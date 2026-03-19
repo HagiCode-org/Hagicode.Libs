@@ -10,7 +10,7 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="Shouldly" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio">
@@ -24,6 +24,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\HagiCode.Libs.Exploration\HagiCode.Libs.Exploration.csproj" />
+    <ProjectReference Include="..\..\src\HagiCode.Libs.ClaudeCode.Console\HagiCode.Libs.ClaudeCode.Console.csproj" />
+    <ProjectReference Include="..\..\src\HagiCode.Libs.ConsoleTesting\HagiCode.Libs.ConsoleTesting.csproj" />
+    <ProjectReference Include="..\..\src\HagiCode.Libs.Providers\HagiCode.Libs.Providers.csproj" />
   </ItemGroup>
 </Project>
