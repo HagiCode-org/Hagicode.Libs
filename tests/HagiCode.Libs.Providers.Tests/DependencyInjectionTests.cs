@@ -1,4 +1,4 @@
-using FluentAssertions;
+using Shouldly;
 using HagiCode.Libs.Providers;
 using HagiCode.Libs.Providers.ClaudeCode;
 using Microsoft.Extensions.DependencyInjection;
@@ -17,7 +17,7 @@ public sealed class DependencyInjectionTests
         var registry = serviceProvider.GetRequiredService<ProviderRegistry>();
         var provider = serviceProvider.GetRequiredService<ICliProvider<ClaudeCodeOptions>>();
 
-        registry.GetProvider("claude-code").Should().NotBeNull();
-        provider.Should().BeOfType<ClaudeCodeProvider>();
+        registry.GetProvider("claude-code").ShouldNotBeNull();
+        provider.ShouldBeOfType<ClaudeCodeProvider>();
     }
 }

@@ -1,4 +1,4 @@
-using FluentAssertions;
+using Shouldly;
 using HagiCode.Libs.Core.Discovery;
 
 namespace HagiCode.Libs.Core.Tests.Discovery;
@@ -14,7 +14,7 @@ public sealed class CliExecutableResolverTests
 
         var resolved = resolver.ResolveExecutablePath("alpha", sandbox.BuildEnvironment());
 
-        resolved.Should().Be(executable);
+        resolved.ShouldBe(executable);
     }
 
     [Fact]
@@ -27,7 +27,7 @@ public sealed class CliExecutableResolverTests
 
         var resolved = resolver.ResolveFirstAvailablePath(["missing", "beta", "alpha"], sandbox.BuildEnvironment());
 
-        resolved.Should().EndWith("beta");
+        resolved.ShouldEndWith("beta");
     }
 
     [Fact]
@@ -36,7 +36,7 @@ public sealed class CliExecutableResolverTests
         using var sandbox = new DirectorySandbox();
         var resolver = new CliExecutableResolver();
 
-        resolver.IsExecutableAvailable("missing", sandbox.BuildEnvironment()).Should().BeFalse();
+        resolver.IsExecutableAvailable("missing", sandbox.BuildEnvironment()).ShouldBeFalse();
     }
 
     [Fact]
@@ -48,7 +48,7 @@ public sealed class CliExecutableResolverTests
 
         var resolved = resolver.ResolveExecutablePath("claude", sandbox.BuildEnvironment(pathExt: ".EXE;.CMD;.BAT"));
 
-        resolved.Should().Be(executable);
+        resolved.ShouldBe(executable);
     }
 
     private sealed class DirectorySandbox : IDisposable

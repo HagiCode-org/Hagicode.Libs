@@ -1,4 +1,4 @@
-using FluentAssertions;
+using Shouldly;
 using HagiCode.Libs.Core.Process;
 
 namespace HagiCode.Libs.Core.Tests.Process;
@@ -12,9 +12,9 @@ public sealed class CliProcessManagerTests
     {
         var result = await _manager.ExecuteAsync(CreateShellContext("printf 'hello'; printf 'oops' >&2"));
 
-        result.ExitCode.Should().Be(0);
-        result.StandardOutput.Should().Be("hello");
-        result.StandardError.Should().Be("oops");
+        result.ExitCode.ShouldBe(0);
+        result.StandardOutput.ShouldBe("hello");
+        result.StandardError.ShouldBe("oops");
     }
 
     [Fact]
@@ -30,7 +30,7 @@ public sealed class CliProcessManagerTests
             }
         });
 
-        result.StandardOutput.Should().Be("from-child");
+        result.StandardOutput.ShouldBe("from-child");
     }
 
     [Fact]
@@ -43,8 +43,8 @@ public sealed class CliProcessManagerTests
             Timeout = TimeSpan.FromMilliseconds(100)
         });
 
-        result.ExitCode.Should().Be(-1);
-        result.StandardError.Should().Contain("timed out", Exactly.Once());
+        result.ExitCode.ShouldBe(-1);
+        result.StandardError.ShouldContain("timed out");
     }
 
     [Fact]
@@ -52,10 +52,10 @@ public sealed class CliProcessManagerTests
     {
         var startInfo = _manager.CreateStartInfo(CreateShellContext("printf 'ok'"));
 
-        startInfo.RedirectStandardInput.Should().BeTrue();
-        startInfo.RedirectStandardOutput.Should().BeTrue();
-        startInfo.RedirectStandardError.Should().BeTrue();
-        startInfo.StandardOutputEncoding.Should().NotBeNull();
+        startInfo.RedirectStandardInput.ShouldBeTrue();
+        startInfo.RedirectStandardOutput.ShouldBeTrue();
+        startInfo.RedirectStandardError.ShouldBeTrue();
+        startInfo.StandardOutputEncoding.ShouldNotBeNull();
     }
 
     private static ProcessStartContext CreateShellContext(string command)

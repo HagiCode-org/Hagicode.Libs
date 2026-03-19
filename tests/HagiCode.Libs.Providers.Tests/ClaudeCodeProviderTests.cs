@@ -1,6 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
-using FluentAssertions;
+using Shouldly;
 using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Environment;
 using HagiCode.Libs.Core.Process;
@@ -33,14 +33,14 @@ public sealed class ClaudeCodeProviderTests
             ExtraArgs = new Dictionary<string, string?> { ["dangerously-skip-permissions"] = null }
         });
 
-        arguments.Should().ContainInOrder("--output-format", "stream-json");
-        arguments.Should().Contain(["--model", "claude-sonnet"]);
-        arguments.Should().Contain(["--system-prompt", "system"]);
-        arguments.Should().Contain(["--max-turns", "3"]);
-        arguments.Should().Contain("--continue");
-        arguments.Should().Contain(["--resume", "resume-id"]);
-        arguments.Should().Contain(["--session-id", "session-id"]);
-        arguments.Should().Contain(["--add-dir", "/tmp/project"]);
+        arguments.ShouldContain("--output-format", "stream-json");
+        arguments.ShouldContain("--model", "claude-sonnet");
+        arguments.ShouldContain("--system-prompt", "system");
+        arguments.ShouldContain("--max-turns", "3");
+        arguments.ShouldContain("--continue");
+        arguments.ShouldContain("--resume", "resume-id");
+        arguments.ShouldContain("--session-id", "session-id");
+        arguments.ShouldContain("--add-dir", "/tmp/project");
     }
 
     [Fact]
@@ -61,12 +61,12 @@ public sealed class ClaudeCodeProviderTests
             messages.Add(message);
         }
 
-        provider.LastStartContext!.ExecutablePath.Should().Be("/custom/claude");
-        provider.LastStartContext.EnvironmentVariables!["ANTHROPIC_AUTH_TOKEN"].Should().Be("token");
-        provider.LastStartContext.EnvironmentVariables["CLAUDE_CODE_ENTRYPOINT"].Should().Be("sdk-csharp");
-        messages.Select(static message => message.Type).Should().Equal("assistant", "result");
-        provider.SentMessages.Should().ContainSingle();
-        provider.SentMessages[0].Content.GetProperty("message").GetProperty("content").GetString().Should().Be("hello");
+        provider.LastStartContext!.ExecutablePath.ShouldBe("/custom/claude");
+        provider.LastStartContext.EnvironmentVariables!["ANTHROPIC_AUTH_TOKEN"].ShouldBe("token");
+        provider.LastStartContext.EnvironmentVariables["CLAUDE_CODE_ENTRYPOINT"].ShouldBe("sdk-csharp");
+        messages.Select(static message => message.Type).ShouldBe(["assistant", "result"]);
+        provider.SentMessages.ShouldHaveSingleItem();
+        provider.SentMessages[0].Content.GetProperty("message").GetProperty("content").GetString().ShouldBe("hello");
     }
 
     [Fact]
@@ -80,8 +80,8 @@ public sealed class ClaudeCodeProviderTests
 
         var result = await provider.PingAsync();
 
-        result.Success.Should().BeTrue();
-        result.Version.Should().Be("1.2.3");
+        result.Success.ShouldBeTrue();
+        result.Version.ShouldBe("1.2.3");
     }
 
     [Fact]
@@ -91,8 +91,9 @@ public sealed class ClaudeCodeProviderTests
 
         var result = await provider.PingAsync();
 
-        result.Success.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("not found");
+        result.Success.ShouldBeFalse();
+        result.ErrorMessage.ShouldNotBeNullOrWhiteSpace();
+        result.ErrorMessage.ShouldContain("not found");
     }
 
     [Fact]
@@ -111,18 +112,20 @@ public sealed class ClaudeCodeProviderTests
             throw new InvalidOperationException("Claude Code CLI was not found on PATH even though the real CLI validation path was enabled.");
         }
 
-        Path.GetFileNameWithoutExtension(executablePath).Should().BeOneOf("claude", "claude-code");
+        var executableName = Path.GetFileNameWithoutExtension(executablePath);
+        executableName.ShouldNotBeNullOrWhiteSpace();
+        executableName.ShouldBeOneOf("claude", "claude-code");
 
         var provider = new ClaudeCodeProvider(resolver, new CliProcessManager(), null);
 
-        provider.IsAvailable.Should().BeTrue();
+        provider.IsAvailable.ShouldBeTrue();
 
         var result = await provider.PingAsync();
 
-        result.ProviderName.Should().Be("claude-code");
-        result.Success.Should().BeTrue();
-        result.Version.Should().NotBeNullOrWhiteSpace();
-        result.ErrorMessage.Should().BeNullOrWhiteSpace();
+        result.ProviderName.ShouldBe("claude-code");
+        result.Success.ShouldBeTrue();
+        result.Version.ShouldNotBeNullOrWhiteSpace();
+        result.ErrorMessage.ShouldBeNullOrWhiteSpace();
     }
 
     private static TestClaudeCodeProvider CreateProvider(

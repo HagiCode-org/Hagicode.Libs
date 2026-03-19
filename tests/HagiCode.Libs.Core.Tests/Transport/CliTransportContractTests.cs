@@ -1,6 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
-using FluentAssertions;
+using Shouldly;
 using HagiCode.Libs.Core.Transport;
 
 namespace HagiCode.Libs.Core.Tests.Transport;
@@ -22,13 +22,13 @@ public sealed class CliTransportContractTests
             messages.Add(message);
         }
 
-        transport.IsConnected.Should().BeTrue();
-        messages.Should().ContainSingle();
-        messages[0].Type.Should().Be("assistant");
-        messages[0].Content.GetProperty("text").GetString().Should().Be("hello");
+        transport.IsConnected.ShouldBeTrue();
+        messages.ShouldHaveSingleItem();
+        messages[0].Type.ShouldBe("assistant");
+        messages[0].Content.GetProperty("text").GetString().ShouldBe("hello");
 
         await transport.DisconnectAsync();
-        transport.IsConnected.Should().BeFalse();
+        transport.IsConnected.ShouldBeFalse();
     }
 
     private sealed class InMemoryCliTransport : ICliTransport

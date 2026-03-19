@@ -1,5 +1,5 @@
 using System.Text.Json;
-using FluentAssertions;
+using Shouldly;
 using HagiCode.Libs.Core.Process;
 using HagiCode.Libs.Core.Transport;
 
@@ -31,7 +31,7 @@ public sealed class SubprocessTransportTests
             messages.Add(message);
         }
 
-        messages.Select(static message => message.Type).Should().Equal("assistant", "result");
+        messages.Select(static message => message.Type).ShouldBe(["assistant", "result"]);
     }
 
     [Fact]
@@ -46,6 +46,6 @@ public sealed class SubprocessTransportTests
 
         var action = async () => await transport.SendAsync(new CliMessage("user", JsonSerializer.SerializeToElement(new { text = "oops" })));
 
-        await action.Should().ThrowAsync<InvalidOperationException>();
+        await Should.ThrowAsync<InvalidOperationException>(action());
     }
 }

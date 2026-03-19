@@ -1,4 +1,4 @@
-using FluentAssertions;
+using Shouldly;
 using HagiCode.Libs.Providers;
 
 namespace HagiCode.Libs.Providers.Tests;
@@ -13,8 +13,8 @@ public sealed class ProviderRegistryTests
 
         registry.Register(provider.Name, provider);
 
-        registry.GetProvider("stub").Should().BeSameAs(provider);
-        registry.GetAllProviders().Should().ContainSingle();
+        registry.GetProvider("stub").ShouldBeSameAs(provider);
+        registry.GetAllProviders().ShouldHaveSingleItem();
     }
 
     [Fact]
@@ -23,9 +23,7 @@ public sealed class ProviderRegistryTests
         var registry = new ProviderRegistry();
         registry.Register("stub", new StubProvider("stub", true));
 
-        var action = () => registry.Register("stub", new StubProvider("stub", false));
-
-        action.Should().Throw<InvalidOperationException>();
+        Should.Throw<InvalidOperationException>(() => registry.Register("stub", new StubProvider("stub", false)));
     }
 
     private sealed class StubProvider(string name, bool isAvailable) : ICliProvider
