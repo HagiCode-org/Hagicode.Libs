@@ -2,6 +2,7 @@ using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Environment;
 using HagiCode.Libs.Core.Process;
 using HagiCode.Libs.Providers.ClaudeCode;
+using HagiCode.Libs.Providers.Codex;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace HagiCode.Libs.Providers;
@@ -25,8 +26,11 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IShellCommandRunner, ProcessShellCommandRunner>();
         services.AddSingleton<IRuntimeEnvironmentResolver, RuntimeEnvironmentResolver>();
         services.AddSingleton<ClaudeCodeProvider>();
+        services.AddSingleton<CodexProvider>();
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<ClaudeCodeProvider>());
+        services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<CodexProvider>());
         services.AddSingleton<ICliProvider<ClaudeCodeOptions>>(serviceProvider => serviceProvider.GetRequiredService<ClaudeCodeProvider>());
+        services.AddSingleton<ICliProvider<CodexOptions>>(serviceProvider => serviceProvider.GetRequiredService<CodexProvider>());
         services.AddSingleton(static serviceProvider =>
         {
             var registry = new ProviderRegistry();
