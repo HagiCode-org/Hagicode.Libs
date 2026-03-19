@@ -1,0 +1,91 @@
+name: CLI Discovery Cross-Platform
+
+on:
+  push:
+    paths:
+      - '.github/workflows/cli-discovery-cross-platform.yml'
+      - 'src/**'
+      - 'tests/**'
+      - 'README.md'
+      - 'Directory.Build.props'
+      - 'Directory.Packages.props'
+      - 'global.json'
+      - '*.sln'
+  pull_request:
+    paths:
+      - '.github/workflows/cli-discovery-cross-platform.yml'
+      - 'src/**'
+      - 'tests/**'
+      - 'README.md'
+      - 'Directory.Build.props'
+      - 'Directory.Packages.props'
+      - 'global.json'
+      - '*.sln'
+  workflow_dispatch:
+
+env:
+  CLAUDE_CODE_PACKAGE: '@anthropic-ai/claude-code@2.1.79'
+  HAGICODE_REAL_CLI_TESTS: '1'
+
+jobs:
+  cli-discovery:
+    name: '${{ matrix.os }} real CLI discovery'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log runner context
+        run: |
+          echo "Runner OS: $RUNNER_OS"
+          echo "Image OS: $ImageOS"
+          echo "Dotnet setup will use $(cat global.json | tr -d '\n')"
+          node --version || true
+          npm --version || true
+          dotnet --info || true
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.12.0'
+
+      - name: Install Claude Code CLI
+        run: |
+          echo "Installing ${CLAUDE_CODE_PACKAGE} on ${RUNNER_OS}"
+          npm install --global "${CLAUDE_CODE_PACKAGE}"
+
+      - name: Verify installed CLI resolution
+        run: |
+          echo "Inspecting Claude Code executable on ${RUNNER_OS}"
+          command -v claude
+          claude --version
+
+      - name: Restore HagiCode.Libs solution
+        run: |
+          echo "Restoring HagiCode.Libs.sln on ${RUNNER_OS}"
+          dotnet restore HagiCode.Libs.sln
+
+      - name: Run real CLI discovery tests
+        run: |
+          echo "Running Category=RealCli tests on ${RUNNER_OS}"
+          dotnet test tests/HagiCode.Libs.Providers.Tests/HagiCode.Libs.Providers.Tests.csproj \
+            --no-restore \
+            --filter "Category=RealCli" \
+            --logger "console;verbosity=normal"

@@ -17,6 +17,21 @@ dotnet build HagiCode.Libs.sln
 dotnet test HagiCode.Libs.sln
 ```
 
+## Cross-platform CLI discovery validation
+
+`repos/Hagicode.Libs/.github/workflows/cli-discovery-cross-platform.yml` runs the real Claude Code discovery path on `ubuntu-latest`, `macos-latest`, and `windows-latest`. The workflow installs the npm-distributed Claude Code CLI, verifies the `claude` executable is on `PATH`, and then runs the opt-in `Category=RealCli` test slice so hosted runners exercise the same `CliExecutableResolver` and provider ping path used in production.
+
+The workflow pins `@anthropic-ai/claude-code@2.1.79` to reduce runner drift. That version is the current package version selected for this change on 2026-03-19; if runner images or upstream CLI behavior change, update the workflow pin and rerun the matrix before widening coverage.
+
+To reproduce the same real-CLI validation locally from the `repos/Hagicode.Libs` directory:
+
+```bash
+npm install --global @anthropic-ai/claude-code@2.1.79
+HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.Providers.Tests/HagiCode.Libs.Providers.Tests.csproj --filter "Category=RealCli"
+```
+
+The real-CLI path only checks executable discovery and the auth-free `claude --version` ping behavior. It does not attempt interactive login or prompt execution, so the default test suite remains usable on machines without the external CLI installed.
+
 ## Design goals
 
 - Zero heavy framework dependencies in the reusable libraries.

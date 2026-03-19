@@ -11,6 +11,9 @@ namespace HagiCode.Libs.Providers.Tests;
 
 public sealed class ClaudeCodeProviderTests
 {
+    private const string RealCliTestsEnvironmentVariable = "HAGICODE_REAL_CLI_TESTS";
+    private static readonly string[] ClaudeExecutableCandidates = ["claude", "claude-code"];
+
     [Fact]
     public void BuildCommandArguments_includes_expected_switches()
     {
@@ -92,20 +95,34 @@ public sealed class ClaudeCodeProviderTests
         result.ErrorMessage.Should().Contain("not found");
     }
 
-    [Fact(Skip = "Requires Claude Code CLI installation.")]
-    public async Task Integration_executeAsync_can_run_against_real_claude_cli()
+    [Fact]
+    [Trait("Category", "RealCli")]
+    public async Task PingAsync_can_validate_installed_claude_cli_when_opted_in()
     {
-        var resolver = new CliExecutableResolver();
-        if (!resolver.IsExecutableAvailable("claude") && !resolver.IsExecutableAvailable("claude-code"))
+        if (!IsRealCliTestsEnabled())
         {
             return;
         }
 
-        var provider = new ClaudeCodeProvider(resolver, new CliProcessManager(), null);
-        await foreach (var _ in provider.ExecuteAsync(new ClaudeCodeOptions(), "ping"))
+        var resolver = new CliExecutableResolver();
+        var executablePath = resolver.ResolveFirstAvailablePath(ClaudeExecutableCandidates);
+        if (executablePath is null)
         {
-            break;
+            throw new InvalidOperationException("Claude Code CLI was not found on PATH even though the real CLI validation path was enabled.");
         }
+
+        Path.GetFileNameWithoutExtension(executablePath).Should().BeOneOf("claude", "claude-code");
+
+        var provider = new ClaudeCodeProvider(resolver, new CliProcessManager(), null);
+
+        provider.IsAvailable.Should().BeTrue();
+
+        var result = await provider.PingAsync();
+
+        result.ProviderName.Should().Be("claude-code");
+        result.Success.Should().BeTrue();
+        result.Version.Should().NotBeNullOrWhiteSpace();
+        result.ErrorMessage.Should().BeNullOrWhiteSpace();
     }
 
     private static TestClaudeCodeProvider CreateProvider(
@@ -205,5 +222,12 @@ public sealed class ClaudeCodeProviderTests
         {
             return Task.FromResult(ExecuteResult);
         }
+    }
+
+    private static bool IsRealCliTestsEnabled()
+    {
+        var value = Environment.GetEnvironmentVariable(RealCliTestsEnvironmentVariable);
+        return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
     }
 }
