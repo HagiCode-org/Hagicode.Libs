@@ -1,0 +1,38 @@
+# Build outputs
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+artifacts/
+
+# Test results and coverage
+[Tt]est[Rr]esults/
+TestResults/
+coverage/
+CodeCoverage/
+
+# NuGet packages
+*.nupkg
+*.snupkg
+
+# Logs and temp files
+*.binlog
+*.log
+*.tmp
+*.temp
+
+# IDE and editor files
+.vs/
+.idea/
+.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+*.user
+*.suo
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
