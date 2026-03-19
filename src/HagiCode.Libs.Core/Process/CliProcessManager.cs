@@ -8,6 +8,7 @@ namespace HagiCode.Libs.Core.Process;
 /// </summary>
 public class CliProcessManager
 {
+    private static readonly TimeSpan GracefulStopTimeout = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan StopWaitTimeout = TimeSpan.FromSeconds(5);
 
     /// <summary>
@@ -178,6 +179,30 @@ public class CliProcessManager
 
         try
         {
+            if (!handle.Process.HasExited)
+            {
+                try
+                {
+                    handle.StandardInput.Close();
+                }
+                catch (ObjectDisposedException)
+                {
+                }
+                catch (InvalidOperationException)
+                {
+                }
+
+                using var gracefulWaitCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                gracefulWaitCts.CancelAfter(GracefulStopTimeout);
+                try
+                {
+                    await handle.Process.WaitForExitAsync(gracefulWaitCts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                }
+            }
+
             if (!handle.Process.HasExited)
             {
                 handle.Process.Kill(entireProcessTree: true);
