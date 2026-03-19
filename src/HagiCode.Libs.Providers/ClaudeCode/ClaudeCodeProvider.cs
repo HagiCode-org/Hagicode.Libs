@@ -67,6 +67,13 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
         await foreach (var message in transport.ReceiveAsync(cancellationToken))
         {
             yield return message;
+
+            // Claude CLI can keep the stdio session alive after emitting the final result.
+            // Stop once the terminal result arrives so one prompt execution completes cleanly.
+            if (string.Equals(message.Type, "result", StringComparison.OrdinalIgnoreCase))
+            {
+                yield break;
+            }
         }
     }
 
