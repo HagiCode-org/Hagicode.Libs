@@ -5,7 +5,7 @@
 ## Projects
 
 - `src/HagiCode.Libs.Core` - transport, process management, executable discovery, and runtime environment resolution.
-- `src/HagiCode.Libs.Providers` - provider abstractions, the Claude Code/Codex/CodeBuddy providers, and optional DI registration.
+- `src/HagiCode.Libs.Providers` - provider abstractions, the Claude Code/Codex/CodeBuddy/IFlow providers, and optional DI registration.
 - `src/HagiCode.Libs.Exploration` - Git repository discovery and state inspection.
 - `tests/*` - xUnit coverage for each project.
 
@@ -19,7 +19,7 @@ dotnet test HagiCode.Libs.sln
 
 ## Dedicated provider console
 
-`src/HagiCode.Libs.ClaudeCode.Console`, `src/HagiCode.Libs.Codex.Console`, and `src/HagiCode.Libs.Codebuddy.Console` are dedicated provider consoles built on the shared `HagiCode.Libs.ConsoleTesting` harness.
+`src/HagiCode.Libs.ClaudeCode.Console`, `src/HagiCode.Libs.Codex.Console`, `src/HagiCode.Libs.Codebuddy.Console`, and `src/HagiCode.Libs.IFlow.Console` are dedicated provider consoles built on the shared `HagiCode.Libs.ConsoleTesting` harness.
 
 From `repos/Hagicode.Libs`, you can use:
 
@@ -41,6 +41,13 @@ dotnet run --project src/HagiCode.Libs.Codebuddy.Console
 dotnet run --project src/HagiCode.Libs.Codebuddy.Console -- --test-provider codebuddy-cli
 dotnet run --project src/HagiCode.Libs.Codebuddy.Console -- --test-provider-full --repo .
 dotnet run --project src/HagiCode.Libs.Codebuddy.Console -- --test-all codebuddy
+
+dotnet run --project src/HagiCode.Libs.IFlow.Console -- --help
+dotnet run --project src/HagiCode.Libs.IFlow.Console
+dotnet run --project src/HagiCode.Libs.IFlow.Console -- --test-provider iflow-cli
+dotnet run --project src/HagiCode.Libs.IFlow.Console -- --test-provider-full --repo .
+dotnet run --project src/HagiCode.Libs.IFlow.Console -- --test-provider-full --endpoint ws://127.0.0.1:7331/acp
+dotnet run --project src/HagiCode.Libs.IFlow.Console -- --test-all iflow
 ```
 
 - No arguments run the default Claude suite.
@@ -57,6 +64,10 @@ dotnet run --project src/HagiCode.Libs.Codebuddy.Console -- --test-all codebuddy
 - CodeBuddy 默认套件当前包含 `Ping`、`Simple Prompt`、`Complex Prompt` 和 `Session Resume`。
 - CodeBuddy accepts `--model <model>` and defaults to `glm-4.7` when no explicit model override is supplied.
 - CodeBuddy repository summary remains opt-in via `--repo <path>`.
+- No arguments also run the default IFlow suite.
+- IFlow 默认套件当前包含 `Ping`、`Simple Prompt`、`Complex Prompt` 和 `Session Resume`。
+- IFlow accepts `--model <model>`, `--endpoint <ws-url>`, and `--executable <path>` overrides.
+- IFlow repository summary remains opt-in via `--repo <path>`.
 
 ## Provider usage
 
@@ -67,6 +78,7 @@ using HagiCode.Libs.Providers;
 using HagiCode.Libs.Providers.ClaudeCode;
 using HagiCode.Libs.Providers.Codebuddy;
 using HagiCode.Libs.Providers.Codex;
+using HagiCode.Libs.Providers.IFlow;
 using Microsoft.Extensions.DependencyInjection;
 
 var services = new ServiceCollection();
@@ -76,6 +88,7 @@ await using var provider = services.BuildServiceProvider();
 var claude = provider.GetRequiredService<ICliProvider<ClaudeCodeOptions>>();
 var codebuddy = provider.GetRequiredService<ICliProvider<CodebuddyOptions>>();
 var codex = provider.GetRequiredService<ICliProvider<CodexOptions>>();
+var iflow = provider.GetRequiredService<ICliProvider<IFlowOptions>>();
 ```
 
 CodeBuddy execution options cover the ACP-specific runtime settings without forcing raw command lines:
@@ -116,6 +129,24 @@ await foreach (var message in codex.ExecuteAsync(options, "Reply with exactly th
 }
 ```
 
+IFlow execution options cover both managed bootstrap and explicit ACP endpoint reuse:
+
+```csharp
+var options = new IFlowOptions
+{
+    Model = "iflow/default",
+    WorkingDirectory = "/path/to/repo",
+    Endpoint = new Uri("ws://127.0.0.1:7331/acp")
+};
+
+await foreach (var message in iflow.ExecuteAsync(options, "Reply with exactly the word 'pong'"))
+{
+    Console.WriteLine($"{message.Type}: {message.Content}");
+}
+```
+
+If you want the provider to launch `iflow` for you, omit `Endpoint` and optionally set `ExecutablePath`. The managed path starts `iflow --experimental-acp --port <allocated-port>` and keeps the subprocess alive for the duration of the provider call.
+
 ## Cross-platform CLI discovery validation
 
 `repos/Hagicode.Libs/.github/workflows/cli-discovery-cross-platform.yml` runs the real Claude Code discovery path on `ubuntu-latest`, `macos-latest`, and `windows-latest`. The workflow installs the npm-distributed Claude Code CLI, verifies the `claude` executable is on `PATH`, and then runs the opt-in `Category=RealCli` test slice so hosted runners exercise the same `CliExecutableResolver` and provider ping path used in production.
@@ -149,6 +180,15 @@ HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.ConsoleTesting.Tests/H
 ```
 
 These CodeBuddy checks validate the ACP bootstrap ping path (`codebuddy --acp` initialize) and the dedicated `--test-provider` console flow without requiring the default deterministic suite to talk to a real external CLI.
+
+IFlow follows the same opt-in pattern. If `iflow` is installed and available on `PATH`, you can run:
+
+```bash
+HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.Providers.Tests/HagiCode.Libs.Providers.Tests.csproj --filter "FullyQualifiedName~IFlow"
+HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.ConsoleTesting.Tests/HagiCode.Libs.ConsoleTesting.Tests.csproj --filter "FullyQualifiedName~IFlow"
+```
+
+These IFlow checks validate the managed ACP bootstrap ping path and the dedicated `--test-provider` console flow. The default deterministic suite continues to use fake bootstrap/session implementations, while live endpoint reuse can be validated manually with `--endpoint ws://host:port/acp`.
 
 ## Design goals
 
