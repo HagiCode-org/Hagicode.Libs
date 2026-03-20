@@ -24,7 +24,6 @@ on:
   workflow_dispatch:
 
 env:
-  CLAUDE_CODE_PACKAGE: '@anthropic-ai/claude-code@2.1.79'
   HAGICODE_REAL_CLI_TESTS: '1'
 
 jobs:
@@ -66,16 +65,10 @@ jobs:
         with:
           node-version: '24.12.0'
 
-      - name: Install Claude Code CLI
+      - name: Install and verify CI CLIs
         run: |
-          echo "Installing ${CLAUDE_CODE_PACKAGE} on ${RUNNER_OS}"
-          npm install --global "${CLAUDE_CODE_PACKAGE}"
-
-      - name: Verify installed CLI resolution
-        run: |
-          echo "Inspecting Claude Code executable on ${RUNNER_OS}"
-          command -v claude
-          claude --version
+          echo "Installing and verifying CI CLIs on ${RUNNER_OS}"
+          dotnet run --project src/HagiCode.Libs.CiSetup.Console -- --install --verify
 
       - name: Restore HagiCode.Libs solution
         run: |
@@ -84,8 +77,8 @@ jobs:
 
       - name: Run real CLI discovery tests
         run: |
-          echo "Running Category=RealCli tests on ${RUNNER_OS}"
+          echo "Running CI-targeted real CLI tests on ${RUNNER_OS}"
           dotnet test tests/HagiCode.Libs.Providers.Tests/HagiCode.Libs.Providers.Tests.csproj \
             --no-restore \
-            --filter "Category=RealCli" \
+            --filter "FullyQualifiedName~ClaudeCodeProviderTests|FullyQualifiedName~CodexProviderTests" \
             --logger "console;verbosity=normal"
