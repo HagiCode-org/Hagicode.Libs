@@ -9,5 +9,13 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
+    <PackageId>HagiCode.Libs.Providers</PackageId>
+    <Description>Provider abstractions and built-in HagiCode CLI integrations for Claude Code, Codex, CodeBuddy, Hermes, and QoderCLI.</Description>
+    <PackageTags>hagicode;cli;providers;claude;codex;codebuddy;hermes;qodercli</PackageTags>
+    <Authors>HagiCode</Authors>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/HagiCode-org/Hagicode.Libs</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageProjectUrl>https://github.com/HagiCode-org/Hagicode.Libs</PackageProjectUrl>
   </PropertyGroup>
 </Project>

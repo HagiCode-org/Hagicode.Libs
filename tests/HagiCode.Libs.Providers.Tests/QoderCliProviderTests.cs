@@ -5,27 +5,45 @@ using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Environment;
 using HagiCode.Libs.Core.Process;
 using HagiCode.Libs.Core.Transport;
-using HagiCode.Libs.Providers.Codebuddy;
+using HagiCode.Libs.Providers.QoderCli;
 using Shouldly;
 
 namespace HagiCode.Libs.Providers.Tests;
 
-public sealed class CodebuddyProviderTests
+public sealed class QoderCliProviderTests
 {
     private const string RealCliTestsEnvironmentVariable = "HAGICODE_REAL_CLI_TESTS";
-    private static readonly string[] CodebuddyExecutableCandidates = ["codebuddy", "codebuddy-cli"];
+    private static readonly string[] QoderCliExecutableCandidates = ["qodercli"];
 
     [Fact]
     public void BuildCommandArguments_includes_acp_and_appends_extra_arguments_once()
     {
         var provider = CreateProvider();
 
-        var arguments = provider.BuildCommandArguments(new CodebuddyOptions
+        var arguments = provider.BuildCommandArguments(new QoderCliOptions
         {
             ExtraArguments = ["--acp", "--verbose", "--profile", "ci"]
         });
 
         arguments.ShouldBe(["--acp", "--verbose", "--profile", "ci"]);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_always_sets_qodercli_sessions_to_yolo_mode()
+    {
+        var provider = CreateProvider();
+
+        await foreach (var _ in provider.ExecuteAsync(
+                           new QoderCliOptions
+                           {
+                               ExtraArguments = ["--profile", "ci"]
+                           },
+                           "hello"))
+        {
+        }
+
+        provider.LastStartContext!.Arguments.ShouldBe(["--acp", "--profile", "ci"]);
+        provider.SessionClient!.SetModeCalls.ShouldBe(["yolo"]);
     }
 
     [Fact]
@@ -35,14 +53,14 @@ public sealed class CodebuddyProviderTests
         var messages = new List<CliMessage>();
 
         await foreach (var message in provider.ExecuteAsync(
-                           new CodebuddyOptions
+                           new QoderCliOptions
                            {
-                               ExecutablePath = "/custom/codebuddy",
+                               ExecutablePath = "/custom/qodercli",
                                WorkingDirectory = "/tmp/project",
-                               Model = "glm-4.7",
+                               Model = "qoder-max",
                                EnvironmentVariables = new Dictionary<string, string?>
                                {
-                                   ["CODEBUDDY_TOKEN"] = "token"
+                                   ["QODERCLI_TOKEN"] = "token"
                                }
                            },
                            "hello"))
@@ -50,14 +68,15 @@ public sealed class CodebuddyProviderTests
             messages.Add(message);
         }
 
-        provider.LastStartContext!.ExecutablePath.ShouldBe("/custom/codebuddy");
+        provider.LastStartContext!.ExecutablePath.ShouldBe("/custom/qodercli");
         provider.LastStartContext.WorkingDirectory.ShouldBe("/tmp/project");
-        provider.LastStartContext.EnvironmentVariables!["CODEBUDDY_TOKEN"].ShouldBe("token");
+        provider.LastStartContext.EnvironmentVariables!["QODERCLI_TOKEN"].ShouldBe("token");
         provider.SessionClient!.ConnectCalls.ShouldBe(1);
         provider.SessionClient.InitializeCalls.ShouldBe(1);
         provider.SessionClient.StartSessionCalls.ShouldBe(1);
+        provider.SessionClient.SetModeCalls.ShouldBe(["yolo"]);
         provider.SessionClient.LastWorkingDirectory.ShouldBe("/tmp/project");
-        provider.SessionClient.LastModel.ShouldBe("glm-4.7");
+        provider.SessionClient.LastModel.ShouldBe("qoder-max");
         provider.SessionClient.LastSessionId.ShouldBeNull();
         messages.Select(static message => message.Type).ShouldBe(["session.started", "assistant", "terminal.completed"]);
     }
@@ -69,7 +88,7 @@ public sealed class CodebuddyProviderTests
         var messages = new List<CliMessage>();
 
         await foreach (var message in provider.ExecuteAsync(
-                           new CodebuddyOptions
+                           new QoderCliOptions
                            {
                                SessionId = "session-resume"
                            },
@@ -88,7 +107,7 @@ public sealed class CodebuddyProviderTests
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(emitNotifications: false, promptStopReason: "fallback"));
         var messages = new List<CliMessage>();
 
-        await foreach (var message in provider.ExecuteAsync(new CodebuddyOptions(), "hello"))
+        await foreach (var message in provider.ExecuteAsync(new QoderCliOptions(), "hello"))
         {
             messages.Add(message);
         }
@@ -106,7 +125,7 @@ public sealed class CodebuddyProviderTests
 
         result.Success.ShouldBeTrue();
         result.Version.ShouldNotBeNullOrWhiteSpace();
-        result.Version.ShouldContain("codebuddy");
+        result.Version.ShouldContain("qodercli");
         provider.SessionClient!.InitializeCalls.ShouldBe(1);
     }
 
@@ -137,7 +156,7 @@ public sealed class CodebuddyProviderTests
                 }
             }));
 
-        var messages = CodebuddyAcpMessageMapper.NormalizeNotification(notification);
+        var messages = QoderCliAcpMessageMapper.NormalizeNotification(notification);
 
         messages.ShouldHaveSingleItem();
         messages[0].Type.ShouldBe("terminal.completed");
@@ -163,7 +182,7 @@ public sealed class CodebuddyProviderTests
                 }
             }));
 
-        var messages = CodebuddyAcpMessageMapper.NormalizeNotification(notification);
+        var messages = QoderCliAcpMessageMapper.NormalizeNotification(notification);
 
         messages.ShouldHaveSingleItem();
         messages[0].Type.ShouldBe("assistant");
@@ -172,7 +191,7 @@ public sealed class CodebuddyProviderTests
 
     [Fact]
     [Trait("Category", "RealCli")]
-    public async Task PingAsync_can_validate_installed_codebuddy_cli_when_opted_in()
+    public async Task PingAsync_can_validate_installed_qodercli_cli_when_opted_in()
     {
         if (!IsRealCliTestsEnabled())
         {
@@ -180,33 +199,33 @@ public sealed class CodebuddyProviderTests
         }
 
         var resolver = new CliExecutableResolver();
-        var executablePath = resolver.ResolveFirstAvailablePath(CodebuddyExecutableCandidates);
+        var executablePath = resolver.ResolveFirstAvailablePath(QoderCliExecutableCandidates);
         if (executablePath is null)
         {
-            throw new InvalidOperationException("CodeBuddy CLI was not found on PATH even though the real CLI validation path was enabled.");
+            throw new InvalidOperationException("QoderCLI CLI was not found on PATH even though the real CLI validation path was enabled.");
         }
 
         var executableName = Path.GetFileNameWithoutExtension(executablePath);
         executableName.ShouldNotBeNullOrWhiteSpace();
-        executableName.ShouldBeOneOf("codebuddy", "codebuddy-cli");
+        executableName.ShouldBe("qodercli");
 
-        var provider = new CodebuddyProvider(resolver, new CliProcessManager(), null);
+        var provider = new QoderCliProvider(resolver, new CliProcessManager(), null);
 
         provider.IsAvailable.ShouldBeTrue();
 
         var result = await provider.PingAsync();
 
-        result.ProviderName.ShouldBe("codebuddy");
+        result.ProviderName.ShouldBe("qodercli");
         result.Success.ShouldBeTrue();
         result.Version.ShouldNotBeNullOrWhiteSpace();
         result.ErrorMessage.ShouldBeNullOrWhiteSpace();
     }
 
-    private static TestCodebuddyProvider CreateProvider(
+    private static TestQoderCliProvider CreateProvider(
         CliExecutableResolver? executableResolver = null,
         FakeAcpSessionClient? sessionClient = null)
     {
-        return new TestCodebuddyProvider(
+        return new TestQoderCliProvider(
             executableResolver ?? new StubExecutableResolver(),
             new CliProcessManager(),
             new StubRuntimeEnvironmentResolver(),
@@ -220,12 +239,12 @@ public sealed class CodebuddyProviderTests
                || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
     }
 
-    private sealed class TestCodebuddyProvider(
+    private sealed class TestQoderCliProvider(
         CliExecutableResolver executableResolver,
         CliProcessManager processManager,
         IRuntimeEnvironmentResolver runtimeEnvironmentResolver,
         FakeAcpSessionClient sessionClient)
-        : CodebuddyProvider(executableResolver, processManager, runtimeEnvironmentResolver)
+        : QoderCliProvider(executableResolver, processManager, runtimeEnvironmentResolver)
     {
         public ProcessStartContext? LastStartContext { get; private set; }
 
@@ -250,6 +269,8 @@ public sealed class CodebuddyProviderTests
 
         public int StartSessionCalls { get; private set; }
 
+        public List<string> SetModeCalls { get; } = [];
+
         public string? LastWorkingDirectory { get; private set; }
 
         public string? LastSessionId { get; private set; }
@@ -270,7 +291,7 @@ public sealed class CodebuddyProviderTests
                 protocolVersion = 1,
                 agentInfo = new
                 {
-                    name = "codebuddy",
+                    name = "qodercli",
                     version = "1.0.0"
                 }
             }));
@@ -289,6 +310,7 @@ public sealed class CodebuddyProviderTests
 
         public Task<JsonElement> SetModeAsync(string sessionId, string modeId, CancellationToken cancellationToken = default)
         {
+            SetModeCalls.Add(modeId);
             return Task.FromResult(JsonSerializer.SerializeToElement(new { }));
         }
 

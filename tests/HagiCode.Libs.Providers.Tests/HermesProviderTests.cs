@@ -317,6 +317,11 @@ public sealed class HermesProviderTests
                 })));
         }
 
+        public Task<JsonElement> SetModeAsync(string sessionId, string modeId, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(JsonSerializer.SerializeToElement(new { }));
+        }
+
         public Task<JsonElement> SendPromptAsync(string sessionId, string prompt, CancellationToken cancellationToken = default)
         {
             PromptCalls++;
