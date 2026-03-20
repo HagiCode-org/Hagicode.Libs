@@ -28,7 +28,7 @@
     <ProjectReference Include="..\..\src\HagiCode.Libs.Codebuddy.Console\HagiCode.Libs.Codebuddy.Console.csproj" />
     <ProjectReference Include="..\..\src\HagiCode.Libs.Codex.Console\HagiCode.Libs.Codex.Console.csproj" />
     <ProjectReference Include="..\..\src\HagiCode.Libs.Hermes.Console\HagiCode.Libs.Hermes.Console.csproj" />
-    <ProjectReference Include="..\..\src\HagiCode.Libs.IFlow.Console\HagiCode.Libs.IFlow.Console.csproj" />
+    <ProjectReference Include="..\..\src\HagiCode.Libs.QoderCli.Console\HagiCode.Libs.QoderCli.Console.csproj" />
     <ProjectReference Include="..\..\src\HagiCode.Libs.ConsoleTesting\HagiCode.Libs.ConsoleTesting.csproj" />
     <ProjectReference Include="..\..\src\HagiCode.Libs.Providers\HagiCode.Libs.Providers.csproj" />
   </ItemGroup>
