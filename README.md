@@ -5,7 +5,7 @@
 ## Projects
 
 - `src/HagiCode.Libs.Core` - transport, process management, executable discovery, and runtime environment resolution.
-- `src/HagiCode.Libs.Providers` - provider abstractions, the Claude Code/Codex providers, and optional DI registration.
+- `src/HagiCode.Libs.Providers` - provider abstractions, the Claude Code/Codex/CodeBuddy providers, and optional DI registration.
 - `src/HagiCode.Libs.Exploration` - Git repository discovery and state inspection.
 - `tests/*` - xUnit coverage for each project.
 
@@ -19,7 +19,7 @@ dotnet test HagiCode.Libs.sln
 
 ## Dedicated provider console
 
-`src/HagiCode.Libs.ClaudeCode.Console` and `src/HagiCode.Libs.Codex.Console` are dedicated provider consoles built on the shared `HagiCode.Libs.ConsoleTesting` harness.
+`src/HagiCode.Libs.ClaudeCode.Console`, `src/HagiCode.Libs.Codex.Console`, and `src/HagiCode.Libs.Codebuddy.Console` are dedicated provider consoles built on the shared `HagiCode.Libs.ConsoleTesting` harness.
 
 From `repos/Hagicode.Libs`, you can use:
 
@@ -35,6 +35,12 @@ dotnet run --project src/HagiCode.Libs.Codex.Console
 dotnet run --project src/HagiCode.Libs.Codex.Console -- --test-provider codex-cli
 dotnet run --project src/HagiCode.Libs.Codex.Console -- --test-provider-full --sandbox workspace-write --repo .
 dotnet run --project src/HagiCode.Libs.Codex.Console -- --test-all codex
+
+dotnet run --project src/HagiCode.Libs.Codebuddy.Console -- --help
+dotnet run --project src/HagiCode.Libs.Codebuddy.Console
+dotnet run --project src/HagiCode.Libs.Codebuddy.Console -- --test-provider codebuddy-cli
+dotnet run --project src/HagiCode.Libs.Codebuddy.Console -- --test-provider-full --repo .
+dotnet run --project src/HagiCode.Libs.Codebuddy.Console -- --test-all codebuddy
 ```
 
 - No arguments run the default Claude suite.
@@ -47,14 +53,19 @@ dotnet run --project src/HagiCode.Libs.Codex.Console -- --test-all codex
 - Codex 默认套件当前包含 `Ping`、`Simple Prompt`、`Complex Prompt` 和 `Session Resume`。
 - Codex accepts `--model <model>`, `--sandbox <mode>`, `--approval-policy <mode>`, `--api-key <key>`, and `--base-url <url>` overrides.
 - Codex repository analysis remains opt-in via `--repo <path>` and reuses the same shared report formatter.
+- No arguments also run the default CodeBuddy suite.
+- CodeBuddy 默认套件当前包含 `Ping`、`Simple Prompt`、`Complex Prompt` 和 `Session Resume`。
+- CodeBuddy accepts `--model <model>` and defaults to `glm-4.7` when no explicit model override is supplied.
+- CodeBuddy repository summary remains opt-in via `--repo <path>`.
 
 ## Provider usage
 
-The DI registration path now exposes both built-in providers:
+The DI registration path now exposes all built-in providers:
 
 ```csharp
 using HagiCode.Libs.Providers;
 using HagiCode.Libs.Providers.ClaudeCode;
+using HagiCode.Libs.Providers.Codebuddy;
 using HagiCode.Libs.Providers.Codex;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -63,7 +74,27 @@ services.AddHagiCodeLibs();
 
 await using var provider = services.BuildServiceProvider();
 var claude = provider.GetRequiredService<ICliProvider<ClaudeCodeOptions>>();
+var codebuddy = provider.GetRequiredService<ICliProvider<CodebuddyOptions>>();
 var codex = provider.GetRequiredService<ICliProvider<CodexOptions>>();
+```
+
+CodeBuddy execution options cover the ACP-specific runtime settings without forcing raw command lines:
+
+```csharp
+var options = new CodebuddyOptions
+{
+    Model = "glm-4.7",
+    WorkingDirectory = "/path/to/repo",
+    EnvironmentVariables = new Dictionary<string, string?>
+    {
+        ["CODEBUDDY_TOKEN"] = "<token>"
+    }
+};
+
+await foreach (var message in codebuddy.ExecuteAsync(options, "Reply with exactly the word 'pong'"))
+{
+    Console.WriteLine($"{message.Type}: {message.Content}");
+}
 ```
 
 Codex execution options cover the common CLI settings without forcing raw command lines:
@@ -109,6 +140,15 @@ HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.ConsoleTesting.Tests/H
 ```
 
 These Codex checks intentionally stay at the auth-free `codex --version` / `--test-provider` layer. Prompt execution remains covered by fake-provider integration tests so the default CI path stays deterministic.
+
+CodeBuddy follows the same opt-in pattern. If `codebuddy` is installed and available on `PATH`, you can run:
+
+```bash
+HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.Providers.Tests/HagiCode.Libs.Providers.Tests.csproj --filter "FullyQualifiedName~Codebuddy"
+HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.ConsoleTesting.Tests/HagiCode.Libs.ConsoleTesting.Tests.csproj --filter "FullyQualifiedName~Codebuddy"
+```
+
+These CodeBuddy checks validate the ACP bootstrap ping path (`codebuddy --acp` initialize) and the dedicated `--test-provider` console flow without requiring the default deterministic suite to talk to a real external CLI.
 
 ## Design goals
 
