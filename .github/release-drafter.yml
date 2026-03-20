@@ -1,0 +1,33 @@
+name-template: "v$RESOLVED_VERSION"
+tag-template: "v$RESOLVED_VERSION"
+categories:
+  - title: "Breaking Changes"
+    label: "💥 Breaking Change"
+  - title: "New APIs"
+    label: "🆕 New API"
+  - title: "Bug Fixes"
+    label: "🐛 Bug Fix"
+  - title: "Internal Changes"
+    label: "🔧 Internal"
+  - title: "Documentation"
+    label: "📖 Docs"
+  - title: "Dependency Updates"
+    label: "⬆️ Dependencies"
+change-template: "- $TITLE @$AUTHOR (#$NUMBER)"
+exclude-labels:
+  - "skip-changelog"
+version-resolver:
+  major:
+    labels:
+      - "major"
+  minor:
+    labels:
+      - "minor"
+  patch:
+    labels:
+      - "patch"
+  default: patch
+template: |
+  ## Changes
+
+  $CHANGES

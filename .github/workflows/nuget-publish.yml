@@ -1,0 +1,73 @@
+name: NuGet Publish
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nuget-publish
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Pack Core and Providers packages
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          mkdir -p artifacts/packages
+
+          dotnet pack src/HagiCode.Libs.Core/HagiCode.Libs.Core.csproj \
+            -c Release \
+            -o artifacts/packages \
+            /p:Version="$version"
+
+          dotnet pack src/HagiCode.Libs.Providers/HagiCode.Libs.Providers.csproj \
+            -c Release \
+            -o artifacts/packages \
+            /p:Version="$version"
+
+      - name: Check NuGet API key
+        id: check_nuget_api_key
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          if [ -n "$NUGET_API_KEY" ]; then
+            echo "is_available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::NUGET_API_KEY is not configured. Skipping dotnet nuget push."
+            echo "is_available=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push packages to NuGet
+        if: steps.check_nuget_api_key.outputs.is_available == 'true'
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          for package in artifacts/packages/*.nupkg; do
+            dotnet nuget push "$package" \
+              --api-key "$NUGET_API_KEY" \
+              --source "https://api.nuget.org/v3/index.json" \
+              --skip-duplicate
+          done
+
+      - name: Publish GitHub release
+        uses: release-drafter/release-drafter@v6
+        with:
+          publish: true
+          name: ${{ github.ref_name }}
+          tag: ${{ github.ref_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
