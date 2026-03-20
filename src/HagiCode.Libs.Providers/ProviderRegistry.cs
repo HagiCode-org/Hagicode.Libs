@@ -14,12 +14,35 @@ public sealed class ProviderRegistry
     /// <param name="provider">The provider instance.</param>
     public void Register(string name, ICliProvider provider)
     {
+        Register(name, provider, aliases: null);
+    }
+
+    /// <summary>
+    /// Registers a provider instance under a name and additional aliases.
+    /// </summary>
+    /// <param name="name">The provider name.</param>
+    /// <param name="provider">The provider instance.</param>
+    /// <param name="aliases">Additional provider aliases.</param>
+    public void Register(string name, ICliProvider provider, IEnumerable<string>? aliases)
+    {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(provider);
 
-        if (!_providers.TryAdd(name, provider))
+        RegisterCore(name, provider);
+
+        if (aliases is null)
         {
-            throw new InvalidOperationException($"Provider '{name}' has already been registered.");
+            return;
+        }
+
+        foreach (var alias in aliases)
+        {
+            if (string.IsNullOrWhiteSpace(alias))
+            {
+                continue;
+            }
+
+            RegisterCore(alias, provider);
         }
     }
 
@@ -52,6 +75,14 @@ public sealed class ProviderRegistry
     /// <returns>A read-only provider list.</returns>
     public IReadOnlyList<ICliProvider> GetAllProviders()
     {
-        return _providers.Values.ToArray();
+        return _providers.Values.Distinct().ToArray();
+    }
+
+    private void RegisterCore(string name, ICliProvider provider)
+    {
+        if (!_providers.TryAdd(name, provider))
+        {
+            throw new InvalidOperationException($"Provider '{name}' has already been registered.");
+        }
     }
 }
