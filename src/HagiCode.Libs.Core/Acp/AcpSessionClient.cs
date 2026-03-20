@@ -123,6 +123,26 @@ public sealed class AcpSessionClient : IAcpSessionClient
     }
 
     /// <inheritdoc />
+    public async Task<JsonElement> SetModeAsync(string sessionId, string modeId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(modeId);
+
+        await InitializeAsync(cancellationToken).ConfigureAwait(false);
+
+        var result = await _rpcClient.InvokeAsync<JsonElement>(
+            "session/set_mode",
+            new
+            {
+                sessionId,
+                modeId
+            },
+            cancellationToken).ConfigureAwait(false);
+
+        return result;
+    }
+
+    /// <inheritdoc />
     public async Task<JsonElement> SendPromptAsync(string sessionId, string prompt, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);

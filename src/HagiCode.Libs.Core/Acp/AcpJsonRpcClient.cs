@@ -237,6 +237,16 @@ public sealed class AcpJsonRpcClient : IAsyncDisposable
 
         if (message.TryGetProperty("method", out var methodElement) && methodElement.ValueKind == JsonValueKind.String)
         {
+            if (message.TryGetProperty("id", out var requestIdElement))
+            {
+                _ = HandleInboundRequestAsync(
+                    requestIdElement.Clone(),
+                    methodElement.GetString()!,
+                    message.TryGetProperty("params", out var requestParamsElement) ? requestParamsElement.Clone() : default,
+                    _disposeCts.Token);
+                return;
+            }
+
             var parameters = message.TryGetProperty("params", out var paramsElement)
                 ? paramsElement.Clone()
                 : default;
@@ -286,6 +296,90 @@ public sealed class AcpJsonRpcClient : IAsyncDisposable
             $"ACP method '{method}' failed{(string.IsNullOrWhiteSpace(code) ? string.Empty : $" with code {code}")}: {message ?? "Unknown error."}");
     }
 
+    private async Task HandleInboundRequestAsync(
+        JsonElement requestIdElement,
+        string method,
+        JsonElement parameters,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = method switch
+            {
+                "fs/read_text_file" => CreateReadTextFileResponse(parameters),
+                "fs/write_text_file" => await CreateWriteTextFileResponseAsync(parameters, cancellationToken).ConfigureAwait(false),
+                _ => throw new InvalidOperationException($"ACP inbound method '{method}' is not supported.")
+            };
+
+            await _transport.SendMessageAsync(
+                CreateResponsePayload(requestIdElement, result),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            await _transport.SendMessageAsync(
+                CreateErrorPayload(requestIdElement, -32601, ex.Message),
+                cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static JsonElement CreateReadTextFileResponse(JsonElement parameters)
+    {
+        var path = GetRequiredString(parameters, "path");
+        var startLine = GetOptionalInt(parameters, "line") ?? 1;
+        var limit = GetOptionalInt(parameters, "limit");
+
+        var allLines = File.ReadAllLines(path);
+        var startIndex = Math.Max(startLine - 1, 0);
+        var selectedLines = limit is > 0
+            ? allLines.Skip(startIndex).Take(limit.Value)
+            : allLines.Skip(startIndex);
+
+        return JsonSerializer.SerializeToElement(new
+        {
+            content = string.Join(global::System.Environment.NewLine, selectedLines)
+        });
+    }
+
+    private static async Task<JsonElement> CreateWriteTextFileResponseAsync(JsonElement parameters, CancellationToken cancellationToken)
+    {
+        var path = GetRequiredString(parameters, "path");
+        var content = GetRequiredString(parameters, "content");
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        await File.WriteAllTextAsync(path, content, cancellationToken).ConfigureAwait(false);
+        return JsonSerializer.SerializeToElement(new { });
+    }
+
+    private static string GetRequiredString(JsonElement parameters, string propertyName)
+    {
+        if (parameters.ValueKind != JsonValueKind.Object ||
+            !parameters.TryGetProperty(propertyName, out var propertyElement) ||
+            propertyElement.ValueKind != JsonValueKind.String)
+        {
+            throw new InvalidOperationException($"ACP inbound request is missing required string parameter '{propertyName}'.");
+        }
+
+        return propertyElement.GetString() ?? string.Empty;
+    }
+
+    private static int? GetOptionalInt(JsonElement parameters, string propertyName)
+    {
+        if (parameters.ValueKind != JsonValueKind.Object ||
+            !parameters.TryGetProperty(propertyName, out var propertyElement) ||
+            propertyElement.ValueKind != JsonValueKind.Number ||
+            !propertyElement.TryGetInt32(out var value))
+        {
+            return null;
+        }
+
+        return value;
+    }
+
     private string CreateRequestPayload(string requestId, string method, object? parameters)
     {
         using var stream = new MemoryStream();
@@ -305,6 +399,22 @@ public sealed class AcpJsonRpcClient : IAsyncDisposable
         }
 
         return System.Text.Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    private static string CreateResponsePayload(JsonElement requestIdElement, JsonElement result)
+    {
+        return "{\"jsonrpc\":\"2.0\",\"id\":" + requestIdElement.GetRawText() + ",\"result\":" + result.GetRawText() + "}";
+    }
+
+    private static string CreateErrorPayload(JsonElement requestIdElement, int code, string message)
+    {
+        var error = JsonSerializer.SerializeToElement(new
+        {
+            code,
+            message
+        });
+
+        return "{\"jsonrpc\":\"2.0\",\"id\":" + requestIdElement.GetRawText() + ",\"error\":" + error.GetRawText() + "}";
     }
 
     private static string GetRequestId(JsonElement idElement)

@@ -39,12 +39,11 @@ public static class CliInstallRegistry
             PinnedVersion: string.Empty,
             ExecutableCandidates: ["hermes", "hermes-cli"],
             IsPubliclyInstallable: false),
-
         new CliInstallDescriptor(
-            ProviderName: "IFlow",
+            ProviderName: "QoderCLI",
             NpmPackage: string.Empty,
             PinnedVersion: string.Empty,
-            ExecutableCandidates: ["iflow", "iflow-cli"],
+            ExecutableCandidates: ["qodercli"],
             IsPubliclyInstallable: false),
     ];
 

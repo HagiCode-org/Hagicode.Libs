@@ -68,6 +68,26 @@ public sealed class AcpSessionClientTests
     }
 
     [Fact]
+    public async Task SetModeAsync_invokes_session_set_mode()
+    {
+        var transport = new ScriptedAcpTransport(request => request.Method switch
+        {
+            "initialize" => [CreateJsonRpcResult(request.Id, """{"protocolVersion":1}""")],
+            "session/set_mode" => [CreateJsonRpcResult(request.Id, "{}")],
+            _ => throw new InvalidOperationException($"Unexpected ACP method: {request.Method}")
+        });
+
+        await using var client = new AcpSessionClient(transport);
+        await client.ConnectAsync();
+
+        await client.SetModeAsync("session-123", "yolo");
+
+        transport.SentMethods.ShouldBe(["initialize", "session/set_mode"]);
+        transport.Requests[1].Params.GetProperty("sessionId").GetString().ShouldBe("session-123");
+        transport.Requests[1].Params.GetProperty("modeId").GetString().ShouldBe("yolo");
+    }
+
+    [Fact]
     public void SanitizeIncomingMessage_strips_comment_preamble()
     {
         var payload = "// ready\n{\"jsonrpc\":\"2.0\",\"id\":\"1\",\"result\":{}}";

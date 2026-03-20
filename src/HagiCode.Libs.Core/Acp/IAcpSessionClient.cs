@@ -35,6 +35,15 @@ public interface IAcpSessionClient : IAsyncDisposable
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Updates the execution mode for an existing ACP session.
+    /// </summary>
+    /// <param name="sessionId">The target session identifier.</param>
+    /// <param name="modeId">The mode identifier to activate.</param>
+    /// <param name="cancellationToken">Cancels the mode update request.</param>
+    /// <returns>The raw mode update result.</returns>
+    Task<JsonElement> SetModeAsync(string sessionId, string modeId, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Sends one prompt through ACP.
     /// </summary>
     /// <param name="sessionId">The target session identifier.</param>

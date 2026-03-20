@@ -1,5 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
+    <PackageId>HagiCode.Libs.Core</PackageId>
+    <Description>Core transport, process management, executable discovery, and runtime environment resolution for HagiCode CLI integrations.</Description>
+    <PackageTags>hagicode;cli;transport;process;discovery;runtime</PackageTags>
+    <Authors>HagiCode</Authors>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/HagiCode-org/Hagicode.Libs</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageProjectUrl>https://github.com/HagiCode-org/Hagicode.Libs</PackageProjectUrl>
   </PropertyGroup>
 </Project>
