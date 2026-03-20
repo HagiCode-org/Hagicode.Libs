@@ -5,7 +5,7 @@
 ## Projects
 
 - `src/HagiCode.Libs.Core` - transport, process management, executable discovery, and runtime environment resolution.
-- `src/HagiCode.Libs.Providers` - provider abstractions, the Claude Code/Codex/CodeBuddy/Hermes/IFlow providers, and optional DI registration.
+- `src/HagiCode.Libs.Providers` - provider abstractions, the Claude Code/Codex/CodeBuddy/Hermes/QoderCLI providers, and optional DI registration.
 - `src/HagiCode.Libs.Exploration` - Git repository discovery and state inspection.
 - `tests/*` - xUnit coverage for each project.
 
@@ -19,7 +19,7 @@ dotnet test HagiCode.Libs.sln
 
 ## Dedicated provider console
 
-`src/HagiCode.Libs.ClaudeCode.Console`, `src/HagiCode.Libs.Codex.Console`, `src/HagiCode.Libs.Codebuddy.Console`, `src/HagiCode.Libs.Hermes.Console`, and `src/HagiCode.Libs.IFlow.Console` are dedicated provider consoles built on the shared `HagiCode.Libs.ConsoleTesting` harness.
+`src/HagiCode.Libs.ClaudeCode.Console`, `src/HagiCode.Libs.Codex.Console`, `src/HagiCode.Libs.Codebuddy.Console`, `src/HagiCode.Libs.Hermes.Console`, and `src/HagiCode.Libs.QoderCli.Console` are dedicated provider consoles built on the shared `HagiCode.Libs.ConsoleTesting` harness.
 
 From `repos/Hagicode.Libs`, you can use:
 
@@ -49,12 +49,12 @@ dotnet run --project src/HagiCode.Libs.Hermes.Console -- --test-provider-full --
 dotnet run --project src/HagiCode.Libs.Hermes.Console -- --test-provider-full --arguments "acp --profile smoke"
 dotnet run --project src/HagiCode.Libs.Hermes.Console -- --test-all hermes
 
-dotnet run --project src/HagiCode.Libs.IFlow.Console -- --help
-dotnet run --project src/HagiCode.Libs.IFlow.Console
-dotnet run --project src/HagiCode.Libs.IFlow.Console -- --test-provider iflow-cli
-dotnet run --project src/HagiCode.Libs.IFlow.Console -- --test-provider-full --repo .
-dotnet run --project src/HagiCode.Libs.IFlow.Console -- --test-provider-full --endpoint ws://127.0.0.1:7331/acp
-dotnet run --project src/HagiCode.Libs.IFlow.Console -- --test-all iflow
+dotnet run --project src/HagiCode.Libs.QoderCli.Console -- --help
+dotnet run --project src/HagiCode.Libs.QoderCli.Console
+dotnet run --project src/HagiCode.Libs.QoderCli.Console -- --test-provider qodercli
+dotnet run --project src/HagiCode.Libs.QoderCli.Console -- --test-provider-full --repo .
+dotnet run --project src/HagiCode.Libs.QoderCli.Console -- --test-provider-full --model qoder-max
+dotnet run --project src/HagiCode.Libs.QoderCli.Console -- --test-all qodercli
 ```
 
 - No arguments run the default Claude suite.
@@ -75,10 +75,10 @@ dotnet run --project src/HagiCode.Libs.IFlow.Console -- --test-all iflow
 - Hermes 默认套件当前包含 `Ping`、`Simple Prompt`、`Complex Prompt` 和 `Memory Reuse`。
 - Hermes accepts `--model <model>`, `--executable <path>`, and `--arguments <value>` overrides.
 - Hermes repository summary remains opt-in via `--repo <path>`.
-- No arguments also run the default IFlow suite.
-- IFlow 默认套件当前包含 `Ping`、`Simple Prompt`、`Complex Prompt` 和 `Session Resume`。
-- IFlow accepts `--model <model>`, `--endpoint <ws-url>`, and `--executable <path>` overrides.
-- IFlow repository summary remains opt-in via `--repo <path>`.
+- No arguments also run the default QoderCLI suite.
+- QoderCLI 默认套件当前包含 `Ping`、`Simple Prompt`、`Complex Prompt` 和 `Session Resume`。
+- QoderCLI accepts `--model <model>` for explicit model forwarding only; no default model is imposed because supported qodercli model identifiers have not been confirmed yet.
+- QoderCLI repository summary remains opt-in via `--repo <path>`, and the provider now forces ACP sessions into `yolo` mode for unattended runs.
 
 ## Provider usage
 
@@ -90,7 +90,7 @@ using HagiCode.Libs.Providers.ClaudeCode;
 using HagiCode.Libs.Providers.Codebuddy;
 using HagiCode.Libs.Providers.Codex;
 using HagiCode.Libs.Providers.Hermes;
-using HagiCode.Libs.Providers.IFlow;
+using HagiCode.Libs.Providers.QoderCli;
 using Microsoft.Extensions.DependencyInjection;
 
 var services = new ServiceCollection();
@@ -101,7 +101,7 @@ var claude = provider.GetRequiredService<ICliProvider<ClaudeCodeOptions>>();
 var codebuddy = provider.GetRequiredService<ICliProvider<CodebuddyOptions>>();
 var codex = provider.GetRequiredService<ICliProvider<CodexOptions>>();
 var hermes = provider.GetRequiredService<ICliProvider<HermesOptions>>();
-var iflow = provider.GetRequiredService<ICliProvider<IFlowOptions>>();
+var qoderCli = provider.GetRequiredService<ICliProvider<QoderCliOptions>>();
 ```
 
 CodeBuddy execution options cover the ACP-specific runtime settings without forcing raw command lines:
@@ -162,23 +162,27 @@ await foreach (var message in hermes.ExecuteAsync(options, "Reply with exactly t
 }
 ```
 
-IFlow execution options cover both managed bootstrap and explicit ACP endpoint reuse:
+QoderCLI execution options mirror the ACP stdio providers while keeping the model override optional. `SessionId` is forwarded to the `session/new` or `session/resume` ACP call when present, and `ExtraArguments` are appended after the managed `--acp` bootstrap switch:
 
 ```csharp
-var options = new IFlowOptions
+var options = new QoderCliOptions
 {
-    Model = "iflow/default",
     WorkingDirectory = "/path/to/repo",
-    Endpoint = new Uri("ws://127.0.0.1:7331/acp")
+    Model = "qoder-max",
+    EnvironmentVariables = new Dictionary<string, string?>
+    {
+        ["QODERCLI_TOKEN"] = "<token>"
+    },
+    ExtraArguments = ["--profile", "smoke"]
 };
 
-await foreach (var message in iflow.ExecuteAsync(options, "Reply with exactly the word 'pong'"))
+await foreach (var message in qoderCli.ExecuteAsync(options, "Reply with exactly the word 'pong'"))
 {
     Console.WriteLine($"{message.Type}: {message.Content}");
 }
 ```
 
-If you want the provider to launch `iflow` for you, omit `Endpoint` and optionally set `ExecutablePath`. The managed path starts `iflow --experimental-acp --port <allocated-port>` and keeps the subprocess alive for the duration of the provider call.
+If you omit `Model`, the provider forwards no model override so qodercli can use its own default. This keeps the integration aligned with local qodercli installations whose supported model names may vary by environment. The provider also forces each ACP session into `yolo` mode after `session/new` or `session/load`, so unattended prompts can use tool and file-system callbacks without interactive permission gates.
 
 ## Cross-platform CLI discovery validation
 
@@ -194,11 +198,11 @@ All CLI metadata is centralized in `HagiCode.Libs.Core.Discovery.CliInstallRegis
 | Codex | `@openai/codex` | 0.115.0 | Yes |
 | CodeBuddy | (private) | — | No |
 | Hermes | (private) | — | No |
-| IFlow | (private) | — | No |
+| QoderCLI | (private) | — | No |
 
 ### CI-covered vs. locally-installed CLIs
 
-CLIs with `IsPubliclyInstallable = true` are automatically installed and tested in CI. CLIs marked as not publicly installable (CodeBuddy, Hermes, IFlow) are skipped during CI setup and require local installation for validation.
+CLIs with `IsPubliclyInstallable = true` are automatically installed and tested in CI. CLIs marked as not publicly installable (CodeBuddy, Hermes, QoderCLI) are skipped during CI setup and require local installation for validation.
 
 ### Local reproduction
 
@@ -242,10 +246,11 @@ HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.Providers.Tests/HagiCo
 HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.ConsoleTesting.Tests/HagiCode.Libs.ConsoleTesting.Tests.csproj --filter "FullyQualifiedName~Hermes"
 ```
 
-**IFlow** (requires local installation):
+**QoderCLI** (requires local installation):
 ```bash
-HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.Providers.Tests/HagiCode.Libs.Providers.Tests.csproj --filter "FullyQualifiedName~IFlow"
-HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.ConsoleTesting.Tests/HagiCode.Libs.ConsoleTesting.Tests.csproj --filter "FullyQualifiedName~IFlow"
+HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.Providers.Tests/HagiCode.Libs.Providers.Tests.csproj --filter "FullyQualifiedName~QoderCli"
+HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.ConsoleTesting.Tests/HagiCode.Libs.ConsoleTesting.Tests.csproj --filter "FullyQualifiedName~QoderCli"
+dotnet run --project src/HagiCode.Libs.QoderCli.Console -- --test-provider-full --repo .
 ```
 
 ## Design goals
