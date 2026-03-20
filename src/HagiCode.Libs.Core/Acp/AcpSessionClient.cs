@@ -46,10 +46,18 @@ public sealed class AcpSessionClient : IAcpSessionClient
             new
             {
                 protocolVersion = 1,
-                clientCapabilities = new { },
+                clientCapabilities = new
+                {
+                    fs = new
+                    {
+                        readTextFile = true,
+                        writeTextFile = true
+                    }
+                },
                 clientInfo = new
                 {
                     name = "HagiCode.Libs",
+                    title = "HagiCode Libs",
                     version = typeof(AcpSessionClient).Assembly.GetName().Version?.ToString() ?? "0.0.0"
                 }
             },
