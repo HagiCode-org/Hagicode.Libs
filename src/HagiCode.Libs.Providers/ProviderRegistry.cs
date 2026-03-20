@@ -35,6 +35,18 @@ public sealed class ProviderRegistry
     }
 
     /// <summary>
+    /// Gets a typed provider by name.
+    /// </summary>
+    /// <typeparam name="TOptions">The provider option type.</typeparam>
+    /// <param name="name">The provider name.</param>
+    /// <returns>The typed provider instance, or <see langword="null" /> when not found.</returns>
+    public ICliProvider<TOptions>? GetProvider<TOptions>(string name)
+        where TOptions : class
+    {
+        return GetProvider(name) as ICliProvider<TOptions>;
+    }
+
+    /// <summary>
     /// Gets all registered providers.
     /// </summary>
     /// <returns>A read-only provider list.</returns>
