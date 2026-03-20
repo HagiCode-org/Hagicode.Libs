@@ -3,6 +3,7 @@ using HagiCode.Libs.Providers;
 using HagiCode.Libs.Providers.ClaudeCode;
 using HagiCode.Libs.Providers.Codebuddy;
 using HagiCode.Libs.Providers.Codex;
+using HagiCode.Libs.Providers.Hermes;
 using HagiCode.Libs.Providers.IFlow;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -21,17 +22,25 @@ public sealed class DependencyInjectionTests
         var claudeProvider = serviceProvider.GetRequiredService<ICliProvider<ClaudeCodeOptions>>();
         var codebuddyProvider = serviceProvider.GetRequiredService<ICliProvider<CodebuddyOptions>>();
         var codexProvider = serviceProvider.GetRequiredService<ICliProvider<CodexOptions>>();
+        var hermesProvider = serviceProvider.GetRequiredService<ICliProvider<HermesOptions>>();
         var iflowProvider = serviceProvider.GetRequiredService<ICliProvider<IFlowOptions>>();
+        var allProviders = serviceProvider.GetServices<ICliProvider>().ToArray();
 
         registry.GetProvider("claude-code").ShouldNotBeNull();
         registry.GetProvider("codebuddy").ShouldNotBeNull();
         registry.GetProvider("codex").ShouldNotBeNull();
+        registry.GetProvider("hermes").ShouldNotBeNull();
+        registry.GetProvider("hermes-cli").ShouldNotBeNull();
         registry.GetProvider("iflow").ShouldNotBeNull();
         claudeProvider.ShouldBeOfType<ClaudeCodeProvider>();
         codebuddyProvider.ShouldBeOfType<CodebuddyProvider>();
         codexProvider.ShouldBeOfType<CodexProvider>();
+        hermesProvider.ShouldBeOfType<HermesProvider>();
         iflowProvider.ShouldBeOfType<IFlowProvider>();
+        allProviders.ShouldContain(provider => provider is HermesProvider);
+        registry.GetProvider<HermesOptions>("hermes").ShouldBeOfType<HermesProvider>();
+        registry.GetProvider<HermesOptions>("hermes-cli").ShouldBeOfType<HermesProvider>();
         registry.GetProvider<IFlowOptions>("iflow").ShouldBeOfType<IFlowProvider>();
-        registry.GetAllProviders().Select(static provider => provider.Name).ShouldBe(["claude-code", "codebuddy", "codex", "iflow"], ignoreOrder: true);
+        registry.GetAllProviders().Select(static provider => provider.Name).ShouldBe(["claude-code", "codebuddy", "codex", "hermes", "iflow"], ignoreOrder: true);
     }
 }

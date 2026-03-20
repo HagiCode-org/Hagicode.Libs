@@ -26,6 +26,18 @@ public sealed class ProviderRegistryTests
         Should.Throw<InvalidOperationException>(() => registry.Register("stub", new StubProvider("stub", false)));
     }
 
+    [Fact]
+    public void Register_maps_aliases_to_the_same_provider()
+    {
+        var registry = new ProviderRegistry();
+        var provider = new StubProvider("stub", isAvailable: true);
+
+        registry.Register("stub", provider, ["stub-cli"]);
+
+        registry.GetProvider("stub-cli").ShouldBeSameAs(provider);
+        registry.GetAllProviders().ShouldHaveSingleItem();
+    }
+
     private sealed class StubProvider(string name, bool isAvailable) : ICliProvider
     {
         public string Name { get; } = name;
