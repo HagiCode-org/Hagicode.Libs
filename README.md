@@ -17,6 +17,31 @@ dotnet build HagiCode.Libs.sln
 dotnet test HagiCode.Libs.sln
 ```
 
+## NuGet publishing
+
+`repos/Hagicode.Libs/.github/workflows/nuget-publish.yml` now supports two publish modes for `src/HagiCode.Libs.Core` and `src/HagiCode.Libs.Providers`:
+
+- Push a `v*.*.*` tag to publish a stable package version that matches the tag name without the leading `v` and publish the matching GitHub Release.
+- Push to `main` to publish a dev prerelease package automatically without creating a GitHub Release.
+
+The `main` prerelease version format is:
+
+```text
+<next-patch>-dev.<github.run_number>.<github.run_attempt>
+```
+
+- If the latest stable tag is `v1.2.3`, the next `main` publish becomes `1.2.4-dev.<run_number>.<run_attempt>`.
+- If the repository has no stable `v*.*.*` tags yet, the workflow falls back to `0.1.0-dev.<run_number>.<run_attempt>`.
+- Rerunning the same workflow increments `github.run_attempt`, so each rerun still produces a unique package version.
+
+Because the `-dev.*` suffix marks these builds as NuGet prereleases, consumers must explicitly allow prerelease packages to install or upgrade to them. Stable consumers that do not opt into prerelease packages continue to resolve only stable versions.
+
+Before using that workflow, configure GitHub and nuget.org for Trusted Publishing:
+
+- Set the GitHub Actions secret `NUGET_USER` to the nuget.org account name that owns the packages.
+- In nuget.org Trusted Publishing, add a policy for the `newbe36524/Hagicode.Libs` repository and set the workflow file name to `nuget-publish.yml`.
+- Do not keep a long-lived `NUGET_API_KEY` secret for this workflow; both stable and dev publishes expect `NuGet/login@v1` to mint a temporary key through GitHub OIDC.
+
 ## Dedicated provider console
 
 `src/HagiCode.Libs.ClaudeCode.Console`, `src/HagiCode.Libs.Codex.Console`, `src/HagiCode.Libs.Codebuddy.Console`, `src/HagiCode.Libs.Hermes.Console`, and `src/HagiCode.Libs.QoderCli.Console` are dedicated provider consoles built on the shared `HagiCode.Libs.ConsoleTesting` harness.

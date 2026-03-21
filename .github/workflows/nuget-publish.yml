@@ -2,60 +2,123 @@ name: NuGet Publish
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*.*.*"
 
-permissions:
-  contents: write
-
 concurrency:
-  group: nuget-publish
+  group: nuget-publish-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  publish:
+  publish_packages:
     runs-on: ubuntu-latest
+    outputs:
+      publish_mode: ${{ steps.publish_context.outputs.publish_mode }}
+      package_version: ${{ steps.publish_context.outputs.package_version }}
+      should_publish_release: ${{ steps.publish_context.outputs.should_publish_release }}
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
 
+      - name: Resolve publish context
+        id: publish_context
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Expected stable tags to match vX.Y.Z, got ${GITHUB_REF_NAME}."
+              exit 1
+            fi
+
+            publish_mode="stable"
+            package_version="${GITHUB_REF_NAME#v}"
+            should_publish_release="true"
+          elif [[ "${GITHUB_REF_TYPE}" == "branch" && "${GITHUB_REF_NAME}" == "main" ]]; then
+            publish_mode="dev"
+            latest_stable_tag="$(git tag --list 'v*.*.*' --sort=-version:refname | while read -r tag; do
+              if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                echo "$tag"
+                break
+              fi
+            done)"
+
+            if [[ -n "${latest_stable_tag}" ]]; then
+              stable_version="${latest_stable_tag#v}"
+              IFS='.' read -r major minor patch <<< "${stable_version}"
+              base_version="${major}.${minor}.$((patch + 1))"
+            else
+              base_version="0.1.0"
+            fi
+
+            package_version="${base_version}-dev.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+            should_publish_release="false"
+          else
+            echo "::error::Unsupported publish ref ${GITHUB_REF_TYPE}:${GITHUB_REF_NAME}."
+            exit 1
+          fi
+
+          echo "Resolved publish mode: ${publish_mode}"
+          echo "Resolved package version: ${package_version}"
+          echo "Will publish GitHub Release: ${should_publish_release}"
+
+          {
+            echo "publish_mode=${publish_mode}"
+            echo "package_version=${package_version}"
+            echo "should_publish_release=${should_publish_release}"
+          } >> "${GITHUB_OUTPUT}"
+
       - name: Pack Core and Providers packages
         run: |
-          version="${GITHUB_REF_NAME#v}"
           mkdir -p artifacts/packages
 
           dotnet pack src/HagiCode.Libs.Core/HagiCode.Libs.Core.csproj \
             -c Release \
             -o artifacts/packages \
-            /p:Version="$version"
+            /p:Version="${{ steps.publish_context.outputs.package_version }}"
 
           dotnet pack src/HagiCode.Libs.Providers/HagiCode.Libs.Providers.csproj \
             -c Release \
             -o artifacts/packages \
-            /p:Version="$version"
+            /p:Version="${{ steps.publish_context.outputs.package_version }}"
 
-      - name: Check NuGet API key
-        id: check_nuget_api_key
+      - name: Validate Trusted Publishing configuration
         env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          NUGET_USER: ${{ secrets.NUGET_USER }}
         run: |
-          if [ -n "$NUGET_API_KEY" ]; then
-            echo "is_available=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::NUGET_API_KEY is not configured. Skipping dotnet nuget push."
-            echo "is_available=false" >> "$GITHUB_OUTPUT"
+          if [ -z "$NUGET_USER" ]; then
+            echo "::error::NUGET_USER is not configured. Set the GitHub Actions secret to your nuget.org username and create a Trusted Publishing policy for workflow file nuget-publish.yml."
+            exit 1
           fi
 
+      - name: Login to NuGet with OIDC
+        id: login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
       - name: Push packages to NuGet
-        if: steps.check_nuget_api_key.outputs.is_available == 'true'
         env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
         run: |
+          if [ -z "$NUGET_API_KEY" ]; then
+            echo "::error::NuGet/login@v1 did not return a temporary NUGET_API_KEY. Verify the nuget.org Trusted Publishing policy for newbe36524/Hagicode.Libs and workflow file nuget-publish.yml."
+            exit 1
+          fi
+
           for package in artifacts/packages/*.nupkg; do
             dotnet nuget push "$package" \
               --api-key "$NUGET_API_KEY" \
@@ -63,6 +126,13 @@ jobs:
               --skip-duplicate
           done
 
+  publish_release:
+    runs-on: ubuntu-latest
+    needs: publish_packages
+    if: ${{ needs.publish_packages.outputs.should_publish_release == 'true' }}
+    permissions:
+      contents: write
+    steps:
       - name: Publish GitHub release
         uses: release-drafter/release-drafter@v6
         with:
