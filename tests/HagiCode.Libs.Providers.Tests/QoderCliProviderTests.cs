@@ -102,6 +102,33 @@ public sealed class QoderCliProviderTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_resumed_session_filters_non_streamed_replay_chunks_before_emitting_current_turn()
+    {
+        var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(
+            resumedSessionId: "session-resume",
+            promptOutputText: "CURRENT-TURN",
+            historicalReplayChunks: ["PREVIOUS-TURN"],
+            assistantChunks: ["CURRENT-TURN"]));
+        var assistantMessages = new List<string>();
+
+        await foreach (var message in provider.ExecuteAsync(
+                           new QoderCliOptions
+                           {
+                               SessionId = "session-resume"
+                           },
+                           "resume prompt"))
+        {
+            if (message.Type == "assistant")
+            {
+                message.Content.GetProperty("text").GetString().ShouldNotBeNull();
+                assistantMessages.Add(message.Content.GetProperty("text").GetString()!);
+            }
+        }
+
+        assistantMessages.ShouldBe(["CURRENT-TURN"]);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_falls_back_to_prompt_result_when_notification_loop_ends_via_internal_cancellation()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(emitNotifications: false, promptStopReason: "fallback"));
@@ -221,6 +248,50 @@ public sealed class QoderCliProviderTests
         result.ErrorMessage.ShouldBeNullOrWhiteSpace();
     }
 
+    [Fact]
+    [Trait("Category", "RealCli")]
+    public async Task ExecuteAsync_real_cli_resume_should_not_replay_prior_assistant_output_when_opted_in()
+    {
+        if (!IsRealCliTestsEnabled())
+        {
+            return;
+        }
+
+        var resolver = new CliExecutableResolver();
+        var executablePath = resolver.ResolveFirstAvailablePath(QoderCliExecutableCandidates);
+        if (executablePath is null)
+        {
+            throw new InvalidOperationException("QoderCLI CLI was not found on PATH even though the real CLI validation path was enabled.");
+        }
+
+        var provider = new QoderCliProvider(resolver, new CliProcessManager(), null);
+        var firstToken = $"TRACE-FIRST-{Guid.NewGuid():N}";
+        var secondToken = $"TRACE-SECOND-{Guid.NewGuid():N}";
+
+        var firstResult = await ReadExecutionResultAsync(
+            provider,
+            new QoderCliOptions
+            {
+                ExecutablePath = executablePath
+            },
+            $"Reply with exactly {firstToken} and nothing else.");
+
+        firstResult.SessionId.ShouldNotBeNullOrWhiteSpace();
+        firstResult.AssistantText.ShouldContain(firstToken);
+
+        var secondResult = await ReadExecutionResultAsync(
+            provider,
+            new QoderCliOptions
+            {
+                ExecutablePath = executablePath,
+                SessionId = firstResult.SessionId
+            },
+            $"Reply with exactly {secondToken} and nothing else.");
+
+        secondResult.AssistantText.ShouldContain(secondToken);
+        secondResult.AssistantText.ShouldNotContain(firstToken);
+    }
+
     private static TestQoderCliProvider CreateProvider(
         CliExecutableResolver? executableResolver = null,
         FakeAcpSessionClient? sessionClient = null)
@@ -237,6 +308,37 @@ public sealed class QoderCliProviderTests
         var value = Environment.GetEnvironmentVariable(RealCliTestsEnvironmentVariable);
         return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
                || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static async Task<(string AssistantText, string? SessionId)> ReadExecutionResultAsync(
+        ICliProvider<QoderCliOptions> provider,
+        QoderCliOptions options,
+        string prompt,
+        CancellationToken cancellationToken = default)
+    {
+        var assistantText = new List<string>();
+        string? sessionId = null;
+
+        await foreach (var message in provider.ExecuteAsync(options, prompt, cancellationToken))
+        {
+            if (message.Content.ValueKind == JsonValueKind.Object &&
+                message.Content.TryGetProperty("session_id", out var sessionIdElement) &&
+                sessionIdElement.ValueKind == JsonValueKind.String)
+            {
+                sessionId ??= sessionIdElement.GetString();
+            }
+
+            if (message.Type == "assistant" &&
+                message.Content.ValueKind == JsonValueKind.Object &&
+                message.Content.TryGetProperty("text", out var textElement) &&
+                textElement.ValueKind == JsonValueKind.String &&
+                !string.IsNullOrWhiteSpace(textElement.GetString()))
+            {
+                assistantText.Add(textElement.GetString()!);
+            }
+        }
+
+        return (string.Concat(assistantText), sessionId);
     }
 
     private sealed class TestQoderCliProvider(
@@ -261,7 +363,10 @@ public sealed class QoderCliProviderTests
     private sealed class FakeAcpSessionClient(
         string? resumedSessionId = null,
         bool emitNotifications = true,
-        string? promptStopReason = "end_turn") : IAcpSessionClient
+        string? promptStopReason = "end_turn",
+        string? promptOutputText = null,
+        IReadOnlyList<string>? historicalReplayChunks = null,
+        IReadOnlyList<string>? assistantChunks = null) : IAcpSessionClient
     {
         public int ConnectCalls { get; private set; }
 
@@ -319,7 +424,7 @@ public sealed class QoderCliProviderTests
             return Task.FromResult(JsonSerializer.SerializeToElement(new Dictionary<string, object?>
             {
                 ["stopReason"] = promptStopReason,
-                ["outputText"] = prompt.Contains("resume", StringComparison.OrdinalIgnoreCase) ? "session ready" : "pong"
+                ["outputText"] = promptOutputText ?? (prompt.Contains("resume", StringComparison.OrdinalIgnoreCase) ? "session ready" : "pong")
             }));
         }
 
@@ -331,22 +436,60 @@ public sealed class QoderCliProviderTests
                 yield break;
             }
 
-            yield return new AcpNotification(
-                "session/update",
-                JsonSerializer.SerializeToElement(new
-                {
-                    sessionId = LastSessionId ?? resumedSessionId ?? "session-1",
-                    update = new
+            foreach (var replayChunk in historicalReplayChunks ?? [])
+            {
+                yield return new AcpNotification(
+                    "session/update",
+                    JsonSerializer.SerializeToElement(new
                     {
-                        sessionUpdate = "agent_message_chunk",
-                        content = new
+                        sessionId = LastSessionId ?? resumedSessionId ?? "session-1",
+                        _meta = new Dictionary<string, object?>
                         {
-                            type = "text",
-                            text = "pong"
+                            ["ai-coding/message-end"] = true,
+                            ["ai-coding/request-id"] = string.Empty,
+                            ["ai-coding/streamed"] = false,
+                            ["ai-coding/turn-id"] = string.Empty
+                        },
+                        update = new
+                        {
+                            sessionUpdate = "agent_message_chunk",
+                            content = new
+                            {
+                                type = "text",
+                                text = replayChunk
+                            }
                         }
-                    }
-                }));
-            await Task.Yield();
+                    }));
+                await Task.Yield();
+            }
+
+            foreach (var assistantChunk in assistantChunks ?? ["pong"])
+            {
+                yield return new AcpNotification(
+                    "session/update",
+                    JsonSerializer.SerializeToElement(new
+                    {
+                        sessionId = LastSessionId ?? resumedSessionId ?? "session-1",
+                        _meta = new Dictionary<string, object?>
+                        {
+                            ["ai-coding/message-end"] = false,
+                            ["ai-coding/request-id"] = "request-1",
+                            ["ai-coding/streamed"] = true,
+                            ["ai-coding/turn-id"] = "turn-1"
+                        },
+                        update = new
+                        {
+                            sessionUpdate = "agent_message_chunk",
+                            content = new
+                            {
+                                type = "text",
+                                text = assistantChunk
+                            }
+                        }
+                    }));
+                await Task.Yield();
+            }
+
             yield return new AcpNotification(
                 "session/update",
                 JsonSerializer.SerializeToElement(new

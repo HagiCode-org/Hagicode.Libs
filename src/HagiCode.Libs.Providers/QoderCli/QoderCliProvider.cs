@@ -86,6 +86,7 @@ public class QoderCliProvider : ICliProvider<QoderCliOptions>
         await foreach (var message in StreamPromptMessagesAsync(
                            sessionClient,
                            sessionHandle.SessionId,
+                           sessionHandle.IsResumed,
                            promptTask,
                            cancellationToken).ConfigureAwait(false))
         {
@@ -262,11 +263,14 @@ public class QoderCliProvider : ICliProvider<QoderCliOptions>
     private static async IAsyncEnumerable<CliMessage> StreamPromptMessagesAsync(
         IAcpSessionClient sessionClient,
         string sessionId,
+        bool isResumedSession,
         Task<JsonElement> promptTask,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var sawTerminalMessage = false;
         var sawAssistantText = false;
+        var bufferedAssistantMessages = isResumedSession ? new List<CliMessage>() : null;
+        CliMessage? terminalMessage = null;
         using var receiveUpdatesCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _ = CancelReceiveLoopWhenPromptCompletesAsync(promptTask, receiveUpdatesCancellation);
         await using var updateEnumerator = sessionClient.ReceiveNotificationsAsync(receiveUpdatesCancellation.Token)
@@ -304,20 +308,43 @@ public class QoderCliProvider : ICliProvider<QoderCliOptions>
                 yield break;
             }
 
+            if (isResumedSession && QoderCliAcpMessageMapper.IsReplayAssistantNotification(notification))
+            {
+                continue;
+            }
+
             foreach (var message in QoderCliAcpMessageMapper.NormalizeNotification(notification))
             {
                 if (string.Equals(message.Type, "assistant", StringComparison.OrdinalIgnoreCase) &&
                     QoderCliAcpMessageMapper.TryExtractMessageText(message.Content, out _))
                 {
                     sawAssistantText = true;
+                    if (isResumedSession)
+                    {
+                        bufferedAssistantMessages!.Add(message);
+                        continue;
+                    }
                 }
 
-                yield return message;
                 if (IsTerminalMessage(message.Type))
                 {
                     sawTerminalMessage = true;
+                    if (isResumedSession)
+                    {
+                        terminalMessage = message;
+                        break;
+                    }
+
+                    yield return message;
                     yield break;
                 }
+
+                yield return message;
+            }
+
+            if (isResumedSession && sawTerminalMessage)
+            {
+                break;
             }
         }
 
@@ -340,6 +367,20 @@ public class QoderCliProvider : ICliProvider<QoderCliOptions>
         if (promptFailure is not null)
         {
             yield return QoderCliAcpMessageMapper.CreateTerminalFailureMessage(sessionId, promptFailure);
+            yield break;
+        }
+
+        if (isResumedSession)
+        {
+            foreach (var resumedMessage in BuildResumedSessionMessages(
+                         sessionId,
+                         promptResult,
+                         bufferedAssistantMessages ?? [],
+                         terminalMessage))
+            {
+                yield return resumedMessage;
+            }
+
             yield break;
         }
 
@@ -383,6 +424,35 @@ public class QoderCliProvider : ICliProvider<QoderCliOptions>
             !QoderCliAcpMessageMapper.IsFailurePromptResult(promptResult))
         {
             yield return QoderCliAcpMessageMapper.CreateAssistantMessage(sessionId, fallbackText, promptResult);
+        }
+
+        yield return QoderCliAcpMessageMapper.CreateTerminalMessage(sessionId, promptResult);
+    }
+
+    private static IEnumerable<CliMessage> BuildResumedSessionMessages(
+        string sessionId,
+        JsonElement promptResult,
+        IReadOnlyList<CliMessage> bufferedAssistantMessages,
+        CliMessage? terminalMessage)
+    {
+        if (!QoderCliAcpMessageMapper.IsFailurePromptResult(promptResult) &&
+            QoderCliAcpMessageMapper.TryExtractPromptResultText(promptResult, out var promptText) &&
+            !string.IsNullOrWhiteSpace(promptText))
+        {
+            yield return QoderCliAcpMessageMapper.CreateAssistantMessage(sessionId, promptText, promptResult);
+        }
+        else
+        {
+            foreach (var assistantMessage in bufferedAssistantMessages)
+            {
+                yield return assistantMessage;
+            }
+        }
+
+        if (terminalMessage is not null)
+        {
+            yield return terminalMessage;
+            yield break;
         }
 
         yield return QoderCliAcpMessageMapper.CreateTerminalMessage(sessionId, promptResult);

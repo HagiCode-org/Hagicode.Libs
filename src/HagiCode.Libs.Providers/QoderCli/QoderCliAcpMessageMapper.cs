@@ -142,6 +142,36 @@ internal static class QoderCliAcpMessageMapper
         return !string.IsNullOrWhiteSpace(text);
     }
 
+    public static bool IsReplayAssistantNotification(AcpNotification notification)
+    {
+        if (!string.Equals(notification.Method, "session/update", StringComparison.OrdinalIgnoreCase) ||
+            notification.Parameters.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        if (!notification.Parameters.TryGetProperty("update", out var updateElement) ||
+            updateElement.ValueKind != JsonValueKind.Object ||
+            !string.Equals(TryGetString(updateElement, "sessionUpdate"), "agent_message_chunk", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (!notification.Parameters.TryGetProperty("_meta", out var metaElement) ||
+            metaElement.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        var streamed = TryGetBoolean(metaElement, "ai-coding/streamed");
+        var requestId = TryGetString(metaElement, "ai-coding/request-id");
+        var turnId = TryGetString(metaElement, "ai-coding/turn-id");
+
+        return streamed == false &&
+               string.IsNullOrWhiteSpace(requestId) &&
+               string.IsNullOrWhiteSpace(turnId);
+    }
+
     private static CliMessage CreateAssistantUpdateMessage(string sessionId, JsonElement updateElement, string messageType)
     {
         return new CliMessage(
@@ -236,6 +266,14 @@ internal static class QoderCliAcpMessageMapper
     private static string? TryGetPromptResultStopReason(JsonElement promptResult)
     {
         return TryGetString(promptResult, "stopReason") ?? TryGetString(promptResult, "status");
+    }
+
+    private static bool? TryGetBoolean(JsonElement element, string propertyName)
+    {
+        return element.TryGetProperty(propertyName, out var propertyElement) &&
+               (propertyElement.ValueKind == JsonValueKind.True || propertyElement.ValueKind == JsonValueKind.False)
+            ? propertyElement.GetBoolean()
+            : null;
     }
 
     private static string? TryGetString(JsonElement element, string propertyName)
