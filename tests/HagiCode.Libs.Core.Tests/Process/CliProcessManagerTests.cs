@@ -58,6 +58,20 @@ public sealed class CliProcessManagerTests
         startInfo.StandardOutputEncoding.ShouldNotBeNull();
     }
 
+    [Fact]
+    public void CreateStartInfo_on_windows_wraps_batch_files_with_cmd()
+    {
+        var manager = new TestCliProcessManager();
+        var startInfo = manager.CreateStartInfo(new ProcessStartContext
+        {
+            ExecutablePath = @"C:\tools\npm.cmd",
+            Arguments = ["install", "--global", "@openai/codex"]
+        });
+
+        startInfo.FileName.ShouldBe("cmd.exe");
+        startInfo.ArgumentList.ShouldBe(["/c", @"C:\tools\npm.cmd", "install", "--global", "@openai/codex"]);
+    }
+
     private static ProcessStartContext CreateShellContext(string command)
     {
         return new ProcessStartContext
@@ -65,5 +79,10 @@ public sealed class CliProcessManagerTests
             ExecutablePath = "/bin/sh",
             Arguments = ["-lc", command]
         };
+    }
+
+    private sealed class TestCliProcessManager : CliProcessManager
+    {
+        protected override bool IsWindows() => true;
     }
 }

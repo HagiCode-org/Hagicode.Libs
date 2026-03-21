@@ -1,5 +1,5 @@
-using System.Diagnostics;
 using HagiCode.Libs.Core.Discovery;
+using HagiCode.Libs.Core.Process;
 
 namespace HagiCode.Libs.CiSetup.Console;
 
@@ -20,7 +20,7 @@ public static class Program
 
         if (doInstall)
         {
-            var exitCode = InstallClis();
+            var exitCode = await InstallClisAsync();
             if (exitCode != 0)
             {
                 return exitCode;
@@ -35,22 +35,28 @@ public static class Program
         return 0;
     }
 
-    private static int InstallClis()
+    private static async Task<int> InstallClisAsync()
     {
         System.Console.WriteLine("Installing publicly available CLI tools...");
 
-        var hadErrors = false;
-
-        foreach (var descriptor in CliInstallRegistry.Descriptors)
+        var npmExecutable = ResolveNpmExecutable();
+        if (npmExecutable is null)
         {
-            if (!descriptor.IsPubliclyInstallable)
-            {
-                System.Console.WriteLine($"  [SKIP] {descriptor.ProviderName} (not publicly installable)");
-                continue;
-            }
+            System.Console.Error.WriteLine("  [FAIL] npm was not found on PATH. Ensure Node.js is installed before running CI setup.");
+            return 1;
+        }
 
+        var hadErrors = false;
+        var processManager = new CliProcessManager();
+
+        foreach (var descriptor in CliInstallRegistry.PubliclyInstallable)
+        {
             System.Console.WriteLine($"  [INSTALL] {descriptor.FullPackageSpecifier}...");
-            var result = RunProcess("npm", $"install --global \"{descriptor.FullPackageSpecifier}\"");
+            var result = await processManager.ExecuteAsync(new ProcessStartContext
+            {
+                ExecutablePath = npmExecutable,
+                Arguments = ["install", "--global", descriptor.FullPackageSpecifier]
+            });
 
             if (result.ExitCode == 0)
             {
@@ -59,7 +65,11 @@ public static class Program
             else
             {
                 System.Console.Error.WriteLine($"  [FAIL] {descriptor.ProviderName} installation failed (exit code {result.ExitCode})");
-                System.Console.Error.WriteLine($"  {result.Error}");
+                if (!string.IsNullOrWhiteSpace(result.StandardError))
+                {
+                    System.Console.Error.WriteLine($"  {result.StandardError.Trim()}");
+                }
+
                 hadErrors = true;
             }
         }
@@ -74,14 +84,8 @@ public static class Program
         var resolver = new CliExecutableResolver();
         var hadFailures = false;
 
-        foreach (var descriptor in CliInstallRegistry.Descriptors)
+        foreach (var descriptor in CliInstallRegistry.PubliclyInstallable)
         {
-            if (!descriptor.IsPubliclyInstallable)
-            {
-                System.Console.WriteLine($"  [SKIP] {descriptor.ProviderName} (not publicly installable)");
-                continue;
-            }
-
             var path = resolver.ResolveFirstAvailablePath(descriptor.ExecutableCandidates);
             if (path is not null)
             {
@@ -97,22 +101,9 @@ public static class Program
         return hadFailures ? 1 : 0;
     }
 
-    private static ProcessResult RunProcess(string fileName, string arguments)
+    private static string? ResolveNpmExecutable()
     {
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = fileName,
-            Arguments = arguments,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-
-        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException($"Failed to start process: {fileName}");
-        process.WaitForExit();
-
-        return new ProcessResult(process.ExitCode, process.StandardError.ReadToEnd());
+        var resolver = new CliExecutableResolver();
+        return resolver.ResolveFirstAvailablePath(["npm", "npm.cmd", "npm.exe", "npm.bat"]);
     }
-
-    private sealed record ProcessResult(int ExitCode, string Error);
 }
