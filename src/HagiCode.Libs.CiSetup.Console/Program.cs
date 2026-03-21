@@ -74,6 +74,11 @@ public static class Program
             }
         }
 
+        foreach (var descriptor in CliInstallRegistry.Descriptors.Where(static descriptor => !descriptor.IsPubliclyInstallable))
+        {
+            System.Console.WriteLine($"  [SKIP] {descriptor.ProviderName} is not publicly installable and must be validated with local setup.");
+        }
+
         return hadErrors ? 1 : 0;
     }
 
@@ -96,6 +101,11 @@ public static class Program
                 System.Console.Error.WriteLine($"  [WARN] {descriptor.ProviderName} not found on PATH (candidates: {string.Join(", ", descriptor.ExecutableCandidates)})");
                 hadFailures = true;
             }
+        }
+
+        foreach (var descriptor in CliInstallRegistry.Descriptors.Where(static descriptor => !descriptor.IsPubliclyInstallable))
+        {
+            System.Console.WriteLine($"  [SKIP] {descriptor.ProviderName} is outside the public CI install matrix.");
         }
 
         return hadFailures ? 1 : 0;

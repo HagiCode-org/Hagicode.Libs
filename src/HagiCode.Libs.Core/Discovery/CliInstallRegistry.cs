@@ -20,6 +20,13 @@ public static class CliInstallRegistry
             IsPubliclyInstallable: true),
 
         new CliInstallDescriptor(
+            ProviderName: "Copilot",
+            NpmPackage: "@github/copilot",
+            PinnedVersion: "1.0.10",
+            ExecutableCandidates: ["copilot"],
+            IsPubliclyInstallable: true),
+
+        new CliInstallDescriptor(
             ProviderName: "Codex",
             NpmPackage: "@openai/codex",
             PinnedVersion: "0.115.0",

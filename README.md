@@ -5,7 +5,7 @@
 ## Projects
 
 - `src/HagiCode.Libs.Core` - transport, process management, executable discovery, and runtime environment resolution.
-- `src/HagiCode.Libs.Providers` - provider abstractions, the Claude Code/Codex/CodeBuddy/Hermes/QoderCLI providers, and optional DI registration.
+- `src/HagiCode.Libs.Providers` - provider abstractions, the Claude Code/Copilot/Codex/CodeBuddy/Hermes/QoderCLI providers, and optional DI registration.
 - `src/HagiCode.Libs.Exploration` - Git repository discovery and state inspection.
 - `tests/*` - xUnit coverage for each project.
 
@@ -44,7 +44,7 @@ Before using that workflow, configure GitHub and nuget.org for Trusted Publishin
 
 ## Dedicated provider console
 
-`src/HagiCode.Libs.ClaudeCode.Console`, `src/HagiCode.Libs.Codex.Console`, `src/HagiCode.Libs.Codebuddy.Console`, `src/HagiCode.Libs.Hermes.Console`, and `src/HagiCode.Libs.QoderCli.Console` are dedicated provider consoles built on the shared `HagiCode.Libs.ConsoleTesting` harness.
+`src/HagiCode.Libs.ClaudeCode.Console`, `src/HagiCode.Libs.Copilot.Console`, `src/HagiCode.Libs.Codex.Console`, `src/HagiCode.Libs.Codebuddy.Console`, `src/HagiCode.Libs.Hermes.Console`, and `src/HagiCode.Libs.QoderCli.Console` are dedicated provider consoles built on the shared `HagiCode.Libs.ConsoleTesting` harness.
 
 From `repos/Hagicode.Libs`, you can use:
 
@@ -54,6 +54,12 @@ dotnet run --project src/HagiCode.Libs.ClaudeCode.Console
 dotnet run --project src/HagiCode.Libs.ClaudeCode.Console -- --test-provider
 dotnet run --project src/HagiCode.Libs.ClaudeCode.Console -- --test-provider-full --repo .
 dotnet run --project src/HagiCode.Libs.ClaudeCode.Console -- --test-all claude
+
+dotnet run --project src/HagiCode.Libs.Copilot.Console -- --help
+dotnet run --project src/HagiCode.Libs.Copilot.Console
+dotnet run --project src/HagiCode.Libs.Copilot.Console -- --test-provider github-copilot
+dotnet run --project src/HagiCode.Libs.Copilot.Console -- --test-provider-full --model claude-sonnet-4.5 --config-dir .copilot --repo .
+dotnet run --project src/HagiCode.Libs.Copilot.Console -- --test-all copilot
 
 dotnet run --project src/HagiCode.Libs.Codex.Console -- --help
 dotnet run --project src/HagiCode.Libs.Codex.Console
@@ -88,6 +94,10 @@ dotnet run --project src/HagiCode.Libs.QoderCli.Console -- --test-all qodercli
 - `--test-provider-full` and `--test-all` run the full provider-scoped suite.
 - `--repo <path>` adds the repository analysis scenario to the suite.
 - `--api-key <key>` and `--model <model>` override Claude execution options for scenario runs.
+- No arguments also run the default Copilot suite.
+- Copilot 默认套件当前包含 `Ping`、`Simple Prompt` 和 `Complex Prompt`。
+- Copilot accepts `--model <model>`, `--executable <path>`, `--auth-source <mode>`, `--github-token <token>`, `--config-dir <path>`, and compatible filtered startup overrides such as `--log-level <level>`.
+- Copilot repository analysis remains opt-in via `--repo <path>`, and the provider filters unsupported startup flags before SDK launch with deterministic diagnostics.
 - No arguments also run the default Codex suite.
 - Codex 默认套件当前包含 `Ping`、`Simple Prompt`、`Complex Prompt` 和 `Session Resume`。
 - Codex accepts `--model <model>`, `--sandbox <mode>`, `--approval-policy <mode>`, `--api-key <key>`, and `--base-url <url>` overrides.
@@ -113,6 +123,7 @@ The DI registration path now exposes all built-in providers:
 using HagiCode.Libs.Providers;
 using HagiCode.Libs.Providers.ClaudeCode;
 using HagiCode.Libs.Providers.Codebuddy;
+using HagiCode.Libs.Providers.Copilot;
 using HagiCode.Libs.Providers.Codex;
 using HagiCode.Libs.Providers.Hermes;
 using HagiCode.Libs.Providers.QoderCli;
@@ -124,6 +135,7 @@ services.AddHagiCodeLibs();
 await using var provider = services.BuildServiceProvider();
 var claude = provider.GetRequiredService<ICliProvider<ClaudeCodeOptions>>();
 var codebuddy = provider.GetRequiredService<ICliProvider<CodebuddyOptions>>();
+var copilot = provider.GetRequiredService<ICliProvider<CopilotOptions>>();
 var codex = provider.GetRequiredService<ICliProvider<CodexOptions>>();
 var hermes = provider.GetRequiredService<ICliProvider<HermesOptions>>();
 var qoderCli = provider.GetRequiredService<ICliProvider<QoderCliOptions>>();
@@ -143,6 +155,27 @@ var options = new CodebuddyOptions
 };
 
 await foreach (var message in codebuddy.ExecuteAsync(options, "Reply with exactly the word 'pong'"))
+{
+    Console.WriteLine($"{message.Type}: {message.Content}");
+}
+```
+
+Copilot execution options cover SDK-managed session startup without exposing raw prompt-mode wiring. Unsupported startup flags are filtered before launch, while compatible flags remain available through `AdditionalArgs`:
+
+```csharp
+var options = new CopilotOptions
+{
+    Model = "claude-sonnet-4.5",
+    WorkingDirectory = "/path/to/repo",
+    Permissions = new CopilotPermissionOptions
+    {
+        AllowAllTools = true,
+        AllowedPaths = ["/path/to/repo"]
+    },
+    AdditionalArgs = ["--config-dir", "/path/to/.copilot"]
+};
+
+await foreach (var message in copilot.ExecuteAsync(options, "Reply with exactly the word 'pong'"))
 {
     Console.WriteLine($"{message.Type}: {message.Content}");
 }
@@ -220,6 +253,7 @@ All CLI metadata is centralized in `HagiCode.Libs.Core.Discovery.CliInstallRegis
 | Provider | npm Package | Pinned Version | CI-Covered |
 |----------|-------------|----------------|------------|
 | Claude Code | `@anthropic-ai/claude-code` | 2.1.79 | Yes |
+| Copilot | `@github/copilot` | 1.0.10 | Yes |
 | Codex | `@openai/codex` | 0.115.0 | Yes |
 | CodeBuddy | (private) | — | No |
 | Hermes | (private) | — | No |
@@ -227,7 +261,7 @@ All CLI metadata is centralized in `HagiCode.Libs.Core.Discovery.CliInstallRegis
 
 ### CI-covered vs. locally-installed CLIs
 
-CLIs with `IsPubliclyInstallable = true` are automatically installed and tested in CI. CLIs marked as not publicly installable (CodeBuddy, Hermes, QoderCLI) are skipped during CI setup and require local installation for validation.
+CLIs with `IsPubliclyInstallable = true` are automatically installed and tested in CI. Today that public set is Claude Code, Copilot, and Codex. CLIs marked as not publicly installable (CodeBuddy, Hermes, QoderCLI) are skipped during CI setup and require local installation for validation.
 
 ### Local reproduction
 
@@ -237,8 +271,8 @@ To reproduce the same real-CLI validation locally from the `repos/Hagicode.Libs`
 # Install and verify all publicly available CLIs
 dotnet run --project src/HagiCode.Libs.CiSetup.Console -- --install --verify
 
-# Run CI-targeted discovery tests (Claude Code + Codex only)
-HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.Providers.Tests/HagiCode.Libs.Providers.Tests.csproj --filter "FullyQualifiedName~ClaudeCodeProviderTests|FullyQualifiedName~CodexProviderTests" --logger "console;verbosity=normal"
+# Run CI-targeted discovery tests (Claude Code + Copilot + Codex)
+HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.Providers.Tests/HagiCode.Libs.Providers.Tests.csproj --filter "FullyQualifiedName~ClaudeCodeProviderTests|FullyQualifiedName~CopilotProviderTests|FullyQualifiedName~CodexProviderTests" --logger "console;verbosity=normal"
 ```
 
 The real-CLI path only checks executable discovery and the auth-free version ping behavior through the provider and dedicated console flows. It does not attempt interactive login or prompt execution, so the default test suite remains usable on machines without the external CLI installed.
@@ -257,6 +291,13 @@ HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.ConsoleTesting.Tests/H
 ```bash
 HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.Providers.Tests/HagiCode.Libs.Providers.Tests.csproj --filter "FullyQualifiedName~CodexProviderTests"
 HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.ConsoleTesting.Tests/HagiCode.Libs.ConsoleTesting.Tests.csproj --filter "FullyQualifiedName~Codex"
+```
+
+**Copilot:**
+```bash
+HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.Providers.Tests/HagiCode.Libs.Providers.Tests.csproj --filter "FullyQualifiedName~CopilotProviderTests"
+HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.ConsoleTesting.Tests/HagiCode.Libs.ConsoleTesting.Tests.csproj --filter "FullyQualifiedName~Copilot"
+dotnet run --project src/HagiCode.Libs.Copilot.Console -- --test-provider-full --model claude-sonnet-4.5 --config-dir .copilot --repo .
 ```
 
 **CodeBuddy** (requires local installation):

@@ -8,6 +8,7 @@
     <Project Path="src/HagiCode.Libs.CiSetup.Console/HagiCode.Libs.CiSetup.Console.csproj" />
     <Project Path="src/HagiCode.Libs.ClaudeCode.Console/HagiCode.Libs.ClaudeCode.Console.csproj" />
     <Project Path="src/HagiCode.Libs.Codebuddy.Console/HagiCode.Libs.Codebuddy.Console.csproj" />
+    <Project Path="src/HagiCode.Libs.Copilot.Console/HagiCode.Libs.Copilot.Console.csproj" />
     <Project Path="src/HagiCode.Libs.Codex.Console/HagiCode.Libs.Codex.Console.csproj" />
     <Project Path="src/HagiCode.Libs.ConsoleTesting/HagiCode.Libs.ConsoleTesting.csproj" />
     <Project Path="src/HagiCode.Libs.Hermes.Console/HagiCode.Libs.Hermes.Console.csproj" />
