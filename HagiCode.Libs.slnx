@@ -17,10 +17,12 @@
   <Folder Name="/src/">
     <Project Path="src/HagiCode.Libs.Core/HagiCode.Libs.Core.csproj" />
     <Project Path="src/HagiCode.Libs.Providers/HagiCode.Libs.Providers.csproj" />
+    <Project Path="src/HagiCode.Libs.Skills/HagiCode.Libs.Skills.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/HagiCode.Libs.ConsoleTesting.Tests/HagiCode.Libs.ConsoleTesting.Tests.csproj" />
     <Project Path="tests/HagiCode.Libs.Core.Tests/HagiCode.Libs.Core.Tests.csproj" />
     <Project Path="tests/HagiCode.Libs.Providers.Tests/HagiCode.Libs.Providers.Tests.csproj" />
+    <Project Path="tests/HagiCode.Libs.Skills.Tests/HagiCode.Libs.Skills.Tests.csproj" />
   </Folder>
 </Solution>
