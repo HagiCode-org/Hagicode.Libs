@@ -82,7 +82,7 @@ public sealed record ClaudeCodeOptions
 
     /// <summary>
     /// Gets or sets extra CLI arguments expressed as flag/value pairs.
-    /// A <see langword="null" /> value adds a switch without a value.
+    /// A <see langword="null" /> value adds a switch without a value, while non-null values are boundary-trimmed and ignored when empty after trimming.
     /// </summary>
     public IReadOnlyDictionary<string, string?> ExtraArgs { get; init; } = new Dictionary<string, string?>();
 

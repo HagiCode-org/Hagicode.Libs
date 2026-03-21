@@ -42,6 +42,7 @@ public sealed record CodebuddyOptions
 
     /// <summary>
     /// Gets or sets additional raw CLI arguments appended after the ACP bootstrap switch.
+    /// Tokens are boundary-trimmed individually and whitespace-only tokens are ignored.
     /// </summary>
     public IReadOnlyList<string> ExtraArguments { get; init; } = [];
 }

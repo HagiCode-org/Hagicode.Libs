@@ -17,7 +17,7 @@ public sealed record QoderCliOptions
 
     /// <summary>
     /// Gets or sets the optional QoderCLI model override.
-    /// The provider forwards this value as-is and does not apply a default model.
+    /// Boundary whitespace is trimmed before forwarding, and the provider does not apply a default model.
     /// </summary>
     public string? Model { get; init; }
 
@@ -43,7 +43,7 @@ public sealed record QoderCliOptions
 
     /// <summary>
     /// Gets or sets additional raw CLI arguments appended after the ACP bootstrap switch.
-    /// Permission-bypass flags are ignored because the provider always forces ACP sessions into yolo mode.
+    /// Tokens are boundary-trimmed individually, whitespace-only tokens are ignored, and permission-bypass flags are skipped because the provider always forces ACP sessions into yolo mode.
     /// </summary>
     public IReadOnlyList<string> ExtraArguments { get; init; } = [];
 }

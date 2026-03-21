@@ -135,24 +135,31 @@ public class CodexProvider : ICliProvider<CodexOptions>
             "--experimental-json"
         };
 
-        if (!string.IsNullOrWhiteSpace(options.Model))
+        var model = ArgumentValueNormalizer.NormalizeOptionalValue(options.Model);
+        if (model is not null)
         {
-            arguments.AddRange(["--model", options.Model]);
+            arguments.AddRange(["--model", model]);
         }
 
-        if (!string.IsNullOrWhiteSpace(options.SandboxMode))
+        var sandboxMode = ArgumentValueNormalizer.NormalizeOptionalValue(options.SandboxMode);
+        if (sandboxMode is not null)
         {
-            arguments.AddRange(["--sandbox", options.SandboxMode]);
+            arguments.AddRange(["--sandbox", sandboxMode]);
         }
 
-        if (!string.IsNullOrWhiteSpace(options.WorkingDirectory))
+        var workingDirectory = ArgumentValueNormalizer.NormalizeOptionalValue(options.WorkingDirectory);
+        if (workingDirectory is not null)
         {
-            arguments.AddRange(["--cd", options.WorkingDirectory]);
+            arguments.AddRange(["--cd", workingDirectory]);
         }
 
         foreach (var directory in options.AddDirectories)
         {
-            arguments.AddRange(["--add-dir", directory]);
+            var normalizedDirectory = ArgumentValueNormalizer.NormalizeOptionalValue(directory);
+            if (normalizedDirectory is not null)
+            {
+                arguments.AddRange(["--add-dir", normalizedDirectory]);
+            }
         }
 
         if (options.SkipGitRepositoryCheck)
@@ -160,25 +167,33 @@ public class CodexProvider : ICliProvider<CodexOptions>
             arguments.Add("--skip-git-repo-check");
         }
 
-        if (!string.IsNullOrWhiteSpace(options.ApprovalPolicy))
+        var approvalPolicy = ArgumentValueNormalizer.NormalizeOptionalValue(options.ApprovalPolicy);
+        if (approvalPolicy is not null)
         {
-            arguments.AddRange(["--config", $"approval_policy=\"{options.ApprovalPolicy}\""]);
+            arguments.AddRange(["--config", $"approval_policy=\"{approvalPolicy}\""]);
         }
 
-        if (!string.IsNullOrWhiteSpace(options.ThreadId))
+        var threadId = ArgumentValueNormalizer.NormalizeOptionalValue(options.ThreadId);
+        if (threadId is not null)
         {
-            arguments.AddRange(["resume", options.ThreadId]);
+            arguments.AddRange(["resume", threadId]);
         }
 
         foreach (var extraArgument in options.ExtraArgs)
         {
+            var normalizedValue = ArgumentValueNormalizer.NormalizeOptionalValue(extraArgument.Value);
+            if (extraArgument.Value is not null && normalizedValue is null)
+            {
+                continue;
+            }
+
             var flag = extraArgument.Key.StartsWith("--", StringComparison.Ordinal)
                 ? extraArgument.Key
                 : $"--{extraArgument.Key}";
             arguments.Add(flag);
-            if (extraArgument.Value is not null)
+            if (normalizedValue is not null)
             {
-                arguments.Add(extraArgument.Value);
+                arguments.Add(normalizedValue);
             }
         }
 

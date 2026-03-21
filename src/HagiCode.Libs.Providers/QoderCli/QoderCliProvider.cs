@@ -152,14 +152,15 @@ public class QoderCliProvider : ICliProvider<QoderCliOptions>
         var arguments = new List<string> { "--acp" };
         foreach (var argument in options.ExtraArguments)
         {
-            if (string.IsNullOrWhiteSpace(argument) ||
-                string.Equals(argument, "--acp", StringComparison.OrdinalIgnoreCase) ||
-                PermissionBypassFlags.Any(flag => string.Equals(flag, argument, StringComparison.OrdinalIgnoreCase)))
+            var normalizedArgument = ArgumentValueNormalizer.NormalizeOptionalValue(argument);
+            if (normalizedArgument is null ||
+                string.Equals(normalizedArgument, "--acp", StringComparison.OrdinalIgnoreCase) ||
+                PermissionBypassFlags.Any(flag => string.Equals(flag, normalizedArgument, StringComparison.OrdinalIgnoreCase)))
             {
                 continue;
             }
 
-            arguments.Add(argument);
+            arguments.Add(normalizedArgument);
         }
 
         return arguments;

@@ -42,6 +42,7 @@ public sealed record HermesOptions
 
     /// <summary>
     /// Gets or sets the raw Hermes CLI arguments used for managed ACP startup.
+    /// Tokens are boundary-trimmed individually and whitespace-only tokens are ignored.
     /// </summary>
     public IReadOnlyList<string> Arguments { get; init; } = [];
 }

@@ -160,7 +160,9 @@ public class HermesProvider : ICliProvider<HermesOptions>
         ArgumentNullException.ThrowIfNull(options);
 
         var arguments = options.Arguments
-            .Where(static argument => !string.IsNullOrWhiteSpace(argument))
+            .Select(ArgumentValueNormalizer.NormalizeOptionalValue)
+            .Where(static argument => argument is not null)
+            .Cast<string>()
             .ToArray();
 
         return arguments.Length == 0 ? ["acp"] : arguments;

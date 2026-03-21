@@ -137,19 +137,22 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
             "stream-json"
         };
 
-        if (!string.IsNullOrWhiteSpace(options.Model))
+        var model = ArgumentValueNormalizer.NormalizeOptionalValue(options.Model);
+        if (model is not null)
         {
-            arguments.AddRange(["--model", options.Model]);
+            arguments.AddRange(["--model", model]);
         }
 
-        if (!string.IsNullOrWhiteSpace(options.SystemPrompt))
+        var systemPrompt = ArgumentValueNormalizer.NormalizeOptionalValue(options.SystemPrompt);
+        if (systemPrompt is not null)
         {
-            arguments.AddRange(["--system-prompt", options.SystemPrompt]);
+            arguments.AddRange(["--system-prompt", systemPrompt]);
         }
 
-        if (!string.IsNullOrWhiteSpace(options.AppendSystemPrompt))
+        var appendSystemPrompt = ArgumentValueNormalizer.NormalizeOptionalValue(options.AppendSystemPrompt);
+        if (appendSystemPrompt is not null)
         {
-            arguments.AddRange(["--append-system-prompt", options.AppendSystemPrompt]);
+            arguments.AddRange(["--append-system-prompt", appendSystemPrompt]);
         }
 
         if (options.MaxTurns is { } maxTurns)
@@ -157,19 +160,30 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
             arguments.AddRange(["--max-turns", maxTurns.ToString()]);
         }
 
-        if (options.AllowedTools.Count > 0)
+        var allowedTools = options.AllowedTools
+            .Select(ArgumentValueNormalizer.NormalizeOptionalValue)
+            .Where(static value => value is not null)
+            .Cast<string>()
+            .ToArray();
+        if (allowedTools.Length > 0)
         {
-            arguments.AddRange(["--allowedTools", string.Join(',', options.AllowedTools)]);
+            arguments.AddRange(["--allowedTools", string.Join(',', allowedTools)]);
         }
 
-        if (options.DisallowedTools.Count > 0)
+        var disallowedTools = options.DisallowedTools
+            .Select(ArgumentValueNormalizer.NormalizeOptionalValue)
+            .Where(static value => value is not null)
+            .Cast<string>()
+            .ToArray();
+        if (disallowedTools.Length > 0)
         {
-            arguments.AddRange(["--disallowedTools", string.Join(',', options.DisallowedTools)]);
+            arguments.AddRange(["--disallowedTools", string.Join(',', disallowedTools)]);
         }
 
-        if (!string.IsNullOrWhiteSpace(options.PermissionMode))
+        var permissionMode = ArgumentValueNormalizer.NormalizeOptionalValue(options.PermissionMode);
+        if (permissionMode is not null)
         {
-            arguments.AddRange(["--permission-mode", options.PermissionMode]);
+            arguments.AddRange(["--permission-mode", permissionMode]);
         }
 
         if (options.ContinueConversation)
@@ -177,24 +191,31 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
             arguments.Add("--continue");
         }
 
-        if (!string.IsNullOrWhiteSpace(options.Resume))
+        var resume = ArgumentValueNormalizer.NormalizeOptionalValue(options.Resume);
+        if (resume is not null)
         {
-            arguments.AddRange(["--resume", options.Resume]);
+            arguments.AddRange(["--resume", resume]);
         }
 
-        if (!string.IsNullOrWhiteSpace(options.SessionId))
+        var sessionId = ArgumentValueNormalizer.NormalizeOptionalValue(options.SessionId);
+        if (sessionId is not null)
         {
-            arguments.AddRange(["--session-id", options.SessionId]);
+            arguments.AddRange(["--session-id", sessionId]);
         }
 
         foreach (var directory in options.AddDirectories)
         {
-            arguments.AddRange(["--add-dir", directory]);
+            var normalizedDirectory = ArgumentValueNormalizer.NormalizeOptionalValue(directory);
+            if (normalizedDirectory is not null)
+            {
+                arguments.AddRange(["--add-dir", normalizedDirectory]);
+            }
         }
 
-        if (!string.IsNullOrWhiteSpace(options.McpServersPath))
+        var mcpServersPath = ArgumentValueNormalizer.NormalizeOptionalValue(options.McpServersPath);
+        if (mcpServersPath is not null)
         {
-            arguments.AddRange(["--mcp-config", options.McpServersPath]);
+            arguments.AddRange(["--mcp-config", mcpServersPath]);
         }
         else if (options.McpServers.Count > 0)
         {
@@ -203,10 +224,16 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
 
         foreach (var extraArgument in options.ExtraArgs)
         {
-            arguments.Add($"--{extraArgument.Key}");
-            if (extraArgument.Value is not null)
+            var normalizedValue = ArgumentValueNormalizer.NormalizeOptionalValue(extraArgument.Value);
+            if (extraArgument.Value is not null && normalizedValue is null)
             {
-                arguments.Add(extraArgument.Value);
+                continue;
+            }
+
+            arguments.Add($"--{extraArgument.Key}");
+            if (normalizedValue is not null)
+            {
+                arguments.Add(normalizedValue);
             }
         }
 
