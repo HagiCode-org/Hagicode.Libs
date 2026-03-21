@@ -44,6 +44,40 @@ public sealed class ClaudeCodeProviderTests
     }
 
     [Fact]
+    public void BuildCommandArguments_trims_optional_values_and_omits_empty_after_trim_pairs()
+    {
+        var provider = CreateProvider();
+
+        var arguments = provider.BuildCommandArguments(new ClaudeCodeOptions
+        {
+            Model = "  Claude Sonnet 4.5  ",
+            AddDirectories = ["  /tmp/my repo  ", "   "],
+            ExtraArgs = new Dictionary<string, string?>
+            {
+                ["settings"] = "  balanced mode  ",
+                ["ignored"] = "   ",
+                ["dangerously-skip-permissions"] = null
+            }
+        });
+
+        arguments.ShouldBe(
+        [
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--input-format",
+            "stream-json",
+            "--model",
+            "Claude Sonnet 4.5",
+            "--add-dir",
+            "/tmp/my repo",
+            "--settings",
+            "balanced mode",
+            "--dangerously-skip-permissions"
+        ]);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_uses_custom_executable_and_streams_messages()
     {
         var provider = CreateProvider();

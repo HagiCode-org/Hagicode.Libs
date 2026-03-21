@@ -29,6 +29,19 @@ public sealed class QoderCliProviderTests
     }
 
     [Fact]
+    public void BuildCommandArguments_trims_tokens_and_omits_empty_or_blocked_entries()
+    {
+        var provider = CreateProvider();
+
+        var arguments = provider.BuildCommandArguments(new QoderCliOptions
+        {
+            ExtraArguments = ["  --acp  ", "  --profile  ", "  ci smoke  ", "   ", "  --dangerously-skip-permissions  ", "  --verbose  "]
+        });
+
+        arguments.ShouldBe(["--acp", "--profile", "ci smoke", "--verbose"]);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_always_sets_qodercli_sessions_to_yolo_mode()
     {
         var provider = CreateProvider();

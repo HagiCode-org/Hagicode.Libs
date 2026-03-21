@@ -28,6 +28,19 @@ public sealed class HermesProviderTests
     }
 
     [Fact]
+    public void BuildCommandArguments_trims_tokens_without_collapsing_internal_spaces()
+    {
+        var provider = CreateProvider();
+
+        var arguments = provider.BuildCommandArguments(new HermesOptions
+        {
+            Arguments = ["  acp  ", "  --profile  ", "  ci smoke  ", "   "]
+        });
+
+        arguments.ShouldBe(["acp", "--profile", "ci smoke"]);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_uses_custom_executable_and_streams_normalized_messages()
     {
         var provider = CreateProvider();

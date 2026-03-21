@@ -29,6 +29,19 @@ public sealed class CodebuddyProviderTests
     }
 
     [Fact]
+    public void BuildCommandArguments_trims_tokens_and_ignores_whitespace_only_entries()
+    {
+        var provider = CreateProvider();
+
+        var arguments = provider.BuildCommandArguments(new CodebuddyOptions
+        {
+            ExtraArguments = ["  --acp  ", "  --profile  ", "  ci smoke  ", "   ", "  --verbose  "]
+        });
+
+        arguments.ShouldBe(["--acp", "--profile", "ci smoke", "--verbose"]);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_uses_custom_executable_and_streams_normalized_messages()
     {
         var provider = CreateProvider();

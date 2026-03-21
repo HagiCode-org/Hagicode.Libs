@@ -44,6 +44,50 @@ public sealed class AcpSessionClientTests
     }
 
     [Fact]
+    public async Task StartSessionAsync_trims_session_id_and_model_before_forwarding()
+    {
+        var transport = new ScriptedAcpTransport(request => request.Method switch
+        {
+            "initialize" => [CreateJsonRpcResult(request.Id, """{"protocolVersion":1}""")],
+            "session/load" => [CreateJsonRpcResult(request.Id, """{"sessionId":"session-123"}""")],
+            "session/set_model" => [CreateJsonRpcResult(request.Id, "{}")],
+            _ => throw new InvalidOperationException($"Unexpected ACP method: {request.Method}")
+        });
+
+        await using var client = new AcpSessionClient(transport);
+        await client.ConnectAsync();
+
+        var session = await client.StartSessionAsync("/tmp/project", "  session-123  ", "  Claude Sonnet 4.5  ");
+
+        session.SessionId.ShouldBe("session-123");
+        session.IsResumed.ShouldBeTrue();
+        transport.SentMethods.ShouldBe(["initialize", "session/load", "session/set_model"]);
+        transport.Requests[1].Params.GetProperty("sessionId").GetString().ShouldBe("session-123");
+        transport.Requests[2].Params.GetProperty("sessionId").GetString().ShouldBe("session-123");
+        transport.Requests[2].Params.GetProperty("modelId").GetString().ShouldBe("Claude Sonnet 4.5");
+    }
+
+    [Fact]
+    public async Task StartSessionAsync_treats_whitespace_only_optional_values_as_absent()
+    {
+        var transport = new ScriptedAcpTransport(request => request.Method switch
+        {
+            "initialize" => [CreateJsonRpcResult(request.Id, """{"protocolVersion":1}""")],
+            "session/new" => [CreateJsonRpcResult(request.Id, """{"sessionId":"session-456"}""")],
+            _ => throw new InvalidOperationException($"Unexpected ACP method: {request.Method}")
+        });
+
+        await using var client = new AcpSessionClient(transport);
+        await client.ConnectAsync();
+
+        var session = await client.StartSessionAsync("/tmp/project", "   ", "\t  ");
+
+        session.SessionId.ShouldBe("session-456");
+        session.IsResumed.ShouldBeFalse();
+        transport.SentMethods.ShouldBe(["initialize", "session/new"]);
+    }
+
+    [Fact]
     public async Task SendPromptAsync_enqueues_synthetic_prompt_completed_notification_for_end_turn_results()
     {
         var transport = new ScriptedAcpTransport(request => request.Method switch

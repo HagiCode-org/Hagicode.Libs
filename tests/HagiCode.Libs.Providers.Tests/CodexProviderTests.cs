@@ -60,6 +60,47 @@ public sealed class CodexProviderTests
     }
 
     [Fact]
+    public void BuildCommandArguments_trims_optional_values_and_preserves_internal_spaces()
+    {
+        var provider = CreateProvider();
+
+        var arguments = provider.BuildCommandArguments(new CodexOptions
+        {
+            Model = "  gpt-5 codex  ",
+            WorkingDirectory = "  /tmp/my repo  ",
+            ApprovalPolicy = "  on-request  ",
+            ThreadId = "  thread-456  ",
+            AddDirectories = ["  /tmp/shared repo  ", "   "],
+            ExtraArgs = new Dictionary<string, string?>
+            {
+                ["config"] = "  web_search=\"disabled\"  ",
+                ["notes"] = "  keep internal  spaces  ",
+                ["ignored"] = "   "
+            }
+        });
+
+        arguments.ShouldBe(
+        [
+            "exec",
+            "--experimental-json",
+            "--model",
+            "gpt-5 codex",
+            "--cd",
+            "/tmp/my repo",
+            "--add-dir",
+            "/tmp/shared repo",
+            "--config",
+            "approval_policy=\"on-request\"",
+            "resume",
+            "thread-456",
+            "--config",
+            "web_search=\"disabled\"",
+            "--notes",
+            "keep internal  spaces"
+        ]);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_uses_custom_executable_and_streams_messages()
     {
         var provider = CreateProvider();
