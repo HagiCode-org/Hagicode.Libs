@@ -13,8 +13,8 @@
 
 ```bash
 cd repos/Hagicode.Libs
-dotnet build HagiCode.Libs.sln
-dotnet test HagiCode.Libs.sln
+dotnet build HagiCode.Libs.slnx
+dotnet test HagiCode.Libs.slnx
 ```
 
 ## NuGet publishing
