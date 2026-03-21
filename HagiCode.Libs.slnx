@@ -1,0 +1,25 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Folder Name="/integrationTests/">
+    <Project Path="src/HagiCode.Libs.CiSetup.Console/HagiCode.Libs.CiSetup.Console.csproj" />
+    <Project Path="src/HagiCode.Libs.ClaudeCode.Console/HagiCode.Libs.ClaudeCode.Console.csproj" />
+    <Project Path="src/HagiCode.Libs.Codebuddy.Console/HagiCode.Libs.Codebuddy.Console.csproj" />
+    <Project Path="src/HagiCode.Libs.Codex.Console/HagiCode.Libs.Codex.Console.csproj" />
+    <Project Path="src/HagiCode.Libs.ConsoleTesting/HagiCode.Libs.ConsoleTesting.csproj" />
+    <Project Path="src/HagiCode.Libs.Hermes.Console/HagiCode.Libs.Hermes.Console.csproj" />
+    <Project Path="src/HagiCode.Libs.QoderCli.Console/HagiCode.Libs.QoderCli.Console.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/HagiCode.Libs.Core/HagiCode.Libs.Core.csproj" />
+    <Project Path="src/HagiCode.Libs.Providers/HagiCode.Libs.Providers.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/HagiCode.Libs.ConsoleTesting.Tests/HagiCode.Libs.ConsoleTesting.Tests.csproj" />
+    <Project Path="tests/HagiCode.Libs.Core.Tests/HagiCode.Libs.Core.Tests.csproj" />
+    <Project Path="tests/HagiCode.Libs.Providers.Tests/HagiCode.Libs.Providers.Tests.csproj" />
+  </Folder>
+</Solution>
