@@ -10,7 +10,7 @@ on:
       - 'Directory.Build.props'
       - 'Directory.Packages.props'
       - 'global.json'
-      - '*.sln'
+      - '*.slnx'
   pull_request:
     paths:
       - '.github/workflows/cli-discovery-cross-platform.yml'
@@ -20,7 +20,7 @@ on:
       - 'Directory.Build.props'
       - 'Directory.Packages.props'
       - 'global.json'
-      - '*.sln'
+      - '*.slnx'
   workflow_dispatch:
 
 env:
@@ -72,8 +72,8 @@ jobs:
 
       - name: Restore HagiCode.Libs solution
         run: |
-          echo "Restoring HagiCode.Libs.sln on ${RUNNER_OS}"
-          dotnet restore HagiCode.Libs.sln
+          echo "Restoring HagiCode.Libs.slnx on ${RUNNER_OS}"
+          dotnet restore HagiCode.Libs.slnx
 
       - name: Run real CLI discovery tests
         run: |
