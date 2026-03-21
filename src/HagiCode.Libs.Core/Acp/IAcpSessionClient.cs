@@ -24,8 +24,8 @@ public interface IAcpSessionClient : IAsyncDisposable
     /// Creates or resumes an ACP session.
     /// </summary>
     /// <param name="workingDirectory">The working directory bound to the session.</param>
-    /// <param name="sessionId">An optional session identifier to resume.</param>
-    /// <param name="model">An optional model applied after the session is ready.</param>
+    /// <param name="sessionId">An optional session identifier to resume. Boundary whitespace is trimmed before reuse is decided.</param>
+    /// <param name="model">An optional model applied after the session is ready. Boundary whitespace is trimmed and empty-after-trim values are ignored.</param>
     /// <param name="cancellationToken">Cancels the bootstrap operation.</param>
     /// <returns>The resulting session handle.</returns>
     Task<AcpSessionHandle> StartSessionAsync(

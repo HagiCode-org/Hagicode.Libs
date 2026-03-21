@@ -78,21 +78,23 @@ public sealed class AcpSessionClient : IAcpSessionClient
 
         await InitializeAsync(cancellationToken).ConfigureAwait(false);
 
+        var normalizedSessionId = Process.ArgumentValueNormalizer.NormalizeOptionalValue(sessionId);
+        var normalizedModel = Process.ArgumentValueNormalizer.NormalizeOptionalValue(model);
         JsonElement sessionResult;
         string resolvedSessionId;
-        var isResumed = !string.IsNullOrWhiteSpace(sessionId);
+        var isResumed = normalizedSessionId is not null;
         if (isResumed)
         {
             sessionResult = await _rpcClient.InvokeAsync<JsonElement>(
                 "session/load",
                 new
                 {
-                    sessionId,
+                    sessionId = normalizedSessionId,
                     cwd = workingDirectory,
                     mcpServers = Array.Empty<object>()
                 },
                 cancellationToken).ConfigureAwait(false);
-            resolvedSessionId = sessionId!;
+            resolvedSessionId = normalizedSessionId!;
         }
         else
         {
@@ -107,14 +109,14 @@ public sealed class AcpSessionClient : IAcpSessionClient
             resolvedSessionId = ParseSessionId(sessionResult);
         }
 
-        if (!string.IsNullOrWhiteSpace(model))
+        if (normalizedModel is not null)
         {
             await _rpcClient.InvokeAsync<JsonElement>(
                 "session/set_model",
                 new
                 {
                     sessionId = resolvedSessionId,
-                    modelId = model
+                    modelId = normalizedModel
                 },
                 cancellationToken).ConfigureAwait(false);
         }
