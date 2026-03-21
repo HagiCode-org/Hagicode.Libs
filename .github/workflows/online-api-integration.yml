@@ -1,0 +1,53 @@
+name: Online API Integration
+
+on:
+  push:
+    paths:
+      - '.github/workflows/online-api-integration.yml'
+      - 'src/HagiCode.Libs.Skills/**'
+      - 'tests/HagiCode.Libs.Skills.Tests/**'
+      - 'docs/skills-online-api-reference.md'
+      - 'README.md'
+      - 'Directory.Build.props'
+      - 'Directory.Packages.props'
+      - 'global.json'
+      - '*.slnx'
+  pull_request:
+    paths:
+      - '.github/workflows/online-api-integration.yml'
+      - 'src/HagiCode.Libs.Skills/**'
+      - 'tests/HagiCode.Libs.Skills.Tests/**'
+      - 'docs/skills-online-api-reference.md'
+      - 'README.md'
+      - 'Directory.Build.props'
+      - 'Directory.Packages.props'
+      - 'global.json'
+      - '*.slnx'
+  workflow_dispatch:
+
+env:
+  HAGICODE_REAL_ONLINE_API_TESTS: '1'
+
+jobs:
+  online-api-integration:
+    name: 'ubuntu-latest real online API integration'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore Skills test project
+        run: dotnet restore tests/HagiCode.Libs.Skills.Tests/HagiCode.Libs.Skills.Tests.csproj
+
+      - name: Run real online API integration tests
+        run: |
+          dotnet test tests/HagiCode.Libs.Skills.Tests/HagiCode.Libs.Skills.Tests.csproj \
+            --no-restore \
+            --filter "FullyQualifiedName~RealOnlineApiIntegrationTests" \
+            --logger "console;verbosity=normal"
