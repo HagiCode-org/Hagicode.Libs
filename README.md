@@ -6,6 +6,7 @@
 
 - `src/HagiCode.Libs.Core` - transport, process management, executable discovery, and runtime environment resolution.
 - `src/HagiCode.Libs.Providers` - provider abstractions, the Claude Code/Copilot/Codex/CodeBuddy/Hermes/QoderCLI providers, and optional DI registration.
+- `src/HagiCode.Libs.Skills` - skills-oriented infrastructure. Its first shipped capability is a typed online API client for search, well-known discovery, audit, telemetry, and GitHub metadata/tree requests.
 - `src/HagiCode.Libs.Exploration` - Git repository discovery and state inspection.
 - `tests/*` - xUnit coverage for each project.
 
@@ -19,7 +20,7 @@ dotnet test HagiCode.Libs.slnx
 
 ## NuGet publishing
 
-`repos/Hagicode.Libs/.github/workflows/nuget-publish.yml` now supports two publish modes for `src/HagiCode.Libs.Core` and `src/HagiCode.Libs.Providers`:
+`repos/Hagicode.Libs/.github/workflows/nuget-publish.yml` now supports two publish modes for `src/HagiCode.Libs.Core`, `src/HagiCode.Libs.Providers`, and `src/HagiCode.Libs.Skills`:
 
 - Push a `v*.*.*` tag to publish a stable package version that matches the tag name without the leading `v` and publish the matching GitHub Release.
 - Push to `main` to publish a dev prerelease package automatically without creating a GitHub Release.
@@ -41,6 +42,46 @@ Before using that workflow, configure GitHub and nuget.org for Trusted Publishin
 - Set the GitHub Actions secret `NUGET_USER` to the nuget.org account name that owns the packages.
 - In nuget.org Trusted Publishing, add a policy for the `newbe36524/Hagicode.Libs` repository and set the workflow file name to `nuget-publish.yml`.
 - Do not keep a long-lived `NUGET_API_KEY` secret for this workflow; both stable and dev publishes expect `NuGet/login@v1` to mint a temporary key through GitHub OIDC.
+
+## Skills package usage
+
+`HagiCode.Libs.Skills` is intentionally broader than the initial HTTP wrapper so future non-HTTP skills capabilities can ship in the same package without a rename. For now, the `OnlineApi` module is the delivered surface.
+
+Register the package through DI:
+
+```csharp
+using HagiCode.Libs.Skills;
+using HagiCode.Libs.Skills.OnlineApi;
+using HagiCode.Libs.Skills.OnlineApi.Models;
+using Microsoft.Extensions.DependencyInjection;
+
+var services = new ServiceCollection();
+services.AddHagiCodeSkills(options =>
+{
+    options.DisableTelemetry = true;
+    options.GitHubToken = "<token>";
+});
+
+await using var provider = services.BuildServiceProvider();
+var onlineApiClient = provider.GetRequiredService<IOnlineApiClient>();
+```
+
+Search and well-known discovery use typed request/response models:
+
+```csharp
+var searchResponse = await onlineApiClient.SearchAsync(new SearchSkillsRequest
+{
+    Query = "codex",
+    Limit = 10,
+});
+
+var discoveryResponse = await onlineApiClient.DiscoverWellKnownAsync(new WellKnownDiscoveryRequest
+{
+    SourceUrl = "https://example.com/docs",
+});
+```
+
+The endpoint profile is provider-driven, so consumers can replace `IOnlineApiEndpointProvider` or override base URIs without changing the public client contract.
 
 ## Dedicated provider console
 
@@ -276,6 +317,18 @@ HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.Providers.Tests/HagiCo
 ```
 
 The real-CLI path only checks executable discovery and the auth-free version ping behavior through the provider and dedicated console flows. It does not attempt interactive login or prompt execution, so the default test suite remains usable on machines without the external CLI installed.
+
+## Real online API validation
+
+`HagiCode.Libs.Skills` also includes an opt-in suite that calls the live search, well-known discovery, audit, telemetry, and GitHub metadata endpoints. The tests stay disabled by default and only run when `HAGICODE_REAL_ONLINE_API_TESTS` is enabled.
+
+From `repos/Hagicode.Libs`, you can run:
+
+```bash
+HAGICODE_REAL_ONLINE_API_TESTS=1 dotnet test tests/HagiCode.Libs.Skills.Tests/HagiCode.Libs.Skills.Tests.csproj --filter "FullyQualifiedName~RealOnlineApiIntegrationTests" --logger "console;verbosity=normal"
+```
+
+GitHub Actions mirrors the same opt-in path in `repos/Hagicode.Libs/.github/workflows/online-api-integration.yml`.
 
 ### Provider-specific local validation
 
