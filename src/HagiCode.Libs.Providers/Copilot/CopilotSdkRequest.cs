@@ -4,6 +4,7 @@ internal sealed record CopilotSdkRequest(
     string Prompt,
     string? Model,
     string? WorkingDirectory,
+    string? SessionId,
     string CliPath,
     string? CliUrl,
     string? GitHubToken,

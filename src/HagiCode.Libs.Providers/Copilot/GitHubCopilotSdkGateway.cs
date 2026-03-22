@@ -22,15 +22,43 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
         try
         {
             client = new CopilotClient(clientOptions);
-            var session = await client.CreateSessionAsync(new SessionConfig
+            CopilotSession session;
+            CopilotSdkStreamEvent lifecycleEvent;
+            if (!string.IsNullOrWhiteSpace(request.SessionId))
             {
-                Model = request.Model,
-                WorkingDirectory = request.WorkingDirectory,
-                Streaming = true,
-                OnPermissionRequest = PermissionHandler.ApproveAll
-            }, startupCancellationTokenSource.Token);
+                try
+                {
+                    session = await client.ResumeSessionAsync(
+                        request.SessionId,
+                        BuildResumeSessionConfig(request),
+                        startupCancellationTokenSource.Token);
+                    lifecycleEvent = new CopilotSdkStreamEvent(
+                        CopilotSdkStreamEventType.SessionResumed,
+                        SessionId: session.SessionId,
+                        RequestedSessionId: request.SessionId);
+                }
+                catch (InvalidOperationException)
+                {
+                    session = await client.CreateSessionAsync(
+                        BuildSessionConfig(request),
+                        startupCancellationTokenSource.Token);
+                    lifecycleEvent = new CopilotSdkStreamEvent(
+                        CopilotSdkStreamEventType.SessionStarted,
+                        SessionId: session.SessionId,
+                        RequestedSessionId: request.SessionId);
+                }
+            }
+            else
+            {
+                session = await client.CreateSessionAsync(
+                    BuildSessionConfig(request),
+                    startupCancellationTokenSource.Token);
+                lifecycleEvent = new CopilotSdkStreamEvent(
+                    CopilotSdkStreamEventType.SessionStarted,
+                    SessionId: session.SessionId);
+            }
 
-            return new PooledCopilotSdkRuntime(client, session, environmentScope);
+            return new PooledCopilotSdkRuntime(client, session, environmentScope, lifecycleEvent);
         }
         catch
         {
@@ -76,15 +104,32 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
 
     internal static SessionEventDispatchResult DispatchSessionEvent(SessionEvent evt, bool sawDelta)
     {
-        var channel = Channel.CreateUnbounded<CopilotSdkStreamEvent>();
         var events = new List<CopilotSdkStreamEvent>();
+        string? sessionId = evt switch
+        {
+            SessionStartEvent sessionStartEvent => sessionStartEvent.Data?.SessionId,
+            _ => null
+        };
 
         switch (evt)
         {
+            case SessionStartEvent sessionStartEvent:
+                events.Add(new CopilotSdkStreamEvent(
+                    CopilotSdkStreamEventType.SessionStarted,
+                    SessionId: FirstNonEmpty(sessionStartEvent.Data?.SessionId, sessionId)));
+                break;
+
+            case SessionResumeEvent:
+                events.Add(new CopilotSdkStreamEvent(
+                    CopilotSdkStreamEventType.SessionResumed,
+                    SessionId: sessionId));
+                break;
+
             case AssistantMessageDeltaEvent deltaEvent when !string.IsNullOrWhiteSpace(deltaEvent.Data.DeltaContent):
                 sawDelta = true;
                 events.Add(new CopilotSdkStreamEvent(
                     CopilotSdkStreamEventType.TextDelta,
+                    SessionId: sessionId,
                     Content: deltaEvent.Data.DeltaContent));
                 break;
 
@@ -94,6 +139,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
             case AssistantMessageEvent messageEvent when !sawDelta && !string.IsNullOrWhiteSpace(messageEvent.Data.Content):
                 events.Add(new CopilotSdkStreamEvent(
                     CopilotSdkStreamEventType.TextDelta,
+                    SessionId: sessionId,
                     Content: messageEvent.Data.Content));
                 break;
 
@@ -103,12 +149,14 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
             case AssistantReasoningEvent reasoningEvent when !string.IsNullOrWhiteSpace(reasoningEvent.Data.Content):
                 events.Add(new CopilotSdkStreamEvent(
                     CopilotSdkStreamEventType.ReasoningDelta,
+                    SessionId: sessionId,
                     Content: reasoningEvent.Data.Content));
                 break;
 
             case ToolExecutionStartEvent toolStartEvent:
                 events.Add(new CopilotSdkStreamEvent(
                     CopilotSdkStreamEventType.ToolExecutionStart,
+                    SessionId: sessionId,
                     ToolName: FirstNonEmpty(toolStartEvent.Data.ToolName, toolStartEvent.Data.McpToolName),
                     ToolCallId: toolStartEvent.Data.ToolCallId));
                 break;
@@ -116,6 +164,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
             case ToolExecutionCompleteEvent toolCompleteEvent:
                 events.Add(new CopilotSdkStreamEvent(
                     CopilotSdkStreamEventType.ToolExecutionEnd,
+                    SessionId: sessionId,
                     Content: ExtractToolExecutionContent(toolCompleteEvent),
                     ToolCallId: toolCompleteEvent.Data.ToolCallId));
                 break;
@@ -123,12 +172,14 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
             case SessionErrorEvent errorEvent:
                 events.Add(new CopilotSdkStreamEvent(
                     CopilotSdkStreamEventType.Error,
+                    SessionId: sessionId,
                     ErrorMessage: NormalizeFailureMessage(errorEvent.Data.Message)));
                 break;
 
             default:
                 events.Add(new CopilotSdkStreamEvent(
                     CopilotSdkStreamEventType.RawEvent,
+                    SessionId: sessionId,
                     Content: SerializeForDiagnostics(evt),
                     RawEventType: evt.GetType().Name));
                 break;
@@ -150,6 +201,29 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
             UseLoggedInUser = request.UseLoggedInUser,
             GitHubToken = request.GitHubToken,
             CliArgs = [.. request.CliArgs]
+        };
+    }
+
+    private static SessionConfig BuildSessionConfig(CopilotSdkRequest request)
+    {
+        return new SessionConfig
+        {
+            SessionId = request.SessionId,
+            Model = request.Model,
+            WorkingDirectory = request.WorkingDirectory,
+            Streaming = true,
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        };
+    }
+
+    private static ResumeSessionConfig BuildResumeSessionConfig(CopilotSdkRequest request)
+    {
+        return new ResumeSessionConfig
+        {
+            Model = request.Model,
+            WorkingDirectory = request.WorkingDirectory,
+            Streaming = true,
+            OnPermissionRequest = PermissionHandler.ApproveAll
         };
     }
 
@@ -244,8 +318,13 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
     private sealed class PooledCopilotSdkRuntime(
         CopilotClient client,
         CopilotSession session,
-        CopilotSdkEnvironmentScope environmentScope) : ICopilotSdkRuntime
+        CopilotSdkEnvironmentScope environmentScope,
+        CopilotSdkStreamEvent lifecycleEvent) : ICopilotSdkRuntime
     {
+        private bool _lifecycleEventSent;
+
+        public string SessionId => session.SessionId;
+
         public async IAsyncEnumerable<CopilotSdkStreamEvent> SendPromptAsync(
             CopilotSdkRequest request,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -254,6 +333,12 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
             {
                 var terminalEventWritten = false;
                 var sawDelta = false;
+                if (!_lifecycleEventSent)
+                {
+                    _lifecycleEventSent = true;
+                    writer.TryWrite(lifecycleEvent);
+                }
+
                 using var subscription = session.On(evt =>
                 {
                     var dispatchResult = DispatchSessionEvent(evt, sawDelta);
@@ -261,12 +346,20 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
 
                     foreach (var mappedEvent in dispatchResult.Events)
                     {
-                        if (mappedEvent.Type == CopilotSdkStreamEventType.Error)
+                        var normalizedEvent = mappedEvent.SessionId is null || mappedEvent.RequestedSessionId is null
+                            ? mappedEvent with
+                            {
+                                SessionId = mappedEvent.SessionId ?? SessionId,
+                                RequestedSessionId = mappedEvent.RequestedSessionId ?? request.SessionId
+                            }
+                            : mappedEvent;
+
+                        if (normalizedEvent.Type == CopilotSdkStreamEventType.Error)
                         {
                             terminalEventWritten = true;
                         }
 
-                        writer.TryWrite(mappedEvent);
+                        writer.TryWrite(normalizedEvent);
                     }
                 });
 
@@ -284,6 +377,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
                         terminalEventWritten = true;
                         writer.TryWrite(new CopilotSdkStreamEvent(
                             CopilotSdkStreamEventType.Error,
+                            SessionId: SessionId,
                             ErrorMessage: NormalizeFailureMessage(ex.Message)));
                     }
                 }
@@ -291,7 +385,9 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
                 {
                     if (!terminalEventWritten)
                     {
-                        writer.TryWrite(new CopilotSdkStreamEvent(CopilotSdkStreamEventType.Completed));
+                        writer.TryWrite(new CopilotSdkStreamEvent(
+                            CopilotSdkStreamEventType.Completed,
+                            SessionId: SessionId));
                     }
                 }
             }, cancellationToken))

@@ -58,7 +58,7 @@ public static class CopilotCliCompatibility
     {
         ["--headless"] = "the installed Copilot CLI does not advertise this startup flag in 'copilot --help'",
         ["--acp"] = "ACP and server bootstrap are managed by the SDK gateway",
-        ["--continue"] = "session resume is managed by the HagiCode provider instead of raw CLI flags",
+        ["--continue"] = "session resume is managed by CopilotOptions.SessionId instead of raw CLI flags",
         ["--help"] = "help output is not a valid runtime startup argument",
         ["-h"] = "help output is not a valid runtime startup argument",
         ["--interactive"] = "interactive prompting is managed by the provider request model",
@@ -66,7 +66,7 @@ public static class CopilotCliCompatibility
         ["--model"] = "model selection is forwarded through SDK-native request fields",
         ["--prompt"] = "prompt content is forwarded through SDK-native request fields",
         ["-p"] = "prompt content is forwarded through SDK-native request fields",
-        ["--resume"] = "session resume is not part of the current libs Copilot contract",
+        ["--resume"] = "session resume is managed by CopilotOptions.SessionId instead of raw CLI flags",
         ["--share"] = "session export is not part of the provider startup contract",
         ["--share-gist"] = "session export is not part of the provider startup contract",
         ["--silent"] = "output shaping is handled by the provider response pipeline",

@@ -33,6 +33,16 @@ public sealed record CopilotOptions
     public string? WorkingDirectory { get; init; }
 
     /// <summary>
+    /// Gets or sets the provider-native Copilot session identifier to resume or pin.
+    /// </summary>
+    public string? SessionId { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether provider-native session reuse was requested.
+    /// </summary>
+    public bool ReuseSession => !string.IsNullOrWhiteSpace(SessionId);
+
+    /// <summary>
     /// Gets or sets the request timeout used for one Copilot prompt.
     /// </summary>
     public TimeSpan Timeout { get; init; } = DefaultTimeout;

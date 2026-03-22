@@ -133,6 +133,18 @@ public class CopilotProvider : ICliProvider<CopilotOptions>
         await lease.Entry.ExecutionLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            if (lease.IsWarmLease)
+            {
+                var reusedMessage = MapEvent(new CopilotSdkStreamEvent(
+                    CopilotSdkStreamEventType.SessionReused,
+                    SessionId: lease.Entry.Resource.SessionId,
+                    RequestedSessionId: sdkRequest.SessionId));
+                if (reusedMessage is not null)
+                {
+                    yield return reusedMessage;
+                }
+            }
+
             await foreach (var eventData in lease.Entry.Resource.SendPromptAsync(sdkRequest, cancellationToken).ConfigureAwait(false))
             {
                 var mappedMessage = MapEvent(eventData);
@@ -230,6 +242,7 @@ public class CopilotProvider : ICliProvider<CopilotOptions>
             Prompt: prompt,
             Model: options.Model,
             WorkingDirectory: options.WorkingDirectory,
+            SessionId: ArgumentValueNormalizer.NormalizeOptionalValue(options.SessionId),
             CliPath: executablePath,
             CliUrl: options.CliUrl,
             GitHubToken: options.AuthSource == CopilotAuthSource.GitHubToken ? options.GitHubToken : null,
@@ -334,55 +347,87 @@ public class CopilotProvider : ICliProvider<CopilotOptions>
 
     private static CliMessage? MapEvent(CopilotSdkStreamEvent eventData)
     {
+        var sessionId = eventData.SessionId;
+        var requestedSessionId = eventData.RequestedSessionId;
+
         return eventData.Type switch
         {
-            CopilotSdkStreamEventType.TextDelta when !string.IsNullOrWhiteSpace(eventData.Content) =>
-                CreateMessage("assistant", new
+            CopilotSdkStreamEventType.SessionStarted =>
+                CreateMessage("session.started", new Dictionary<string, object?>
                 {
-                    type = "assistant",
-                    role = "assistant",
-                    text = eventData.Content
+                    ["type"] = "session.started",
+                    ["session_id"] = sessionId,
+                    ["requested_session_id"] = requestedSessionId
+                }),
+            CopilotSdkStreamEventType.SessionResumed =>
+                CreateMessage("session.resumed", new Dictionary<string, object?>
+                {
+                    ["type"] = "session.resumed",
+                    ["session_id"] = sessionId,
+                    ["requested_session_id"] = requestedSessionId
+                }),
+            CopilotSdkStreamEventType.SessionReused =>
+                CreateMessage("session.reused", new Dictionary<string, object?>
+                {
+                    ["type"] = "session.reused",
+                    ["session_id"] = sessionId,
+                    ["requested_session_id"] = requestedSessionId,
+                    ["reuse_key"] = requestedSessionId ?? sessionId
+                }),
+            CopilotSdkStreamEventType.TextDelta when !string.IsNullOrWhiteSpace(eventData.Content) =>
+                CreateMessage("assistant", new Dictionary<string, object?>
+                {
+                    ["type"] = "assistant",
+                    ["role"] = "assistant",
+                    ["session_id"] = sessionId,
+                    ["text"] = eventData.Content
                 }),
             CopilotSdkStreamEventType.ReasoningDelta when !string.IsNullOrWhiteSpace(eventData.Content) =>
-                CreateMessage("reasoning", new
+                CreateMessage("reasoning", new Dictionary<string, object?>
                 {
-                    type = "reasoning",
-                    text = eventData.Content
+                    ["type"] = "reasoning",
+                    ["session_id"] = sessionId,
+                    ["text"] = eventData.Content
                 }),
             CopilotSdkStreamEventType.ToolExecutionStart =>
-                CreateMessage("tool.started", new
+                CreateMessage("tool.started", new Dictionary<string, object?>
                 {
-                    type = "tool.started",
-                    tool_name = eventData.ToolName,
-                    tool_call_id = eventData.ToolCallId
+                    ["type"] = "tool.started",
+                    ["session_id"] = sessionId,
+                    ["tool_name"] = eventData.ToolName,
+                    ["tool_call_id"] = eventData.ToolCallId
                 }),
             CopilotSdkStreamEventType.ToolExecutionEnd =>
-                CreateMessage("tool.completed", new
+                CreateMessage("tool.completed", new Dictionary<string, object?>
                 {
-                    type = "tool.completed",
-                    tool_name = eventData.ToolName,
-                    tool_call_id = eventData.ToolCallId,
-                    text = eventData.Content,
-                    failed = LooksLikeToolFailure(eventData.Content)
+                    ["type"] = "tool.completed",
+                    ["session_id"] = sessionId,
+                    ["tool_name"] = eventData.ToolName,
+                    ["tool_call_id"] = eventData.ToolCallId,
+                    ["text"] = eventData.Content,
+                    ["failed"] = LooksLikeToolFailure(eventData.Content)
                 }),
             CopilotSdkStreamEventType.Error =>
-                CreateMessage("error", new
+                CreateMessage("error", new Dictionary<string, object?>
                 {
-                    type = "error",
-                    message = eventData.ErrorMessage ?? "GitHub Copilot stream failed."
+                    ["type"] = "error",
+                    ["session_id"] = sessionId,
+                    ["message"] = eventData.ErrorMessage ?? "GitHub Copilot stream failed."
                 }),
             CopilotSdkStreamEventType.Completed =>
-                CreateMessage("result", new
+                CreateMessage("result", new Dictionary<string, object?>
                 {
-                    type = "result",
-                    status = "completed"
+                    ["type"] = "result",
+                    ["session_id"] = sessionId,
+                    ["status"] = "completed"
                 }),
             CopilotSdkStreamEventType.RawEvent =>
-                CreateMessage("event.raw", new
+                CreateMessage("event.raw", new Dictionary<string, object?>
                 {
-                    type = "event.raw",
-                    raw_event_type = eventData.RawEventType,
-                    text = eventData.Content
+                    ["type"] = "event.raw",
+                    ["session_id"] = sessionId,
+                    ["raw_event_type"] = eventData.RawEventType,
+                    ["text"] = eventData.Content
                 }),
             _ => null
         };
@@ -412,7 +457,14 @@ public class CopilotProvider : ICliProvider<CopilotOptions>
 
     private static string? ResolveLogicalSessionKey(CopilotOptions options)
     {
-        return ArgumentValueNormalizer.NormalizeOptionalValue(options.WorkingDirectory);
+        var sessionId = ArgumentValueNormalizer.NormalizeOptionalValue(options.SessionId);
+        if (sessionId is not null)
+        {
+            return $"copilot-session:{sessionId}";
+        }
+
+        var workingDirectory = ArgumentValueNormalizer.NormalizeOptionalValue(options.WorkingDirectory);
+        return workingDirectory is null ? null : $"copilot-workdir:{workingDirectory}";
     }
 
     private static CliMessage CreateDiagnosticMessage(string message)
