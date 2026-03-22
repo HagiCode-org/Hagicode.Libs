@@ -215,7 +215,7 @@ Built-in providers now participate in a shared pooling architecture:
 - ACP providers (`CodeBuddy`, `Hermes`, `Kimi`, `Kiro`, `QoderCLI`) lease warm ACP sessions from the shared `CliProviderPoolCoordinator`.
 - `Claude Code` reuses warm stdio transports when the effective session key and compatibility fingerprint match.
 - `Codex` keeps thread-resume state in the shared pool so follow-up requests can reuse the last known thread id for the same workspace.
-- `Copilot` reuses SDK-backed runtimes per compatible working directory/configuration pair.
+- `Copilot` reuses SDK-backed runtimes per explicit `SessionId` when provided, otherwise per compatible working directory/configuration pair.
 
 Every provider option record exposes `PoolSettings` so callers can disable pooling or tune provider-level behavior:
 
@@ -240,6 +240,7 @@ Operational notes:
 - Each pooled entry executes one prompt at a time through an execution lock.
 - Idle entries are evicted lazily on acquire/return or explicit reaper calls once `IdleTimeout` elapses.
 - Faulted transports, broken ACP sessions, and failed Copilot runtimes are removed immediately instead of being returned to the pool.
+- `CliAcpSessionPool.GetDiagnosticsSnapshot()` now reports global plus provider-scoped hit/miss/evict/fault counters, along with the latest eviction/fault reason; the pool also emits structured logs and `System.Diagnostics.Metrics` counters for monitoring hooks.
 
 CodeBuddy execution options cover the ACP-specific runtime settings without forcing raw command lines:
 
@@ -267,6 +268,7 @@ var options = new CopilotOptions
 {
     Model = "claude-sonnet-4.5",
     WorkingDirectory = "/path/to/repo",
+    SessionId = "copilot-session-123",
     Permissions = new CopilotPermissionOptions
     {
         AllowAllTools = true,
@@ -280,6 +282,8 @@ await foreach (var message in copilot.ExecuteAsync(options, "Reply with exactly 
     Console.WriteLine($"{message.Type}: {message.Content}");
 }
 ```
+
+Set `SessionId` when you want provider-native Copilot resume semantics. The provider first attempts SDK resume for that id, falls back to creating a new session pinned to the requested id when nothing persisted yet, and emits `session.started`, `session.resumed`, or `session.reused` messages accordingly.
 
 Codex execution options cover the common CLI settings without forcing raw command lines:
 
