@@ -178,6 +178,52 @@ public sealed class KiroProviderTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_reuses_pooled_session_without_reconnecting_when_pooling_is_enabled()
+    {
+        var provider = CreateProvider(sessionClient: new FakeAcpSessionClient());
+
+        await foreach (var _ in provider.ExecuteAsync(new KiroOptions { SessionId = "session-key" }, "first"))
+        {
+        }
+
+        await foreach (var _ in provider.ExecuteAsync(new KiroOptions { SessionId = "session-key" }, "second"))
+        {
+        }
+
+        provider.SessionClient!.ConnectCalls.ShouldBe(1);
+        provider.SessionClient.StartSessionCalls.ShouldBe(2);
+        provider.SessionClient.PromptCalls.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_uses_one_shot_path_when_pooling_is_disabled()
+    {
+        var provider = CreateProvider(sessionClient: new FakeAcpSessionClient());
+
+        await foreach (var _ in provider.ExecuteAsync(
+                           new KiroOptions
+                           {
+                               SessionId = "session-key",
+                               PoolSettings = new HagiCode.Libs.Core.Acp.CliPoolSettings { Enabled = false }
+                           },
+                           "first"))
+        {
+        }
+
+        await foreach (var _ in provider.ExecuteAsync(
+                           new KiroOptions
+                           {
+                               SessionId = "session-key",
+                               PoolSettings = new HagiCode.Libs.Core.Acp.CliPoolSettings { Enabled = false }
+                           },
+                           "second"))
+        {
+        }
+
+        provider.SessionClient!.ConnectCalls.ShouldBe(2);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_resumed_session_filters_non_streamed_replay_chunks_before_emitting_current_turn()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(

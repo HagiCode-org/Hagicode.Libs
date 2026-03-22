@@ -131,6 +131,61 @@ public sealed class CopilotProviderTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_reuses_warm_copilot_runtime_for_same_working_directory()
+    {
+        var gateway = new StubCopilotSdkGateway(
+        [
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.TextDelta, Content: "pong"),
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.Completed)
+        ]);
+        var provider = CreateProvider(gateway: gateway);
+
+        await foreach (var _ in provider.ExecuteAsync(new CopilotOptions { WorkingDirectory = "/tmp/project" }, "first"))
+        {
+        }
+
+        await foreach (var _ in provider.ExecuteAsync(new CopilotOptions { WorkingDirectory = "/tmp/project" }, "second"))
+        {
+        }
+
+        gateway.CreatedRuntimeCount.ShouldBe(1);
+        gateway.SendPromptCallCount.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_uses_one_shot_copilot_path_when_pooling_is_disabled()
+    {
+        var gateway = new StubCopilotSdkGateway(
+        [
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.TextDelta, Content: "pong"),
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.Completed)
+        ]);
+        var provider = CreateProvider(gateway: gateway);
+
+        await foreach (var _ in provider.ExecuteAsync(
+                           new CopilotOptions
+                           {
+                               WorkingDirectory = "/tmp/project",
+                               PoolSettings = new HagiCode.Libs.Core.Acp.CliPoolSettings { Enabled = false }
+                           },
+                           "first"))
+        {
+        }
+
+        await foreach (var _ in provider.ExecuteAsync(
+                           new CopilotOptions
+                           {
+                               WorkingDirectory = "/tmp/project",
+                               PoolSettings = new HagiCode.Libs.Core.Acp.CliPoolSettings { Enabled = false }
+                           },
+                           "second"))
+        {
+        }
+
+        gateway.CreatedRuntimeCount.ShouldBe(2);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_emits_error_terminal_message_when_gateway_fails()
     {
         var provider = CreateProvider(gateway: new StubCopilotSdkGateway(
@@ -231,15 +286,44 @@ public sealed class CopilotProviderTests
 
     private sealed class StubCopilotSdkGateway(IReadOnlyList<CopilotSdkStreamEvent> events) : ICopilotSdkGateway
     {
+        public int CreatedRuntimeCount { get; private set; }
+
+        public int SendPromptCallCount { get; private set; }
+
+        public Task<ICopilotSdkRuntime> CreateRuntimeAsync(
+            CopilotSdkRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            CreatedRuntimeCount++;
+            return Task.FromResult<ICopilotSdkRuntime>(new StubCopilotSdkRuntime(events, this));
+        }
+
         public async IAsyncEnumerable<CopilotSdkStreamEvent> SendPromptAsync(
             CopilotSdkRequest request,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            foreach (var eventData in events)
+            await using var runtime = await CreateRuntimeAsync(request, cancellationToken);
+            await foreach (var eventData in runtime.SendPromptAsync(request, cancellationToken))
             {
                 yield return eventData;
-                await Task.Yield();
             }
+        }
+
+        private sealed class StubCopilotSdkRuntime(IReadOnlyList<CopilotSdkStreamEvent> events, StubCopilotSdkGateway owner) : ICopilotSdkRuntime
+        {
+            public async IAsyncEnumerable<CopilotSdkStreamEvent> SendPromptAsync(
+                CopilotSdkRequest request,
+                [EnumeratorCancellation] CancellationToken cancellationToken = default)
+            {
+                owner.SendPromptCallCount++;
+                foreach (var eventData in events)
+                {
+                    yield return eventData;
+                    await Task.Yield();
+                }
+            }
+
+            public ValueTask DisposeAsync() => ValueTask.CompletedTask;
         }
     }
 

@@ -100,7 +100,7 @@ public sealed class HermesProviderTests
         }
 
         provider.CreatedSessionClients.Count.ShouldBe(1);
-        provider.CreatedSessionClients[0].StartSessionCalls.ShouldBe(1);
+        provider.CreatedSessionClients[0].StartSessionCalls.ShouldBe(2);
         provider.CreatedSessionClients[0].PromptCalls.ShouldBe(2);
         secondMessages.First().Type.ShouldBe("session.reused");
         var reusedText = secondMessages[1].Content.GetProperty("text").GetString();

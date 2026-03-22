@@ -1,4 +1,5 @@
 using Shouldly;
+using HagiCode.Libs.Core.Acp;
 using HagiCode.Libs.Core.Execution;
 using HagiCode.Libs.Providers;
 using HagiCode.Libs.Providers.ClaudeCode;
@@ -8,6 +9,7 @@ using HagiCode.Libs.Providers.Codex;
 using HagiCode.Libs.Providers.Hermes;
 using HagiCode.Libs.Providers.Kimi;
 using HagiCode.Libs.Providers.Kiro;
+using HagiCode.Libs.Providers.Pooling;
 using HagiCode.Libs.Providers.QoderCli;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -24,6 +26,9 @@ public sealed class DependencyInjectionTests
         await using var serviceProvider = services.BuildServiceProvider();
         var registry = serviceProvider.GetRequiredService<ProviderRegistry>();
         var executionFacade = serviceProvider.GetRequiredService<ICliExecutionFacade>();
+        var acpPool = serviceProvider.GetRequiredService<ICliAcpSessionPool>();
+        var poolCoordinator = serviceProvider.GetRequiredService<CliProviderPoolCoordinator>();
+        var poolConfiguration = serviceProvider.GetRequiredService<CliProviderPoolConfigurationRegistry>();
         var claudeProvider = serviceProvider.GetRequiredService<ICliProvider<ClaudeCodeOptions>>();
         var codebuddyProvider = serviceProvider.GetRequiredService<ICliProvider<CodebuddyOptions>>();
         var copilotProvider = serviceProvider.GetRequiredService<ICliProvider<CopilotOptions>>();
@@ -35,6 +40,9 @@ public sealed class DependencyInjectionTests
         var allProviders = serviceProvider.GetServices<ICliProvider>().ToArray();
 
         executionFacade.ShouldNotBeNull();
+        acpPool.ShouldNotBeNull();
+        poolCoordinator.ShouldNotBeNull();
+        poolConfiguration.GetSettings("hermes").Enabled.ShouldBeTrue();
         registry.GetProvider("claude-code").ShouldNotBeNull();
         registry.GetProvider("codebuddy").ShouldNotBeNull();
         registry.GetProvider("copilot").ShouldNotBeNull();

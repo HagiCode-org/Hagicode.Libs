@@ -133,6 +133,71 @@ public sealed class CodexProviderTests
         provider.SentMessages[0].Content.GetProperty("input").GetString().ShouldBe("hello");
     }
 
+    [Fact]
+    public async Task ExecuteAsync_reuses_pooled_thread_id_for_follow_up_requests()
+    {
+        var provider = CreateProvider(messageBatches:
+        [
+            [
+                new CliMessage("thread.started", JsonSerializer.SerializeToElement(new { type = "thread.started", thread_id = "thread-xyz" })),
+                new CliMessage("turn.completed", JsonSerializer.SerializeToElement(new { type = "turn.completed" }))
+            ],
+            [
+                new CliMessage("turn.completed", JsonSerializer.SerializeToElement(new { type = "turn.completed" }))
+            ]
+        ]);
+
+        await foreach (var _ in provider.ExecuteAsync(new CodexOptions { WorkingDirectory = "/tmp/project" }, "first"))
+        {
+        }
+
+        await foreach (var _ in provider.ExecuteAsync(new CodexOptions { WorkingDirectory = "/tmp/project" }, "second"))
+        {
+        }
+
+        provider.StartContexts.Count.ShouldBe(2);
+        provider.StartContexts[1].Arguments.ShouldContain("resume");
+        provider.StartContexts[1].Arguments.ShouldContain("thread-xyz");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_uses_one_shot_codex_path_when_pooling_is_disabled()
+    {
+        var provider = CreateProvider(messageBatches:
+        [
+            [
+                new CliMessage("thread.started", JsonSerializer.SerializeToElement(new { type = "thread.started", thread_id = "thread-xyz" })),
+                new CliMessage("turn.completed", JsonSerializer.SerializeToElement(new { type = "turn.completed" }))
+            ],
+            [
+                new CliMessage("turn.completed", JsonSerializer.SerializeToElement(new { type = "turn.completed" }))
+            ]
+        ]);
+
+        await foreach (var _ in provider.ExecuteAsync(
+                           new CodexOptions
+                           {
+                               WorkingDirectory = "/tmp/project",
+                               PoolSettings = new HagiCode.Libs.Core.Acp.CliPoolSettings { Enabled = false }
+                           },
+                           "first"))
+        {
+        }
+
+        await foreach (var _ in provider.ExecuteAsync(
+                           new CodexOptions
+                           {
+                               WorkingDirectory = "/tmp/project",
+                               PoolSettings = new HagiCode.Libs.Core.Acp.CliPoolSettings { Enabled = false }
+                           },
+                           "second"))
+        {
+        }
+
+        provider.StartContexts.Count.ShouldBe(2);
+        provider.StartContexts[1].Arguments.ShouldNotContain("resume");
+    }
+
     [Theory]
     [InlineData("npm")]
     [InlineData("npx")]
@@ -253,33 +318,67 @@ public sealed class CodexProviderTests
         CliExecutableResolver? executableResolver = null,
         CliProcessManager? processManager = null,
         ICliExecutionFacade? executionFacade = null,
-        IRuntimeEnvironmentResolver? runtimeEnvironmentResolver = null)
+        IRuntimeEnvironmentResolver? runtimeEnvironmentResolver = null,
+        IReadOnlyList<IReadOnlyList<CliMessage>>? messageBatches = null)
     {
         return new TestCodexProvider(
             executableResolver ?? new StubExecutableResolver(),
             processManager ?? new StubCliProcessManager(),
             runtimeEnvironmentResolver ?? new StubRuntimeEnvironmentResolver(),
-            executionFacade);
+            executionFacade,
+            messageBatches);
     }
 
     private sealed class TestCodexProvider(
         CliExecutableResolver executableResolver,
         CliProcessManager processManager,
         IRuntimeEnvironmentResolver runtimeEnvironmentResolver,
-        ICliExecutionFacade? executionFacade)
+        ICliExecutionFacade? executionFacade,
+        IReadOnlyList<IReadOnlyList<CliMessage>>? messageBatches)
         : CodexProvider(executableResolver, processManager, runtimeEnvironmentResolver, executionFacade)
     {
         public ProcessStartContext? LastStartContext { get; private set; }
+        public List<ProcessStartContext> StartContexts { get; } = [];
         public List<CliMessage> SentMessages { get; } = [];
+        private readonly Queue<IReadOnlyList<CliMessage>> _messageBatches = new(messageBatches ?? [DefaultBatch]);
+
+        private static IReadOnlyList<CliMessage> DefaultBatch =>
+        [
+            new CliMessage(
+                "item.completed",
+                JsonSerializer.SerializeToElement(new
+                {
+                    type = "item.completed",
+                    item = new
+                    {
+                        type = "agent_message",
+                        text = "pong"
+                    }
+                })),
+            new CliMessage(
+                "turn.completed",
+                JsonSerializer.SerializeToElement(new
+                {
+                    type = "turn.completed",
+                    usage = new
+                    {
+                        input_tokens = 1,
+                        cached_input_tokens = 0,
+                        output_tokens = 1
+                    }
+                }))
+        ];
 
         protected override ICliTransport CreateTransport(ProcessStartContext startContext)
         {
             LastStartContext = startContext;
-            return new StubTransport(SentMessages);
+            StartContexts.Add(startContext);
+            var batch = _messageBatches.Count > 0 ? _messageBatches.Dequeue() : DefaultBatch;
+            return new StubTransport(SentMessages, batch);
         }
     }
 
-    private sealed class StubTransport(List<CliMessage> sentMessages) : ICliTransport
+    private sealed class StubTransport(List<CliMessage> sentMessages, IReadOnlyList<CliMessage> messages) : ICliTransport
     {
         public bool IsConnected { get; private set; }
 
@@ -301,30 +400,11 @@ public sealed class CodexProviderTests
 
         public async IAsyncEnumerable<CliMessage> ReceiveAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            yield return new CliMessage(
-                "item.completed",
-                JsonSerializer.SerializeToElement(new
-                {
-                    type = "item.completed",
-                    item = new
-                    {
-                        type = "agent_message",
-                        text = "pong"
-                    }
-                }));
-            await Task.Yield();
-            yield return new CliMessage(
-                "turn.completed",
-                JsonSerializer.SerializeToElement(new
-                {
-                    type = "turn.completed",
-                    usage = new
-                    {
-                        input_tokens = 1,
-                        cached_input_tokens = 0,
-                        output_tokens = 1
-                    }
-                }));
+            foreach (var message in messages)
+            {
+                yield return message;
+                await Task.Yield();
+            }
         }
 
         public Task SendAsync(CliMessage message, CancellationToken cancellationToken = default)

@@ -104,6 +104,65 @@ public sealed class ClaudeCodeProviderTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_reuses_warm_transport_for_same_session_key_when_pooling_is_enabled()
+    {
+        var provider = CreateProvider();
+
+        await foreach (var _ in provider.ExecuteAsync(
+                           new ClaudeCodeOptions
+                           {
+                               SessionId = "session-1",
+                               WorkingDirectory = "/tmp/project"
+                           },
+                           "hello"))
+        {
+        }
+
+        await foreach (var _ in provider.ExecuteAsync(
+                           new ClaudeCodeOptions
+                           {
+                               SessionId = "session-1",
+                               WorkingDirectory = "/tmp/project"
+                           },
+                           "follow up"))
+        {
+        }
+
+        provider.CreatedTransportCount.ShouldBe(1);
+        provider.SentMessages.Count.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_uses_one_shot_transport_when_pooling_is_disabled()
+    {
+        var provider = CreateProvider();
+
+        await foreach (var _ in provider.ExecuteAsync(
+                           new ClaudeCodeOptions
+                           {
+                               SessionId = "session-1",
+                               WorkingDirectory = "/tmp/project",
+                               PoolSettings = new HagiCode.Libs.Core.Acp.CliPoolSettings { Enabled = false }
+                           },
+                           "hello"))
+        {
+        }
+
+        await foreach (var _ in provider.ExecuteAsync(
+                           new ClaudeCodeOptions
+                           {
+                               SessionId = "session-1",
+                               WorkingDirectory = "/tmp/project",
+                               PoolSettings = new HagiCode.Libs.Core.Acp.CliPoolSettings { Enabled = false }
+                           },
+                           "follow up"))
+        {
+        }
+
+        provider.CreatedTransportCount.ShouldBe(2);
+    }
+
+    [Fact]
     public async Task PingAsync_reports_version_when_process_succeeds()
     {
         var processManager = new StubCliProcessManager
@@ -180,10 +239,12 @@ public sealed class ClaudeCodeProviderTests
     {
         public ProcessStartContext? LastStartContext { get; private set; }
         public List<CliMessage> SentMessages { get; } = [];
+        public int CreatedTransportCount { get; private set; }
 
         protected override ICliTransport CreateTransport(ProcessStartContext startContext)
         {
             LastStartContext = startContext;
+            CreatedTransportCount++;
             return new StubTransport(SentMessages);
         }
     }

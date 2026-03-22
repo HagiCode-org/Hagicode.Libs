@@ -96,6 +96,67 @@ public sealed class CodebuddyProviderTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_reuses_pooled_session_without_reconnecting_when_pooling_is_enabled()
+    {
+        var provider = CreateProvider(sessionClient: new FakeAcpSessionClient());
+        var firstMessages = new List<CliMessage>();
+
+        await foreach (var message in provider.ExecuteAsync(
+                           new CodebuddyOptions { SessionId = "session-key" },
+                           "first"))
+        {
+            firstMessages.Add(message);
+        }
+
+        var secondMessages = new List<CliMessage>();
+        await foreach (var message in provider.ExecuteAsync(
+                           new CodebuddyOptions { SessionId = "session-key" },
+                           "second"))
+        {
+            secondMessages.Add(message);
+        }
+
+        provider.SessionClient!.ConnectCalls.ShouldBe(1);
+        provider.SessionClient.StartSessionCalls.ShouldBe(2);
+        provider.SessionClient.PromptCalls.ShouldBe(2);
+        secondMessages.First().Type.ShouldBe("session.resumed");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_uses_one_shot_path_when_pooling_is_disabled()
+    {
+        var provider = CreateProvider(sessionClient: new FakeAcpSessionClient());
+
+        await foreach (var _ in provider.ExecuteAsync(
+                           new CodebuddyOptions
+                           {
+                               SessionId = "session-key",
+                               PoolSettings = new HagiCode.Libs.Core.Acp.CliPoolSettings
+                               {
+                                   Enabled = false
+                               }
+                           },
+                           "first"))
+        {
+        }
+
+        await foreach (var _ in provider.ExecuteAsync(
+                           new CodebuddyOptions
+                           {
+                               SessionId = "session-key",
+                               PoolSettings = new HagiCode.Libs.Core.Acp.CliPoolSettings
+                               {
+                                   Enabled = false
+                               }
+                           },
+                           "second"))
+        {
+        }
+
+        provider.SessionClient!.ConnectCalls.ShouldBe(2);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_falls_back_to_prompt_result_when_notification_loop_ends_via_internal_cancellation()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(emitNotifications: false, promptStopReason: "fallback"));
@@ -263,6 +324,8 @@ public sealed class CodebuddyProviderTests
 
         public int StartSessionCalls { get; private set; }
 
+        public int PromptCalls { get; private set; }
+
         public string? LastWorkingDirectory { get; private set; }
 
         public string? LastSessionId { get; private set; }
@@ -312,6 +375,7 @@ public sealed class CodebuddyProviderTests
 
         public Task<JsonElement> SendPromptAsync(string sessionId, string prompt, CancellationToken cancellationToken = default)
         {
+            PromptCalls++;
             return Task.FromResult(JsonSerializer.SerializeToElement(new Dictionary<string, object?>
             {
                 ["stopReason"] = promptStopReason,
