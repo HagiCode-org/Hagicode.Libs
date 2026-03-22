@@ -3,6 +3,7 @@ using System.Text.Json;
 using Shouldly;
 using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Environment;
+using HagiCode.Libs.Core.Execution;
 using HagiCode.Libs.Core.Process;
 using HagiCode.Libs.Core.Transport;
 using HagiCode.Libs.Providers.Codex;
@@ -132,6 +133,37 @@ public sealed class CodexProviderTests
         provider.SentMessages[0].Content.GetProperty("input").GetString().ShouldBe("hello");
     }
 
+    [Theory]
+    [InlineData("npm")]
+    [InlineData("npx")]
+    public async Task ExecuteAsync_on_windows_resolves_npm_style_short_names_to_cmd(string executableName)
+    {
+        using var sandbox = new DirectorySandbox();
+        var resolvedExecutable = sandbox.CreateFile($"{executableName}.cmd");
+        var provider = CreateProvider(
+            executableResolver: new CliExecutableResolver(static () => true),
+            runtimeEnvironmentResolver: new StubRuntimeEnvironmentResolver(new Dictionary<string, string?>
+            {
+                ["PATH"] = sandbox.RootPath,
+                ["PATHEXT"] = ".EXE;.CMD;.BAT"
+            }));
+        var messages = new List<CliMessage>();
+
+        await foreach (var message in provider.ExecuteAsync(
+                           new CodexOptions
+                           {
+                               ExecutablePath = executableName
+                           },
+                           "hello"))
+        {
+            messages.Add(message);
+        }
+
+        provider.LastStartContext.ShouldNotBeNull();
+        provider.LastStartContext.ExecutablePath.ShouldBe(resolvedExecutable);
+        messages.Select(static message => message.Type).ShouldBe(["item.completed", "turn.completed"]);
+    }
+
     [Fact]
     public async Task PingAsync_reports_version_when_process_succeeds()
     {
@@ -145,6 +177,32 @@ public sealed class CodexProviderTests
 
         result.Success.ShouldBeTrue();
         result.Version.ShouldBe("codex 1.2.3");
+    }
+
+    [Fact]
+    public async Task PingAsync_prefers_injected_execution_facade()
+    {
+        var executionFacade = new StubExecutionFacade
+        {
+            Result = new CliExecutionResult
+            {
+                Status = CliExecutionStatus.Success,
+                ExitCode = 0,
+                CommandPreview = "codex --version",
+                StandardOutput = "codex 9.9.9",
+                StartedAtUtc = DateTimeOffset.UtcNow,
+                CompletedAtUtc = DateTimeOffset.UtcNow
+            }
+        };
+        var provider = CreateProvider(executionFacade: executionFacade);
+
+        var result = await provider.PingAsync();
+
+        executionFacade.Requests.ShouldHaveSingleItem();
+        executionFacade.Requests[0].ExecutablePath.ShouldBe("codex");
+        executionFacade.Requests[0].Arguments.ShouldBe(["--version"]);
+        result.Success.ShouldBeTrue();
+        result.Version.ShouldBe("codex 9.9.9");
     }
 
     [Fact]
@@ -193,19 +251,23 @@ public sealed class CodexProviderTests
 
     private static TestCodexProvider CreateProvider(
         CliExecutableResolver? executableResolver = null,
-        CliProcessManager? processManager = null)
+        CliProcessManager? processManager = null,
+        ICliExecutionFacade? executionFacade = null,
+        IRuntimeEnvironmentResolver? runtimeEnvironmentResolver = null)
     {
         return new TestCodexProvider(
             executableResolver ?? new StubExecutableResolver(),
             processManager ?? new StubCliProcessManager(),
-            new StubRuntimeEnvironmentResolver());
+            runtimeEnvironmentResolver ?? new StubRuntimeEnvironmentResolver(),
+            executionFacade);
     }
 
     private sealed class TestCodexProvider(
         CliExecutableResolver executableResolver,
         CliProcessManager processManager,
-        IRuntimeEnvironmentResolver runtimeEnvironmentResolver)
-        : CodexProvider(executableResolver, processManager, runtimeEnvironmentResolver)
+        IRuntimeEnvironmentResolver runtimeEnvironmentResolver,
+        ICliExecutionFacade? executionFacade)
+        : CodexProvider(executableResolver, processManager, runtimeEnvironmentResolver, executionFacade)
     {
         public ProcessStartContext? LastStartContext { get; private set; }
         public List<CliMessage> SentMessages { get; } = [];
@@ -292,12 +354,81 @@ public sealed class CodexProviderTests
 
     private sealed class StubRuntimeEnvironmentResolver : IRuntimeEnvironmentResolver
     {
-        public Task<IReadOnlyDictionary<string, string?>> ResolveAsync(CancellationToken cancellationToken = default)
+        private readonly IReadOnlyDictionary<string, string?> _environment;
+
+        public StubRuntimeEnvironmentResolver(IReadOnlyDictionary<string, string?>? environment = null)
         {
-            return Task.FromResult<IReadOnlyDictionary<string, string?>>(new Dictionary<string, string?>
+            _environment = environment ?? new Dictionary<string, string?>
             {
                 ["PATH"] = "/tmp/bin"
-            });
+            };
+        }
+
+        public Task<IReadOnlyDictionary<string, string?>> ResolveAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(_environment);
+        }
+    }
+
+    private sealed class DirectorySandbox : IDisposable
+    {
+        private readonly string _root = Path.Combine(Path.GetTempPath(), $"hagicode-libs-provider-{Guid.NewGuid():N}");
+
+        public DirectorySandbox()
+        {
+            Directory.CreateDirectory(_root);
+        }
+
+        public string RootPath => _root;
+
+        public string CreateFile(string relativePath)
+        {
+            var fullPath = Path.Combine(_root, relativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+            File.WriteAllText(fullPath, string.Empty);
+            return fullPath;
+        }
+
+        public void Dispose()
+        {
+            if (Directory.Exists(_root))
+            {
+                Directory.Delete(_root, true);
+            }
+        }
+    }
+
+    private sealed class StubExecutionFacade : ICliExecutionFacade
+    {
+        public List<CliExecutionRequest> Requests { get; } = [];
+
+        public CliExecutionResult Result { get; init; } = new()
+        {
+            Status = CliExecutionStatus.Success,
+            ExitCode = 0,
+            CommandPreview = "codex --version",
+            StandardOutput = "codex 1.0.0",
+            StartedAtUtc = DateTimeOffset.UtcNow,
+            CompletedAtUtc = DateTimeOffset.UtcNow
+        };
+
+        public Task<CliExecutionResult> ExecuteAsync(CliExecutionRequest request, CancellationToken cancellationToken = default)
+        {
+            Requests.Add(request);
+            return Task.FromResult(Result);
+        }
+
+        public async IAsyncEnumerable<CliExecutionEvent> ExecuteStreamingAsync(CliExecutionRequest request, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            Requests.Add(request);
+            yield return new CliExecutionEvent
+            {
+                Kind = CliExecutionEventKind.Completed,
+                Result = Result,
+                TimestampUtc = DateTimeOffset.UtcNow
+            };
+
+            await Task.CompletedTask;
         }
     }
 

@@ -47,6 +47,18 @@ public static class CliInstallRegistry
             ExecutableCandidates: ["hermes", "hermes-cli"],
             IsPubliclyInstallable: false),
         new CliInstallDescriptor(
+            ProviderName: "Kimi",
+            NpmPackage: string.Empty,
+            PinnedVersion: string.Empty,
+            ExecutableCandidates: ["kimi", "kimi-cli"],
+            IsPubliclyInstallable: false),
+        new CliInstallDescriptor(
+            ProviderName: "Kiro",
+            NpmPackage: string.Empty,
+            PinnedVersion: string.Empty,
+            ExecutableCandidates: ["kiro", "kiro-cli"],
+            IsPubliclyInstallable: false),
+        new CliInstallDescriptor(
             ProviderName: "QoderCLI",
             NpmPackage: string.Empty,
             PinnedVersion: string.Empty,

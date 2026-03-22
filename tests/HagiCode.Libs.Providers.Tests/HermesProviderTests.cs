@@ -309,6 +309,11 @@ public sealed class HermesProviderTests
             }));
         }
 
+        public Task<JsonElement> InvokeBootstrapMethodAsync(string method, object? parameters = null, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(JsonSerializer.SerializeToElement(new { }));
+        }
+
         public Task<AcpSessionHandle> StartSessionAsync(
             string workingDirectory,
             string? sessionId,

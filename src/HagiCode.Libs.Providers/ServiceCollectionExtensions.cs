@@ -1,11 +1,14 @@
 using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Environment;
+using HagiCode.Libs.Core.Execution;
 using HagiCode.Libs.Core.Process;
 using HagiCode.Libs.Providers.ClaudeCode;
 using HagiCode.Libs.Providers.Codebuddy;
 using HagiCode.Libs.Providers.Copilot;
 using HagiCode.Libs.Providers.Codex;
 using HagiCode.Libs.Providers.Hermes;
+using HagiCode.Libs.Providers.Kimi;
+using HagiCode.Libs.Providers.Kiro;
 using HagiCode.Libs.Providers.QoderCli;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -29,6 +32,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<CliProcessManager>();
         services.AddSingleton<IShellCommandRunner, ProcessShellCommandRunner>();
         services.AddSingleton<IRuntimeEnvironmentResolver, RuntimeEnvironmentResolver>();
+        services.AddSingleton<ICliExecutionPolicy, AllowAllCliExecutionPolicy>();
+        services.AddSingleton<ICliExecutionFacade, CliExecutionFacade>();
         services.AddSingleton<ICopilotSdkGateway, GitHubCopilotSdkGateway>();
         services.AddSingleton<ClaudeCodeProvider>();
         services.AddSingleton<CodebuddyProvider>();
@@ -39,18 +44,24 @@ public static class ServiceCollectionExtensions
             serviceProvider.GetRequiredService<IRuntimeEnvironmentResolver>()));
         services.AddSingleton<CodexProvider>();
         services.AddSingleton<HermesProvider>();
+        services.AddSingleton<KimiProvider>();
+        services.AddSingleton<KiroProvider>();
         services.AddSingleton<QoderCliProvider>();
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<ClaudeCodeProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<CodebuddyProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<CopilotProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<CodexProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<HermesProvider>());
+        services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<KimiProvider>());
+        services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<KiroProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<QoderCliProvider>());
         services.AddSingleton<ICliProvider<ClaudeCodeOptions>>(serviceProvider => serviceProvider.GetRequiredService<ClaudeCodeProvider>());
         services.AddSingleton<ICliProvider<CodebuddyOptions>>(serviceProvider => serviceProvider.GetRequiredService<CodebuddyProvider>());
         services.AddSingleton<ICliProvider<CopilotOptions>>(serviceProvider => serviceProvider.GetRequiredService<CopilotProvider>());
         services.AddSingleton<ICliProvider<CodexOptions>>(serviceProvider => serviceProvider.GetRequiredService<CodexProvider>());
         services.AddSingleton<ICliProvider<HermesOptions>>(serviceProvider => serviceProvider.GetRequiredService<HermesProvider>());
+        services.AddSingleton<ICliProvider<KimiOptions>>(serviceProvider => serviceProvider.GetRequiredService<KimiProvider>());
+        services.AddSingleton<ICliProvider<KiroOptions>>(serviceProvider => serviceProvider.GetRequiredService<KiroProvider>());
         services.AddSingleton<ICliProvider<QoderCliOptions>>(serviceProvider => serviceProvider.GetRequiredService<QoderCliProvider>());
         services.AddSingleton(static serviceProvider =>
         {
@@ -66,6 +77,18 @@ public static class ServiceCollectionExtensions
                 if (provider is CopilotProvider)
                 {
                     registry.Register(provider.Name, provider, ["github-copilot", "githubcopilot"]);
+                    continue;
+                }
+
+                if (provider is KimiProvider)
+                {
+                    registry.Register(provider.Name, provider, ["kimi-cli"]);
+                    continue;
+                }
+
+                if (provider is KiroProvider)
+                {
+                    registry.Register(provider.Name, provider, ["kiro-cli"]);
                     continue;
                 }
 

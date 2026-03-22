@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Environment;
+using HagiCode.Libs.Core.Execution;
 using HagiCode.Libs.Core.Process;
 using HagiCode.Libs.Core.Transport;
 
@@ -19,6 +20,7 @@ public class CodexProvider : ICliProvider<CodexOptions>
     private readonly CliExecutableResolver _executableResolver;
     private readonly CliProcessManager _processManager;
     private readonly IRuntimeEnvironmentResolver? _runtimeEnvironmentResolver;
+    private readonly ICliExecutionFacade? _executionFacade;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="CodexProvider" /> class.
@@ -26,14 +28,17 @@ public class CodexProvider : ICliProvider<CodexOptions>
     /// <param name="executableResolver">The executable resolver.</param>
     /// <param name="processManager">The process manager.</param>
     /// <param name="runtimeEnvironmentResolver">The optional runtime environment resolver.</param>
+    /// <param name="executionFacade">The optional shared execution facade used for one-shot probes.</param>
     public CodexProvider(
         CliExecutableResolver executableResolver,
         CliProcessManager processManager,
-        IRuntimeEnvironmentResolver? runtimeEnvironmentResolver = null)
+        IRuntimeEnvironmentResolver? runtimeEnvironmentResolver = null,
+        ICliExecutionFacade? executionFacade = null)
     {
         _executableResolver = executableResolver ?? throw new ArgumentNullException(nameof(executableResolver));
         _processManager = processManager ?? throw new ArgumentNullException(nameof(processManager));
         _runtimeEnvironmentResolver = runtimeEnvironmentResolver;
+        _executionFacade = executionFacade;
     }
 
     /// <inheritdoc />
@@ -95,8 +100,8 @@ public class CodexProvider : ICliProvider<CodexOptions>
                 };
             }
 
-            var result = await _processManager.ExecuteAsync(
-                new ProcessStartContext
+            var result = await ResolveExecutionFacade().ExecuteAsync(
+                new CliExecutionRequest
                 {
                     ExecutablePath = executablePath,
                     Arguments = ["--version"],
@@ -108,9 +113,9 @@ public class CodexProvider : ICliProvider<CodexOptions>
             return new CliProviderTestResult
             {
                 ProviderName = Name,
-                Success = result.ExitCode == 0,
-                Version = result.ExitCode == 0 ? result.StandardOutput.Trim() : null,
-                ErrorMessage = result.ExitCode == 0 ? null : result.StandardError.Trim()
+                Success = result.IsSuccess,
+                Version = result.IsSuccess ? result.StandardOutput.Trim() : null,
+                ErrorMessage = result.IsSuccess ? null : result.StandardError.Trim()
             };
         }
         catch (Exception ex)
@@ -235,6 +240,11 @@ public class CodexProvider : ICliProvider<CodexOptions>
     protected virtual ICliTransport CreateTransport(ProcessStartContext startContext)
     {
         return new CodexExecTransport(_processManager, startContext);
+    }
+
+    internal virtual ICliExecutionFacade ResolveExecutionFacade()
+    {
+        return _executionFacade ?? new CliExecutionFacade(_processManager, _runtimeEnvironmentResolver);
     }
 
     private async Task<IReadOnlyDictionary<string, string?>> ResolveRuntimeEnvironmentAsync(CancellationToken cancellationToken)
