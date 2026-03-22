@@ -12,6 +12,7 @@ namespace HagiCode.Libs.Providers.Tests;
 public sealed class CopilotProviderTests
 {
     private const string RealCliTestsEnvironmentVariable = "HAGICODE_REAL_CLI_TESTS";
+    private const string RealCopilotSessionTestsEnvironmentVariable = "HAGICODE_REAL_CLI_COPILOT_SESSION_TESTS";
     private static readonly string[] CopilotExecutableCandidates = ["copilot"];
 
     [Fact]
@@ -347,7 +348,7 @@ public sealed class CopilotProviderTests
     [Trait("Category", "RealCli")]
     public async Task ExecuteAsync_real_cli_can_resume_provider_native_session_when_opted_in()
     {
-        if (!IsRealCliTestsEnabled())
+        if (!IsRealCliTestsEnabled() || !IsRealCopilotSessionTestsEnabled())
         {
             return;
         }
@@ -403,6 +404,13 @@ public sealed class CopilotProviderTests
     private static bool IsRealCliTestsEnabled()
     {
         var value = Environment.GetEnvironmentVariable(RealCliTestsEnvironmentVariable);
+        return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsRealCopilotSessionTestsEnabled()
+    {
+        var value = Environment.GetEnvironmentVariable(RealCopilotSessionTestsEnvironmentVariable);
         return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
                || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
     }

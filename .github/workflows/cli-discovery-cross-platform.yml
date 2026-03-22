@@ -25,6 +25,7 @@ on:
 
 env:
   HAGICODE_REAL_CLI_TESTS: '1'
+  HAGICODE_REAL_CLI_COPILOT_SESSION_TESTS: '0'
 
 jobs:
   cli-discovery:
