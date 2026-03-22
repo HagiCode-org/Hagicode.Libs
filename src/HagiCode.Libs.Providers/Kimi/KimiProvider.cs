@@ -723,8 +723,7 @@ public class KimiProvider : ICliProvider<KimiOptions>
         CliMessage? terminalMessage)
     {
         if (!KimiAcpMessageMapper.IsFailurePromptResult(promptResult) &&
-            KimiAcpMessageMapper.TryExtractPromptResultText(promptResult, out var promptText) &&
-            !string.IsNullOrWhiteSpace(promptText))
+            KimiAcpMessageMapper.TryExtractPromptResultText(promptResult, out var promptText))
         {
             yield return KimiAcpMessageMapper.CreateAssistantMessage(sessionId, promptText, promptResult);
         }

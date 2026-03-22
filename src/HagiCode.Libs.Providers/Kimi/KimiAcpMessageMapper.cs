@@ -126,8 +126,8 @@ internal static class KimiAcpMessageMapper
 
     public static bool TryExtractPromptResultText(JsonElement promptResult, out string? text)
     {
-        text = TryGetString(promptResult, "outputText") ?? TryGetString(promptResult, "text");
-        if (!string.IsNullOrWhiteSpace(text))
+        text = null;
+        if (TryGetMeaningfulText(promptResult, out text, "outputText", "text"))
         {
             return true;
         }
@@ -138,21 +138,19 @@ internal static class KimiAcpMessageMapper
             text = ExtractTextFromContent(contentElement);
         }
 
-        return !string.IsNullOrWhiteSpace(text);
+        return HasMeaningfulText(text);
     }
 
     public static bool TryExtractMessageText(JsonElement content, out string? text)
     {
         text = null;
         if (content.ValueKind != JsonValueKind.Object ||
-            !content.TryGetProperty("text", out var textElement) ||
-            textElement.ValueKind != JsonValueKind.String)
+            !TryGetMeaningfulText(content, out text, "text"))
         {
             return false;
         }
 
-        text = textElement.GetString();
-        return !string.IsNullOrWhiteSpace(text);
+        return true;
     }
 
     public static bool IsReplayAssistantNotification(AcpNotification notification)
@@ -265,7 +263,8 @@ internal static class KimiAcpMessageMapper
     {
         if (!updateElement.TryGetProperty("content", out var contentElement))
         {
-            return TryGetString(updateElement, "text") ?? TryGetString(updateElement, "message");
+            TryGetMeaningfulText(updateElement, out var directText, "text", "message");
+            return directText;
         }
 
         return ExtractTextFromContent(contentElement);
@@ -284,12 +283,12 @@ internal static class KimiAcpMessageMapper
 
     private static string? ExtractTextFromObject(JsonElement contentElement)
     {
-        if (TryGetString(contentElement, "text") is { Length: > 0 } directText)
+        if (TryGetMeaningfulText(contentElement, out var directText, "text"))
         {
             return directText;
         }
 
-        if (TryGetString(contentElement, "message") is { Length: > 0 } directMessage)
+        if (TryGetMeaningfulText(contentElement, out var directMessage, "message"))
         {
             return directMessage;
         }
@@ -308,13 +307,29 @@ internal static class KimiAcpMessageMapper
         foreach (var item in contentElement.EnumerateArray())
         {
             var text = ExtractTextFromContent(item);
-            if (!string.IsNullOrWhiteSpace(text))
+            if (HasMeaningfulText(text))
             {
-                parts.Add(text);
+                parts.Add(text!);
             }
         }
 
         return parts.Count == 0 ? null : string.Concat(parts);
+    }
+
+    private static bool TryGetMeaningfulText(JsonElement element, out string? text, params string[] propertyNames)
+    {
+        text = null;
+        foreach (var propertyName in propertyNames)
+        {
+            var candidate = TryGetString(element, propertyName);
+            if (HasMeaningfulText(candidate))
+            {
+                text = candidate;
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static string? TryGetPromptResultStopReason(JsonElement promptResult)
@@ -336,6 +351,17 @@ internal static class KimiAcpMessageMapper
                propertyElement.ValueKind == JsonValueKind.String
             ? propertyElement.GetString()
             : null;
+    }
+
+    private static bool HasMeaningfulText(string? text)
+    {
+        return !string.IsNullOrEmpty(text) &&
+               (!string.IsNullOrWhiteSpace(text) || ContainsStructuralNewline(text));
+    }
+
+    private static bool ContainsStructuralNewline(string text)
+    {
+        return text.Contains('\n') || text.Contains('\r');
     }
 
     private static bool IsFailureStopReason(string? stopReason)

@@ -182,6 +182,26 @@ public sealed class KimiProviderTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_falls_back_to_multiline_prompt_result_without_flattening_line_breaks()
+    {
+        const string multilineResult = "Paragraph one.\n\n- item one\n- item two\n\n| Repo | Value |\n| --- | --- |\n| core | yes |";
+        var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(
+            emitNotifications: false,
+            promptStopReason: "fallback",
+            promptOutputText: multilineResult));
+        var messages = new List<CliMessage>();
+
+        await foreach (var message in provider.ExecuteAsync(new KimiOptions(), "hello"))
+        {
+            messages.Add(message);
+        }
+
+        messages.Select(static message => message.Type).ShouldBe(["session.started", "assistant", "terminal.completed"]);
+        messages[1].Content.GetProperty("text").GetString().ShouldBe(multilineResult);
+        messages[2].Content.GetProperty("text").GetString().ShouldBe(multilineResult);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_authentication_failure_surfaces_bootstrap_context()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(advertiseAuth: true, authenticationAccepted: false));
@@ -269,6 +289,33 @@ public sealed class KimiProviderTests
         messages.ShouldHaveSingleItem();
         messages[0].Type.ShouldBe("assistant");
         messages[0].Content.GetProperty("text").GetString().ShouldBe("pong");
+    }
+
+    [Fact]
+    public void NormalizeNotification_preserves_multiline_content_arrays_and_newline_only_fragments()
+    {
+        var notification = new AcpNotification(
+            "session/update",
+            JsonSerializer.SerializeToElement(new
+            {
+                sessionId = "session-1",
+                update = new
+                {
+                    kind = "assistant",
+                    content = new object[]
+                    {
+                        new { type = "text", text = "Paragraph one." },
+                        new { type = "text", text = "\n\n" },
+                        new { type = "text", text = "- item one\n- item two" }
+                    }
+                }
+            }));
+
+        var messages = KimiAcpMessageMapper.NormalizeNotification(notification);
+
+        messages.ShouldHaveSingleItem();
+        messages[0].Type.ShouldBe("assistant");
+        messages[0].Content.GetProperty("text").GetString().ShouldBe("Paragraph one.\n\n- item one\n- item two");
     }
 
     [Fact]
