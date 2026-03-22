@@ -124,15 +124,7 @@ public class KimiProvider : ICliProvider<KimiOptions>
 
             await sessionClient.ConnectAsync(startupCts.Token).ConfigureAwait(false);
             var initializeResult = await sessionClient.InitializeAsync(startupCts.Token).ConfigureAwait(false);
-            if (RequiresAuthentication(new KimiOptions(), initializeResult, out var advertisedMethods))
-            {
-                return new CliProviderTestResult
-                {
-                    ProviderName = Name,
-                    Success = false,
-                    ErrorMessage = $"Kimi initialize succeeded but requires authentication ({DescribeAdvertisedMethods(advertisedMethods)}). Use ExecuteAsync with KimiOptions authentication settings."
-                };
-            }
+            await AuthenticateIfRequiredAsync(sessionClient, new KimiOptions(), initializeResult, startupCts.Token).ConfigureAwait(false);
 
             return new CliProviderTestResult
             {

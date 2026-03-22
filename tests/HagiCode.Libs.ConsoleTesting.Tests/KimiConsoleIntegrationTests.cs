@@ -170,6 +170,29 @@ public sealed class KimiConsoleIntegrationTests
         }
     }
 
+    [Fact]
+    [Trait("Category", "RealCli")]
+    public async Task ProgramMain_can_run_the_full_default_suite_when_opted_in()
+    {
+        if (!IsRealCliTestsEnabled())
+        {
+            return;
+        }
+
+        using var output = new StringWriter();
+        var originalOut = Console.Out;
+        try
+        {
+            Console.SetOut(output);
+            var exitCode = await Program.Main([]);
+            exitCode.ShouldBe(0);
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
+    }
+
     private static bool IsRealCliTestsEnabled()
     {
         var value = Environment.GetEnvironmentVariable(RealCliTestsEnvironmentVariable);

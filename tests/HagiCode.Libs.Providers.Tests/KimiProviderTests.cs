@@ -177,16 +177,30 @@ public sealed class KimiProviderTests
     }
 
     [Fact]
-    public async Task PingAsync_returns_actionable_failure_when_authentication_is_required()
+    public async Task PingAsync_attempts_authentication_when_initialize_requires_it()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(advertiseAuth: true));
 
         var result = await provider.PingAsync();
 
+        result.Success.ShouldBeTrue();
+        result.ErrorMessage.ShouldBeNullOrWhiteSpace();
+        provider.SessionClient!.BootstrapInvocations.Count.ShouldBe(1);
+        provider.SessionClient.BootstrapInvocations[0].Method.ShouldBe("authenticate");
+        provider.SessionClient.BootstrapInvocations[0].Parameters.GetProperty("methodId").GetString().ShouldBe("token");
+    }
+
+    [Fact]
+    public async Task PingAsync_returns_actionable_failure_when_authentication_bootstrap_is_rejected()
+    {
+        var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(advertiseAuth: true, authenticationAccepted: false));
+
+        var result = await provider.PingAsync();
+
         result.Success.ShouldBeFalse();
-        result.ErrorMessage.ShouldNotBeNull();
-        result.ErrorMessage.ShouldContain("requires authentication");
-        result.ErrorMessage.ShouldContain("token");
+        result.ErrorMessage.ShouldNotBeNullOrWhiteSpace();
+        result.ErrorMessage.ShouldContain("during authentication");
+        result.ErrorMessage.ShouldContain("rejected");
     }
 
     [Fact]
