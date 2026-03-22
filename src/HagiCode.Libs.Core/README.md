@@ -63,4 +63,5 @@ For long-running or interactive commands, call `ExecuteStreamingAsync()` to rece
 - Use `CliExecutionFacade` when you want typed requests, policy evaluation, normalized diagnostics, and structured success/failure/timeout handling.
 - Use `CliProcessManager` directly when you need a long-lived stdio transport such as ACP or provider-specific session protocols.
 - Use the ACP pool contracts (`CliPoolSettings`, `CliAcpPoolRequest`, `PooledAcpSessionEntry`, and `CliAcpSessionPool`) when provider code needs warm session reuse, idle eviction, or deterministic fault cleanup.
+- `CliAcpSessionPool.GetDiagnosticsSnapshot()` exposes read-only global and provider-scoped hit/miss/evict/fault counters, live entry counts, and the most recent eviction/fault reasons; the pool also emits structured logs plus `System.Diagnostics.Metrics` counters for warm reuse, misses, evictions, and faults.
 - The embedded lifecycle improvements intentionally stay behind HagiCode namespaces; callers should continue passing structured argument tokens instead of raw shell strings.
