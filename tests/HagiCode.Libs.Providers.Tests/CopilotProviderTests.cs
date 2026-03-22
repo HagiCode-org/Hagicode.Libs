@@ -1,11 +1,11 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
-using Shouldly;
 using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Environment;
 using HagiCode.Libs.Core.Process;
 using HagiCode.Libs.Core.Transport;
 using HagiCode.Libs.Providers.Copilot;
+using Shouldly;
 
 namespace HagiCode.Libs.Providers.Tests;
 
@@ -24,6 +24,7 @@ public sealed class CopilotProviderTests
                 ExecutablePath = "/custom/copilot",
                 Model = "claude-sonnet-4.5",
                 WorkingDirectory = "/tmp/project",
+                SessionId = "copilot-session-123",
                 Timeout = TimeSpan.FromMinutes(3),
                 StartupTimeout = TimeSpan.FromSeconds(15),
                 AuthSource = CopilotAuthSource.GitHubToken,
@@ -52,6 +53,7 @@ public sealed class CopilotProviderTests
         request.CliPath.ShouldBe("/custom/copilot");
         request.Model.ShouldBe("claude-sonnet-4.5");
         request.WorkingDirectory.ShouldBe("/tmp/project");
+        request.SessionId.ShouldBe("copilot-session-123");
         request.Timeout.ShouldBe(TimeSpan.FromMinutes(3));
         request.StartupTimeout.ShouldBe(TimeSpan.FromSeconds(15));
         request.GitHubToken.ShouldBe("ghu_test");
@@ -121,13 +123,86 @@ public sealed class CopilotProviderTests
             messages.Add(message);
         }
 
-        messages.Select(static message => message.Type).ShouldBe(["diagnostic", "assistant", "reasoning", "tool.started", "tool.completed", "result"]);
+        messages.Select(static message => message.Type).ShouldBe([
+            "diagnostic",
+            "session.started",
+            "assistant",
+            "reasoning",
+            "tool.started",
+            "tool.completed",
+            "result"
+        ]);
         messages[0].Content.GetProperty("message").GetString()!.ShouldContain("--headless");
-        messages[1].Content.GetProperty("text").GetString().ShouldBe("pong");
-        messages[2].Content.GetProperty("text").GetString().ShouldBe("thinking");
-        messages[3].Content.GetProperty("tool_name").GetString().ShouldBe("grep");
-        messages[4].Content.GetProperty("failed").GetBoolean().ShouldBeFalse();
-        messages[5].Content.GetProperty("status").GetString().ShouldBe("completed");
+        messages[1].Content.GetProperty("session_id").GetString().ShouldBe("copilot-session-1");
+        messages[2].Content.GetProperty("text").GetString().ShouldBe("pong");
+        messages[2].Content.GetProperty("session_id").GetString().ShouldBe("copilot-session-1");
+        messages[3].Content.GetProperty("text").GetString().ShouldBe("thinking");
+        messages[4].Content.GetProperty("tool_name").GetString().ShouldBe("grep");
+        messages[4].Content.GetProperty("session_id").GetString().ShouldBe("copilot-session-1");
+        messages[5].Content.GetProperty("failed").GetBoolean().ShouldBeFalse();
+        messages[6].Content.GetProperty("status").GetString().ShouldBe("completed");
+        messages[6].Content.GetProperty("session_id").GetString().ShouldBe("copilot-session-1");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_uses_explicit_session_id_for_provider_native_resume_contract()
+    {
+        var gateway = new StubCopilotSdkGateway(
+        [
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.TextDelta, Content: "remembered"),
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.Completed)
+        ],
+        lifecycleType: CopilotSdkStreamEventType.SessionResumed,
+        sessionId: "resume-session");
+        var provider = CreateProvider(gateway: gateway);
+        var messages = new List<CliMessage>();
+
+        await foreach (var message in provider.ExecuteAsync(
+                           new CopilotOptions
+                           {
+                               SessionId = "resume-session"
+                           },
+                           "what did I ask earlier"))
+        {
+            messages.Add(message);
+        }
+
+        gateway.CreateRequests.ShouldHaveSingleItem();
+        gateway.CreateRequests[0].SessionId.ShouldBe("resume-session");
+        messages.First().Type.ShouldBe("session.resumed");
+        messages.First().Content.GetProperty("session_id").GetString().ShouldBe("resume-session");
+        messages.First().Content.GetProperty("requested_session_id").GetString().ShouldBe("resume-session");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_reuses_warm_copilot_runtime_for_same_explicit_session_id()
+    {
+        var gateway = new StubCopilotSdkGateway(
+        [
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.TextDelta, Content: "pong"),
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.Completed)
+        ],
+        sessionId: "session-key");
+        var provider = CreateProvider(gateway: gateway);
+        var firstMessages = new List<CliMessage>();
+        var secondMessages = new List<CliMessage>();
+
+        await foreach (var message in provider.ExecuteAsync(new CopilotOptions { SessionId = "session-key" }, "first"))
+        {
+            firstMessages.Add(message);
+        }
+
+        await foreach (var message in provider.ExecuteAsync(new CopilotOptions { SessionId = "session-key" }, "second"))
+        {
+            secondMessages.Add(message);
+        }
+
+        gateway.CreatedRuntimeCount.ShouldBe(1);
+        gateway.SendPromptCallCount.ShouldBe(2);
+        firstMessages.First().Type.ShouldBe("session.started");
+        secondMessages.First().Type.ShouldBe("session.reused");
+        secondMessages.First().Content.GetProperty("session_id").GetString().ShouldBe("session-key");
+        secondMessages.First().Content.GetProperty("requested_session_id").GetString().ShouldBe("session-key");
     }
 
     [Fact]
@@ -139,17 +214,21 @@ public sealed class CopilotProviderTests
             new CopilotSdkStreamEvent(CopilotSdkStreamEventType.Completed)
         ]);
         var provider = CreateProvider(gateway: gateway);
+        var secondMessages = new List<CliMessage>();
 
         await foreach (var _ in provider.ExecuteAsync(new CopilotOptions { WorkingDirectory = "/tmp/project" }, "first"))
         {
         }
 
-        await foreach (var _ in provider.ExecuteAsync(new CopilotOptions { WorkingDirectory = "/tmp/project" }, "second"))
+        await foreach (var message in provider.ExecuteAsync(new CopilotOptions { WorkingDirectory = "/tmp/project" }, "second"))
         {
+            secondMessages.Add(message);
         }
 
         gateway.CreatedRuntimeCount.ShouldBe(1);
         gateway.SendPromptCallCount.ShouldBe(2);
+        secondMessages.First().Type.ShouldBe("session.reused");
+        secondMessages.First().Content.GetProperty("session_id").GetString().ShouldBe("copilot-session-1");
     }
 
     [Fact]
@@ -191,7 +270,8 @@ public sealed class CopilotProviderTests
         var provider = CreateProvider(gateway: new StubCopilotSdkGateway(
         [
             new CopilotSdkStreamEvent(CopilotSdkStreamEventType.Error, ErrorMessage: "startup failed")
-        ]));
+        ],
+        lifecycleType: null));
         var messages = new List<CliMessage>();
 
         await foreach (var message in provider.ExecuteAsync(new CopilotOptions { ExecutablePath = "/custom/copilot" }, "hello"))
@@ -251,7 +331,7 @@ public sealed class CopilotProviderTests
 
         Path.GetFileNameWithoutExtension(executablePath).ShouldBe("copilot");
 
-        var provider = new CopilotProvider(resolver, new CliProcessManager(), new StubCopilotSdkGateway([]), null);
+        var provider = new CopilotProvider(resolver, new CliProcessManager(), runtimeEnvironmentResolver: null);
 
         provider.IsAvailable.ShouldBeTrue();
 
@@ -261,6 +341,51 @@ public sealed class CopilotProviderTests
         result.Success.ShouldBeTrue();
         result.Version.ShouldNotBeNullOrWhiteSpace();
         result.ErrorMessage.ShouldBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    [Trait("Category", "RealCli")]
+    public async Task ExecuteAsync_real_cli_can_resume_provider_native_session_when_opted_in()
+    {
+        if (!IsRealCliTestsEnabled())
+        {
+            return;
+        }
+
+        var resolver = new CliExecutableResolver();
+        var executablePath = resolver.ResolveFirstAvailablePath(CopilotExecutableCandidates);
+        if (executablePath is null)
+        {
+            throw new InvalidOperationException("Copilot CLI was not found on PATH even though the real CLI validation path was enabled.");
+        }
+
+        var provider = new CopilotProvider(resolver, new CliProcessManager(), runtimeEnvironmentResolver: null);
+        var rememberedToken = $"TRACE-{Guid.NewGuid():N}";
+        var workingDirectory = Directory.GetCurrentDirectory();
+
+        var firstResult = await ReadExecutionResultAsync(
+            provider,
+            new CopilotOptions
+            {
+                ExecutablePath = executablePath,
+                WorkingDirectory = workingDirectory
+            },
+            $"Remember this exact token for the next turn: {rememberedToken}. Reply with exactly ACK.");
+
+        firstResult.SessionId.ShouldNotBeNullOrWhiteSpace();
+        firstResult.AssistantText.ShouldContain("ACK", Case.Insensitive);
+
+        var secondResult = await ReadExecutionResultAsync(
+            provider,
+            new CopilotOptions
+            {
+                ExecutablePath = executablePath,
+                WorkingDirectory = workingDirectory,
+                SessionId = firstResult.SessionId
+            },
+            "What exact token did I ask you to remember in the previous turn? Reply with just the token.");
+
+        secondResult.AssistantText.ShouldContain(rememberedToken);
     }
 
     private static TestCopilotProvider CreateProvider(
@@ -275,6 +400,44 @@ public sealed class CopilotProviderTests
             new StubRuntimeEnvironmentResolver());
     }
 
+    private static bool IsRealCliTestsEnabled()
+    {
+        var value = Environment.GetEnvironmentVariable(RealCliTestsEnvironmentVariable);
+        return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static async Task<(string AssistantText, string? SessionId)> ReadExecutionResultAsync(
+        ICliProvider<CopilotOptions> provider,
+        CopilotOptions options,
+        string prompt,
+        CancellationToken cancellationToken = default)
+    {
+        var assistantText = new List<string>();
+        string? sessionId = null;
+
+        await foreach (var message in provider.ExecuteAsync(options, prompt, cancellationToken))
+        {
+            if (message.Content.ValueKind == JsonValueKind.Object &&
+                message.Content.TryGetProperty("session_id", out var sessionIdElement) &&
+                sessionIdElement.ValueKind == JsonValueKind.String)
+            {
+                sessionId ??= sessionIdElement.GetString();
+            }
+
+            if (message.Type == "assistant" &&
+                message.Content.ValueKind == JsonValueKind.Object &&
+                message.Content.TryGetProperty("text", out var textElement) &&
+                textElement.ValueKind == JsonValueKind.String &&
+                !string.IsNullOrWhiteSpace(textElement.GetString()))
+            {
+                assistantText.Add(textElement.GetString()!);
+            }
+        }
+
+        return (string.Concat(assistantText), sessionId);
+    }
+
     private sealed class TestCopilotProvider(
         CliExecutableResolver executableResolver,
         CliProcessManager processManager,
@@ -284,18 +447,24 @@ public sealed class CopilotProviderTests
     {
     }
 
-    private sealed class StubCopilotSdkGateway(IReadOnlyList<CopilotSdkStreamEvent> events) : ICopilotSdkGateway
+    private sealed class StubCopilotSdkGateway(
+        IReadOnlyList<CopilotSdkStreamEvent> promptEvents,
+        CopilotSdkStreamEventType? lifecycleType = CopilotSdkStreamEventType.SessionStarted,
+        string sessionId = "copilot-session-1") : ICopilotSdkGateway
     {
         public int CreatedRuntimeCount { get; private set; }
 
         public int SendPromptCallCount { get; private set; }
+
+        public List<CopilotSdkRequest> CreateRequests { get; } = [];
 
         public Task<ICopilotSdkRuntime> CreateRuntimeAsync(
             CopilotSdkRequest request,
             CancellationToken cancellationToken = default)
         {
             CreatedRuntimeCount++;
-            return Task.FromResult<ICopilotSdkRuntime>(new StubCopilotSdkRuntime(events, this));
+            CreateRequests.Add(request);
+            return Task.FromResult<ICopilotSdkRuntime>(new StubCopilotSdkRuntime(promptEvents, lifecycleType, request.SessionId ?? sessionId, this));
         }
 
         public async IAsyncEnumerable<CopilotSdkStreamEvent> SendPromptAsync(
@@ -309,16 +478,36 @@ public sealed class CopilotProviderTests
             }
         }
 
-        private sealed class StubCopilotSdkRuntime(IReadOnlyList<CopilotSdkStreamEvent> events, StubCopilotSdkGateway owner) : ICopilotSdkRuntime
+        private sealed class StubCopilotSdkRuntime(
+            IReadOnlyList<CopilotSdkStreamEvent> promptEvents,
+            CopilotSdkStreamEventType? lifecycleType,
+            string sessionId,
+            StubCopilotSdkGateway owner) : ICopilotSdkRuntime
         {
+            private bool _lifecycleSent;
+
+            public string SessionId => sessionId;
+
             public async IAsyncEnumerable<CopilotSdkStreamEvent> SendPromptAsync(
                 CopilotSdkRequest request,
                 [EnumeratorCancellation] CancellationToken cancellationToken = default)
             {
                 owner.SendPromptCallCount++;
-                foreach (var eventData in events)
+                if (!_lifecycleSent && lifecycleType is not null)
                 {
-                    yield return eventData;
+                    _lifecycleSent = true;
+                    yield return new CopilotSdkStreamEvent(lifecycleType.Value, SessionId: sessionId, RequestedSessionId: request.SessionId);
+                    await Task.Yield();
+                }
+
+                foreach (var eventData in promptEvents)
+                {
+                    var normalizedEvent = eventData with
+                    {
+                        SessionId = eventData.SessionId ?? sessionId,
+                        RequestedSessionId = eventData.RequestedSessionId ?? request.SessionId
+                    };
+                    yield return normalizedEvent;
                     await Task.Yield();
                 }
             }
@@ -371,12 +560,5 @@ public sealed class CopilotProviderTests
 
             return Task.FromResult(ExecuteResults.Dequeue());
         }
-    }
-
-    private static bool IsRealCliTestsEnabled()
-    {
-        var value = Environment.GetEnvironmentVariable(RealCliTestsEnvironmentVariable);
-        return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
     }
 }
