@@ -12,6 +12,8 @@
     <Project Path="src/HagiCode.Libs.Codex.Console/HagiCode.Libs.Codex.Console.csproj" />
     <Project Path="src/HagiCode.Libs.ConsoleTesting/HagiCode.Libs.ConsoleTesting.csproj" />
     <Project Path="src/HagiCode.Libs.Hermes.Console/HagiCode.Libs.Hermes.Console.csproj" />
+    <Project Path="src/HagiCode.Libs.Kimi.Console/HagiCode.Libs.Kimi.Console.csproj" />
+    <Project Path="src/HagiCode.Libs.Kiro.Console/HagiCode.Libs.Kiro.Console.csproj" />
     <Project Path="src/HagiCode.Libs.QoderCli.Console/HagiCode.Libs.QoderCli.Console.csproj" />
   </Folder>
   <Folder Name="/src/">
