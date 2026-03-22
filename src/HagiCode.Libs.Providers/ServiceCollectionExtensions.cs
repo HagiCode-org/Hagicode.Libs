@@ -2,6 +2,7 @@ using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Environment;
 using HagiCode.Libs.Core.Execution;
 using HagiCode.Libs.Core.Process;
+using HagiCode.Libs.Core.Acp;
 using HagiCode.Libs.Providers.ClaudeCode;
 using HagiCode.Libs.Providers.Codebuddy;
 using HagiCode.Libs.Providers.Copilot;
@@ -9,6 +10,7 @@ using HagiCode.Libs.Providers.Codex;
 using HagiCode.Libs.Providers.Hermes;
 using HagiCode.Libs.Providers.Kimi;
 using HagiCode.Libs.Providers.Kiro;
+using HagiCode.Libs.Providers.Pooling;
 using HagiCode.Libs.Providers.QoderCli;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -35,6 +37,21 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICliExecutionPolicy, AllowAllCliExecutionPolicy>();
         services.AddSingleton<ICliExecutionFacade, CliExecutionFacade>();
         services.AddSingleton<ICopilotSdkGateway, GitHubCopilotSdkGateway>();
+        services.AddSingleton<ICliAcpSessionPool, CliAcpSessionPool>();
+        services.AddSingleton<CliProviderPoolCoordinator>();
+        services.AddSingleton(static _ =>
+        {
+            var registry = new CliProviderPoolConfigurationRegistry();
+            registry.Register("claude-code", new CliPoolSettings { MaxActiveSessions = 4, IdleTimeout = TimeSpan.FromMinutes(5) });
+            registry.Register("codebuddy", new CliPoolSettings { MaxActiveSessions = 8, IdleTimeout = TimeSpan.FromMinutes(10) });
+            registry.Register("copilot", new CliPoolSettings { MaxActiveSessions = 4, IdleTimeout = TimeSpan.FromMinutes(10) });
+            registry.Register("codex", new CliPoolSettings { MaxActiveSessions = 8, IdleTimeout = TimeSpan.FromMinutes(10) });
+            registry.Register("hermes", new CliPoolSettings { MaxActiveSessions = 8, IdleTimeout = TimeSpan.FromMinutes(10) });
+            registry.Register("kimi", new CliPoolSettings { MaxActiveSessions = 8, IdleTimeout = TimeSpan.FromMinutes(10) });
+            registry.Register("kiro", new CliPoolSettings { MaxActiveSessions = 8, IdleTimeout = TimeSpan.FromMinutes(10) });
+            registry.Register("qodercli", new CliPoolSettings { MaxActiveSessions = 8, IdleTimeout = TimeSpan.FromMinutes(10) });
+            return registry;
+        });
         services.AddSingleton<ClaudeCodeProvider>();
         services.AddSingleton<CodebuddyProvider>();
         services.AddSingleton(serviceProvider => new CopilotProvider(

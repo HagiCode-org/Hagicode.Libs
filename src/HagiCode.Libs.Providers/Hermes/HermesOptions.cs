@@ -1,5 +1,7 @@
 namespace HagiCode.Libs.Providers.Hermes;
 
+using HagiCode.Libs.Core.Acp;
+
 /// <summary>
 /// Describes a Hermes ACP CLI invocation.
 /// </summary>
@@ -45,4 +47,9 @@ public sealed record HermesOptions
     /// Tokens are boundary-trimmed individually and whitespace-only tokens are ignored.
     /// </summary>
     public IReadOnlyList<string> Arguments { get; init; } = [];
+
+    /// <summary>
+    /// Gets or sets provider-level pooling overrides.
+    /// </summary>
+    public CliPoolSettings? PoolSettings { get; init; }
 }

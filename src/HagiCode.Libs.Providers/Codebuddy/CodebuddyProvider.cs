@@ -5,6 +5,7 @@ using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Environment;
 using HagiCode.Libs.Core.Process;
 using HagiCode.Libs.Core.Transport;
+using HagiCode.Libs.Providers.Pooling;
 
 namespace HagiCode.Libs.Providers.Codebuddy;
 
@@ -19,6 +20,8 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
     private readonly CliExecutableResolver _executableResolver;
     private readonly CliProcessManager _processManager;
     private readonly IRuntimeEnvironmentResolver? _runtimeEnvironmentResolver;
+    private readonly CliProviderPoolCoordinator _poolCoordinator;
+    private readonly CliProviderPoolConfigurationRegistry _poolConfiguration;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="CodebuddyProvider" /> class.
@@ -29,11 +32,15 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
     public CodebuddyProvider(
         CliExecutableResolver executableResolver,
         CliProcessManager processManager,
-        IRuntimeEnvironmentResolver? runtimeEnvironmentResolver = null)
+        IRuntimeEnvironmentResolver? runtimeEnvironmentResolver = null,
+        CliProviderPoolCoordinator? poolCoordinator = null,
+        CliProviderPoolConfigurationRegistry? poolConfiguration = null)
     {
         _executableResolver = executableResolver ?? throw new ArgumentNullException(nameof(executableResolver));
         _processManager = processManager ?? throw new ArgumentNullException(nameof(processManager));
         _runtimeEnvironmentResolver = runtimeEnvironmentResolver;
+        _poolCoordinator = poolCoordinator ?? new CliProviderPoolCoordinator();
+        _poolConfiguration = poolConfiguration ?? new CliProviderPoolConfigurationRegistry();
     }
 
     /// <inheritdoc />
@@ -65,28 +72,68 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
             EnvironmentVariables = BuildEnvironmentVariables(options, runtimeEnvironment)
         };
 
-        await using var sessionClient = CreateSessionClient(startContext);
-        using var startupCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        startupCts.CancelAfter(options.StartupTimeout ?? DefaultStartupTimeout);
-
-        await sessionClient.ConnectAsync(startupCts.Token).ConfigureAwait(false);
-        await sessionClient.InitializeAsync(startupCts.Token).ConfigureAwait(false);
-        var sessionHandle = await sessionClient.StartSessionAsync(
-            workingDirectory,
-            options.SessionId,
-            options.Model,
-            startupCts.Token).ConfigureAwait(false);
-
-        yield return CodebuddyAcpMessageMapper.CreateSessionLifecycleMessage(sessionHandle);
-
-        var promptTask = sessionClient.SendPromptAsync(sessionHandle.SessionId, prompt, cancellationToken);
-        await foreach (var message in StreamPromptMessagesAsync(
-                           sessionClient,
-                           sessionHandle.SessionId,
-                           promptTask,
-                           cancellationToken).ConfigureAwait(false))
+        var poolSettings = ResolvePoolSettings(options);
+        if (!poolSettings.Enabled)
         {
-            yield return message;
+            await foreach (var message in ExecuteOneShotAsync(options, prompt, workingDirectory, startContext, cancellationToken).ConfigureAwait(false))
+            {
+                yield return message;
+            }
+
+            yield break;
+        }
+
+        var logicalSessionKey = ResolveLogicalSessionKey(options.SessionId, poolSettings);
+        var request = new CliAcpPoolRequest(
+            Name,
+            logicalSessionKey,
+            CliPoolFingerprintBuilder.Build(executablePath, workingDirectory, startContext.Arguments, startContext.EnvironmentVariables),
+            poolSettings);
+
+        await using var lease = await _poolCoordinator.AcquireAcpSessionAsync(
+            request,
+            ct => CreatePooledEntryAsync(options, workingDirectory, startContext, request, ct),
+            cancellationToken).ConfigureAwait(false);
+
+        if (lease.IsWarmLease)
+        {
+            var normalizedHandle = await lease.Entry.SessionClient.StartSessionAsync(
+                workingDirectory,
+                lease.Entry.SessionId,
+                options.Model,
+                cancellationToken).ConfigureAwait(false);
+            lease.Entry.RefreshSession(normalizedHandle, request.CompatibilityFingerprint);
+        }
+
+        var lifecycleHandle = lease.IsWarmLease
+            ? new AcpSessionHandle(lease.Entry.SessionId, true, default)
+            : lease.Entry.SessionHandle;
+        yield return CodebuddyAcpMessageMapper.CreateSessionLifecycleMessage(lifecycleHandle);
+
+        var shouldEvictAnonymous = options.SessionId is null && !poolSettings.KeepAnonymousSessions;
+        var faulted = false;
+        await lease.Entry.ExecutionLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var promptTask = lease.Entry.SessionClient.SendPromptAsync(lease.Entry.SessionId, prompt, cancellationToken);
+            await foreach (var message in StreamPromptMessagesAsync(
+                               lease.Entry.SessionClient,
+                               lease.Entry.SessionId,
+                               promptTask,
+                               cancellationToken).ConfigureAwait(false))
+            {
+                if (string.Equals(message.Type, "terminal.failed", StringComparison.OrdinalIgnoreCase))
+                {
+                    faulted = true;
+                }
+
+                yield return message;
+            }
+        }
+        finally
+        {
+            lease.Entry.ExecutionLock.Release();
+            lease.IsFaulted = faulted || shouldEvictAnonymous;
         }
     }
 
@@ -141,7 +188,10 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
     }
 
     /// <inheritdoc />
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    public async ValueTask DisposeAsync()
+    {
+        await _poolCoordinator.DisposeAcpProviderAsync(Name).ConfigureAwait(false);
+    }
 
     internal virtual IReadOnlyList<string> BuildCommandArguments(CodebuddyOptions options)
     {
@@ -192,6 +242,89 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
     protected virtual IAcpTransport CreateAcpTransport(ProcessStartContext startContext)
     {
         return new SubprocessAcpTransport(_processManager, startContext);
+    }
+
+    private CliPoolSettings ResolvePoolSettings(CodebuddyOptions options)
+    {
+        return CliPoolSettings.Merge(_poolConfiguration.GetSettings(Name), options.PoolSettings);
+    }
+
+    private static string? ResolveLogicalSessionKey(string? requestedSessionId, CliPoolSettings settings)
+    {
+        var normalizedSessionId = ArgumentValueNormalizer.NormalizeOptionalValue(requestedSessionId);
+        if (normalizedSessionId is not null)
+        {
+            return normalizedSessionId;
+        }
+
+        return settings.KeepAnonymousSessions ? $"codebuddy:{Guid.NewGuid():N}" : null;
+    }
+
+    private async Task<PooledAcpSessionEntry> CreatePooledEntryAsync(
+        CodebuddyOptions options,
+        string workingDirectory,
+        ProcessStartContext startContext,
+        CliAcpPoolRequest request,
+        CancellationToken cancellationToken)
+    {
+        var sessionClient = CreateSessionClient(startContext);
+        try
+        {
+            using var startupCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            startupCts.CancelAfter(options.StartupTimeout ?? DefaultStartupTimeout);
+
+            await sessionClient.ConnectAsync(startupCts.Token).ConfigureAwait(false);
+            await sessionClient.InitializeAsync(startupCts.Token).ConfigureAwait(false);
+            var sessionHandle = await sessionClient.StartSessionAsync(
+                workingDirectory,
+                options.SessionId,
+                options.Model,
+                startupCts.Token).ConfigureAwait(false);
+            return new PooledAcpSessionEntry(
+                Name,
+                sessionHandle.SessionId,
+                sessionClient,
+                request.CompatibilityFingerprint,
+                sessionHandle,
+                request.Settings);
+        }
+        catch
+        {
+            await sessionClient.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    private async IAsyncEnumerable<CliMessage> ExecuteOneShotAsync(
+        CodebuddyOptions options,
+        string prompt,
+        string workingDirectory,
+        ProcessStartContext startContext,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        await using var sessionClient = CreateSessionClient(startContext);
+        using var startupCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        startupCts.CancelAfter(options.StartupTimeout ?? DefaultStartupTimeout);
+
+        await sessionClient.ConnectAsync(startupCts.Token).ConfigureAwait(false);
+        await sessionClient.InitializeAsync(startupCts.Token).ConfigureAwait(false);
+        var sessionHandle = await sessionClient.StartSessionAsync(
+            workingDirectory,
+            options.SessionId,
+            options.Model,
+            startupCts.Token).ConfigureAwait(false);
+
+        yield return CodebuddyAcpMessageMapper.CreateSessionLifecycleMessage(sessionHandle);
+
+        var promptTask = sessionClient.SendPromptAsync(sessionHandle.SessionId, prompt, cancellationToken);
+        await foreach (var message in StreamPromptMessagesAsync(
+                           sessionClient,
+                           sessionHandle.SessionId,
+                           promptTask,
+                           cancellationToken).ConfigureAwait(false))
+        {
+            yield return message;
+        }
     }
 
     private async Task<IReadOnlyDictionary<string, string?>> ResolveRuntimeEnvironmentAsync(CancellationToken cancellationToken)

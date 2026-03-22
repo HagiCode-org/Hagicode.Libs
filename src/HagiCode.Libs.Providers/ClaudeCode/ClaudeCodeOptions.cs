@@ -1,5 +1,7 @@
 namespace HagiCode.Libs.Providers.ClaudeCode;
 
+using HagiCode.Libs.Core.Acp;
+
 /// <summary>
 /// Describes a Claude Code CLI invocation.
 /// </summary>
@@ -95,4 +97,9 @@ public sealed record ClaudeCodeOptions
     /// Gets or sets the path to an MCP server configuration file.
     /// </summary>
     public string? McpServersPath { get; init; }
+
+    /// <summary>
+    /// Gets or sets provider-level pooling overrides.
+    /// </summary>
+    public CliPoolSettings? PoolSettings { get; init; }
 }

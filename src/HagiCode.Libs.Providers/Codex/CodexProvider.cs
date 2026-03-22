@@ -5,6 +5,8 @@ using HagiCode.Libs.Core.Environment;
 using HagiCode.Libs.Core.Execution;
 using HagiCode.Libs.Core.Process;
 using HagiCode.Libs.Core.Transport;
+using HagiCode.Libs.Core.Acp;
+using HagiCode.Libs.Providers.Pooling;
 
 namespace HagiCode.Libs.Providers.Codex;
 
@@ -21,6 +23,8 @@ public class CodexProvider : ICliProvider<CodexOptions>
     private readonly CliProcessManager _processManager;
     private readonly IRuntimeEnvironmentResolver? _runtimeEnvironmentResolver;
     private readonly ICliExecutionFacade? _executionFacade;
+    private readonly CliProviderPoolCoordinator _poolCoordinator;
+    private readonly CliProviderPoolConfigurationRegistry _poolConfiguration;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="CodexProvider" /> class.
@@ -33,12 +37,16 @@ public class CodexProvider : ICliProvider<CodexOptions>
         CliExecutableResolver executableResolver,
         CliProcessManager processManager,
         IRuntimeEnvironmentResolver? runtimeEnvironmentResolver = null,
-        ICliExecutionFacade? executionFacade = null)
+        ICliExecutionFacade? executionFacade = null,
+        CliProviderPoolCoordinator? poolCoordinator = null,
+        CliProviderPoolConfigurationRegistry? poolConfiguration = null)
     {
         _executableResolver = executableResolver ?? throw new ArgumentNullException(nameof(executableResolver));
         _processManager = processManager ?? throw new ArgumentNullException(nameof(processManager));
         _runtimeEnvironmentResolver = runtimeEnvironmentResolver;
         _executionFacade = executionFacade;
+        _poolCoordinator = poolCoordinator ?? new CliProviderPoolCoordinator();
+        _poolConfiguration = poolConfiguration ?? new CliProviderPoolConfigurationRegistry();
     }
 
     /// <inheritdoc />
@@ -60,26 +68,87 @@ public class CodexProvider : ICliProvider<CodexOptions>
         var executablePath = ResolveExecutablePath(options, runtimeEnvironment)
             ?? throw new FileNotFoundException("Unable to locate the Codex executable. Set CodexOptions.ExecutablePath or ensure 'codex' is on PATH.");
 
+        var poolSettings = ResolvePoolSettings(options);
+        if (!poolSettings.Enabled)
+        {
+            await foreach (var message in ExecuteOneShotAsync(options, prompt, executablePath, runtimeEnvironment, cancellationToken).ConfigureAwait(false))
+            {
+                yield return message;
+            }
+
+            yield break;
+        }
+
+        var request = new CliRuntimePoolRequest(
+            Name,
+            ResolveLogicalSessionKey(options),
+            CliPoolFingerprintBuilder.Build(
+                executablePath,
+                options.WorkingDirectory,
+                options.Model,
+                options.SandboxMode,
+                options.ApprovalPolicy,
+                options.SkipGitRepositoryCheck,
+                options.AddDirectories,
+                options.EnvironmentVariables,
+                options.ExtraArgs,
+                runtimeEnvironment),
+            poolSettings);
+
+        await using var lease = await _poolCoordinator.AcquireCodexThreadAsync(
+            request,
+            ct => Task.FromResult(new CliRuntimePoolEntry<CodexPooledThreadState>(
+                Name,
+                new CodexPooledThreadState
+                {
+                    ThreadId = ArgumentValueNormalizer.NormalizeOptionalValue(options.ThreadId)
+                },
+                request.CompatibilityFingerprint,
+                request.Settings)),
+            cancellationToken).ConfigureAwait(false);
+
+        var effectiveOptions = options with { ThreadId = lease.Entry.Resource.ThreadId ?? options.ThreadId };
         var startContext = new ProcessStartContext
         {
             ExecutablePath = executablePath,
-            Arguments = BuildCommandArguments(options),
-            WorkingDirectory = options.WorkingDirectory,
-            EnvironmentVariables = BuildEnvironmentVariables(options, runtimeEnvironment)
+            Arguments = BuildCommandArguments(effectiveOptions),
+            WorkingDirectory = effectiveOptions.WorkingDirectory,
+            EnvironmentVariables = BuildEnvironmentVariables(effectiveOptions, runtimeEnvironment)
         };
 
-        await using var transport = CreateTransport(startContext);
-        await transport.ConnectAsync(cancellationToken);
-        await transport.SendAsync(CreatePromptMessage(prompt), cancellationToken);
-
-        await foreach (var message in transport.ReceiveAsync(cancellationToken))
+        var shouldEvictAnonymous = request.LogicalSessionKey is null && !poolSettings.KeepAnonymousSessions;
+        var faulted = false;
+        await lease.Entry.ExecutionLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            yield return message;
+            await using var transport = CreateTransport(startContext);
+            await transport.ConnectAsync(cancellationToken).ConfigureAwait(false);
+            await transport.SendAsync(CreatePromptMessage(prompt), cancellationToken).ConfigureAwait(false);
 
-            if (IsTerminalMessage(message.Type))
+            await foreach (var message in transport.ReceiveAsync(cancellationToken).ConfigureAwait(false))
             {
-                yield break;
+                if (TryGetThreadId(message.Content, out var threadId))
+                {
+                    lease.Entry.Resource.ThreadId = threadId;
+                }
+
+                if (string.Equals(message.Type, "turn.failed", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(message.Type, "error", StringComparison.OrdinalIgnoreCase))
+                {
+                    faulted = true;
+                }
+
+                yield return message;
+                if (IsTerminalMessage(message.Type))
+                {
+                    break;
+                }
             }
+        }
+        finally
+        {
+            lease.Entry.ExecutionLock.Release();
+            lease.IsFaulted = faulted || shouldEvictAnonymous;
         }
     }
 
@@ -130,7 +199,10 @@ public class CodexProvider : ICliProvider<CodexOptions>
     }
 
     /// <inheritdoc />
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    public async ValueTask DisposeAsync()
+    {
+        await _poolCoordinator.DisposeCodexProviderAsync(Name).ConfigureAwait(false);
+    }
 
     internal virtual IReadOnlyList<string> BuildCommandArguments(CodexOptions options)
     {
@@ -242,6 +314,46 @@ public class CodexProvider : ICliProvider<CodexOptions>
         return new CodexExecTransport(_processManager, startContext);
     }
 
+    private CliPoolSettings ResolvePoolSettings(CodexOptions options)
+    {
+        return CliPoolSettings.Merge(_poolConfiguration.GetSettings(Name), options.PoolSettings);
+    }
+
+    private static string? ResolveLogicalSessionKey(CodexOptions options)
+    {
+        return ArgumentValueNormalizer.NormalizeOptionalValue(options.ThreadId)
+               ?? ArgumentValueNormalizer.NormalizeOptionalValue(options.WorkingDirectory);
+    }
+
+    private async IAsyncEnumerable<CliMessage> ExecuteOneShotAsync(
+        CodexOptions options,
+        string prompt,
+        string executablePath,
+        IReadOnlyDictionary<string, string?> runtimeEnvironment,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var startContext = new ProcessStartContext
+        {
+            ExecutablePath = executablePath,
+            Arguments = BuildCommandArguments(options),
+            WorkingDirectory = options.WorkingDirectory,
+            EnvironmentVariables = BuildEnvironmentVariables(options, runtimeEnvironment)
+        };
+
+        await using var transport = CreateTransport(startContext);
+        await transport.ConnectAsync(cancellationToken).ConfigureAwait(false);
+        await transport.SendAsync(CreatePromptMessage(prompt), cancellationToken).ConfigureAwait(false);
+
+        await foreach (var message in transport.ReceiveAsync(cancellationToken).ConfigureAwait(false))
+        {
+            yield return message;
+            if (IsTerminalMessage(message.Type))
+            {
+                yield break;
+            }
+        }
+    }
+
     internal virtual ICliExecutionFacade ResolveExecutionFacade()
     {
         return _executionFacade ?? new CliExecutionFacade(_processManager, _runtimeEnvironmentResolver);
@@ -282,5 +394,30 @@ public class CodexProvider : ICliProvider<CodexOptions>
         return string.Equals(messageType, "turn.completed", StringComparison.OrdinalIgnoreCase)
                || string.Equals(messageType, "turn.failed", StringComparison.OrdinalIgnoreCase)
                || string.Equals(messageType, "error", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TryGetThreadId(JsonElement content, out string? threadId)
+    {
+        threadId = null;
+        if (content.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        if (!content.TryGetProperty("type", out var typeElement) ||
+            typeElement.ValueKind != JsonValueKind.String ||
+            !string.Equals(typeElement.GetString(), "thread.started", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (!content.TryGetProperty("thread_id", out var threadIdElement) ||
+            threadIdElement.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        threadId = threadIdElement.GetString();
+        return !string.IsNullOrWhiteSpace(threadId);
     }
 }

@@ -1,5 +1,7 @@
 namespace HagiCode.Libs.Providers.Codex;
 
+using HagiCode.Libs.Core.Acp;
+
 /// <summary>
 /// Describes a Codex CLI invocation.
 /// </summary>
@@ -65,4 +67,9 @@ public sealed record CodexOptions
     /// A <see langword="null" /> value adds a switch without a value, while non-null values are boundary-trimmed and ignored when empty after trimming.
     /// </summary>
     public IReadOnlyDictionary<string, string?> ExtraArgs { get; init; } = new Dictionary<string, string?>();
+
+    /// <summary>
+    /// Gets or sets provider-level pooling overrides.
+    /// </summary>
+    public CliPoolSettings? PoolSettings { get; init; }
 }

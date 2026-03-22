@@ -1,5 +1,7 @@
 namespace HagiCode.Libs.Providers.Kimi;
 
+using HagiCode.Libs.Core.Acp;
+
 /// <summary>
 /// Describes a Kimi ACP CLI invocation.
 /// </summary>
@@ -62,4 +64,9 @@ public sealed record KimiOptions
     /// Tokens are boundary-trimmed individually, whitespace-only tokens are ignored, and duplicate ACP launch arguments are skipped.
     /// </summary>
     public IReadOnlyList<string> ExtraArguments { get; init; } = [];
+
+    /// <summary>
+    /// Gets or sets provider-level pooling overrides.
+    /// </summary>
+    public CliPoolSettings? PoolSettings { get; init; }
 }

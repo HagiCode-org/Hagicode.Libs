@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using HagiCode.Libs.Core.Acp;
@@ -6,6 +5,7 @@ using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Environment;
 using HagiCode.Libs.Core.Process;
 using HagiCode.Libs.Core.Transport;
+using HagiCode.Libs.Providers.Pooling;
 
 namespace HagiCode.Libs.Providers.Hermes;
 
@@ -20,7 +20,8 @@ public class HermesProvider : ICliProvider<HermesOptions>
     private readonly CliExecutableResolver _executableResolver;
     private readonly CliProcessManager _processManager;
     private readonly IRuntimeEnvironmentResolver? _runtimeEnvironmentResolver;
-    private readonly ConcurrentDictionary<string, CachedHermesSession> _sessions = new(StringComparer.Ordinal);
+    private readonly CliProviderPoolCoordinator _poolCoordinator;
+    private readonly CliProviderPoolConfigurationRegistry _poolConfiguration;
     private int _disposed;
 
     /// <summary>
@@ -32,11 +33,15 @@ public class HermesProvider : ICliProvider<HermesOptions>
     public HermesProvider(
         CliExecutableResolver executableResolver,
         CliProcessManager processManager,
-        IRuntimeEnvironmentResolver? runtimeEnvironmentResolver = null)
+        IRuntimeEnvironmentResolver? runtimeEnvironmentResolver = null,
+        CliProviderPoolCoordinator? poolCoordinator = null,
+        CliProviderPoolConfigurationRegistry? poolConfiguration = null)
     {
         _executableResolver = executableResolver ?? throw new ArgumentNullException(nameof(executableResolver));
         _processManager = processManager ?? throw new ArgumentNullException(nameof(processManager));
         _runtimeEnvironmentResolver = runtimeEnvironmentResolver;
+        _poolCoordinator = poolCoordinator ?? new CliProviderPoolCoordinator();
+        _poolConfiguration = poolConfiguration ?? new CliProviderPoolConfigurationRegistry();
     }
 
     /// <inheritdoc />
@@ -57,35 +62,83 @@ public class HermesProvider : ICliProvider<HermesOptions>
 
         var runtimeEnvironment = await ResolveRuntimeEnvironmentAsync(cancellationToken).ConfigureAwait(false);
         var workingDirectory = ResolveWorkingDirectory(options.WorkingDirectory);
-        var sessionResolution = await GetOrCreateSessionAsync(
-            options,
-            runtimeEnvironment,
-            workingDirectory,
-            cancellationToken).ConfigureAwait(false);
-
-        await sessionResolution.Session.ExecutionLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
+        var executablePath = ResolveExecutablePath(options, runtimeEnvironment)
+            ?? throw new FileNotFoundException(
+                "Unable to locate the Hermes executable. Set HermesOptions.ExecutablePath or ensure 'hermes' is on PATH.");
+        var startContext = new ProcessStartContext
         {
-            yield return sessionResolution.LifecycleMessage;
+            ExecutablePath = executablePath,
+            Arguments = BuildCommandArguments(options),
+            WorkingDirectory = workingDirectory,
+            EnvironmentVariables = BuildEnvironmentVariables(options, runtimeEnvironment)
+        };
 
-            var promptTask = sessionResolution.Session.SessionClient.SendPromptAsync(
-                sessionResolution.Session.SessionId,
-                prompt,
-                cancellationToken);
-            await foreach (var message in StreamPromptMessagesAsync(
-                               sessionResolution.Session.SessionClient,
-                               sessionResolution.Session.SessionId,
-                               promptTask,
-                               cancellationToken).ConfigureAwait(false))
+        var poolSettings = ResolvePoolSettings(options);
+        if (!poolSettings.Enabled)
+        {
+            await foreach (var message in ExecuteOneShotAsync(options, prompt, workingDirectory, startContext, cancellationToken).ConfigureAwait(false))
             {
                 yield return message;
             }
 
-            sessionResolution.Session.Touch();
+            yield break;
+        }
+
+        var logicalSessionKey = ResolveLogicalSessionKey(options.SessionId, poolSettings);
+        var request = new CliAcpPoolRequest(
+            Name,
+            logicalSessionKey,
+            CliPoolFingerprintBuilder.Build(executablePath, workingDirectory, startContext.Arguments, startContext.EnvironmentVariables),
+            poolSettings);
+
+        await using var lease = await _poolCoordinator.AcquireAcpSessionAsync(
+            request,
+            ct => CreatePooledEntryAsync(options, workingDirectory, startContext, request, ct),
+            cancellationToken).ConfigureAwait(false);
+
+        if (lease.IsWarmLease)
+        {
+            var normalizedHandle = await lease.Entry.SessionClient.StartSessionAsync(
+                workingDirectory,
+                lease.Entry.SessionId,
+                options.Model,
+                cancellationToken).ConfigureAwait(false);
+            lease.Entry.RefreshSession(normalizedHandle, request.CompatibilityFingerprint);
+        }
+
+        var lifecycleMessage = lease.IsWarmLease
+            ? HermesAcpMessageMapper.CreateSessionReusedMessage(lease.Entry.SessionId, options.SessionId)
+            : HermesAcpMessageMapper.CreateSessionLifecycleMessage(lease.Entry.SessionHandle);
+
+        var shouldEvictAnonymous = options.SessionId is null && !poolSettings.KeepAnonymousSessions;
+        var faulted = false;
+        await lease.Entry.ExecutionLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            yield return lifecycleMessage;
+
+            var promptTask = lease.Entry.SessionClient.SendPromptAsync(
+                lease.Entry.SessionId,
+                prompt,
+                cancellationToken);
+            await foreach (var message in StreamPromptMessagesAsync(
+                               lease.Entry.SessionClient,
+                               lease.Entry.SessionId,
+                               promptTask,
+                               cancellationToken).ConfigureAwait(false))
+            {
+                if (string.Equals(message.Type, "terminal.failed", StringComparison.OrdinalIgnoreCase))
+                {
+                    faulted = true;
+                }
+
+                yield return message;
+            }
         }
         finally
         {
-            sessionResolution.Session.ExecutionLock.Release();
+            lease.Entry.ExecutionLock.Release();
+            lease.IsFaulted = faulted || shouldEvictAnonymous;
         }
     }
 
@@ -147,12 +200,7 @@ public class HermesProvider : ICliProvider<HermesOptions>
             return;
         }
 
-        var sessions = _sessions.Values.Distinct().ToArray();
-        _sessions.Clear();
-        foreach (var session in sessions)
-        {
-            await session.DisposeAsync().ConfigureAwait(false);
-        }
+        await _poolCoordinator.DisposeAcpProviderAsync(Name).ConfigureAwait(false);
     }
 
     internal virtual IReadOnlyList<string> BuildCommandArguments(HermesOptions options)
@@ -201,42 +249,29 @@ public class HermesProvider : ICliProvider<HermesOptions>
         return new SubprocessAcpTransport(_processManager, startContext);
     }
 
-    private async Task<IReadOnlyDictionary<string, string?>> ResolveRuntimeEnvironmentAsync(CancellationToken cancellationToken)
+    private CliPoolSettings ResolvePoolSettings(HermesOptions options)
     {
-        if (_runtimeEnvironmentResolver is null)
-        {
-            return new Dictionary<string, string?>();
-        }
-
-        return await _runtimeEnvironmentResolver.ResolveAsync(cancellationToken).ConfigureAwait(false);
+        return CliPoolSettings.Merge(_poolConfiguration.GetSettings(Name), options.PoolSettings);
     }
 
-    private async Task<SessionResolution> GetOrCreateSessionAsync(
-        HermesOptions options,
-        IReadOnlyDictionary<string, string?> runtimeEnvironment,
-        string workingDirectory,
-        CancellationToken cancellationToken)
+    private static string? ResolveLogicalSessionKey(string? requestedSessionId, CliPoolSettings settings)
     {
-        if (!string.IsNullOrWhiteSpace(options.SessionId) &&
-            _sessions.TryGetValue(options.SessionId, out var existingSession))
+        var normalizedSessionId = ArgumentValueNormalizer.NormalizeOptionalValue(requestedSessionId);
+        if (normalizedSessionId is not null)
         {
-            existingSession.Touch();
-            return new SessionResolution(
-                existingSession,
-                HermesAcpMessageMapper.CreateSessionReusedMessage(existingSession.SessionId, options.SessionId));
+            return normalizedSessionId;
         }
 
-        var executablePath = ResolveExecutablePath(options, runtimeEnvironment)
-            ?? throw new FileNotFoundException(
-                "Unable to locate the Hermes executable. Set HermesOptions.ExecutablePath or ensure 'hermes' is on PATH.");
-        var startContext = new ProcessStartContext
-        {
-            ExecutablePath = executablePath,
-            Arguments = BuildCommandArguments(options),
-            WorkingDirectory = workingDirectory,
-            EnvironmentVariables = BuildEnvironmentVariables(options, runtimeEnvironment)
-        };
+        return settings.KeepAnonymousSessions ? $"hermes:{Guid.NewGuid():N}" : null;
+    }
 
+    private async Task<PooledAcpSessionEntry> CreatePooledEntryAsync(
+        HermesOptions options,
+        string workingDirectory,
+        ProcessStartContext startContext,
+        CliAcpPoolRequest request,
+        CancellationToken cancellationToken)
+    {
         var sessionClient = CreateSessionClient(startContext);
         try
         {
@@ -251,9 +286,13 @@ public class HermesProvider : ICliProvider<HermesOptions>
                 options.Model,
                 startupCts.Token).ConfigureAwait(false);
 
-            var session = new CachedHermesSession(sessionHandle.SessionId, sessionClient);
-            RegisterSession(session, options.SessionId);
-            return new SessionResolution(session, HermesAcpMessageMapper.CreateSessionLifecycleMessage(sessionHandle));
+            return new PooledAcpSessionEntry(
+                Name,
+                sessionHandle.SessionId,
+                sessionClient,
+                request.CompatibilityFingerprint,
+                sessionHandle,
+                request.Settings);
         }
         catch
         {
@@ -262,18 +301,46 @@ public class HermesProvider : ICliProvider<HermesOptions>
         }
     }
 
-    private void RegisterSession(CachedHermesSession session, string? alias)
+    private async IAsyncEnumerable<CliMessage> ExecuteOneShotAsync(
+        HermesOptions options,
+        string prompt,
+        string workingDirectory,
+        ProcessStartContext startContext,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        if (!_sessions.TryAdd(session.SessionId, session))
+        await using var sessionClient = CreateSessionClient(startContext);
+        using var startupCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        startupCts.CancelAfter(options.StartupTimeout ?? DefaultStartupTimeout);
+
+        await sessionClient.ConnectAsync(startupCts.Token).ConfigureAwait(false);
+        await sessionClient.InitializeAsync(startupCts.Token).ConfigureAwait(false);
+        var sessionHandle = await sessionClient.StartSessionAsync(
+            workingDirectory,
+            sessionId: null,
+            options.Model,
+            startupCts.Token).ConfigureAwait(false);
+
+        yield return HermesAcpMessageMapper.CreateSessionLifecycleMessage(sessionHandle);
+
+        var promptTask = sessionClient.SendPromptAsync(sessionHandle.SessionId, prompt, cancellationToken);
+        await foreach (var message in StreamPromptMessagesAsync(
+                           sessionClient,
+                           sessionHandle.SessionId,
+                           promptTask,
+                           cancellationToken).ConfigureAwait(false))
         {
-            throw new InvalidOperationException($"Hermes session '{session.SessionId}' has already been registered in memory.");
+            yield return message;
+        }
+    }
+
+    private async Task<IReadOnlyDictionary<string, string?>> ResolveRuntimeEnvironmentAsync(CancellationToken cancellationToken)
+    {
+        if (_runtimeEnvironmentResolver is null)
+        {
+            return new Dictionary<string, string?>();
         }
 
-        if (!string.IsNullOrWhiteSpace(alias) &&
-            !string.Equals(alias, session.SessionId, StringComparison.Ordinal))
-        {
-            _sessions.TryAdd(alias, session);
-        }
+        return await _runtimeEnvironmentResolver.ResolveAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private string? ResolveExecutablePath(HermesOptions options, IReadOnlyDictionary<string, string?> runtimeEnvironment)
@@ -477,27 +544,4 @@ public class HermesProvider : ICliProvider<HermesOptions>
                string.Equals(messageType, "terminal.failed", StringComparison.OrdinalIgnoreCase);
     }
 
-    private sealed class CachedHermesSession(string sessionId, IAcpSessionClient sessionClient) : IAsyncDisposable
-    {
-        public string SessionId { get; } = sessionId;
-
-        public IAcpSessionClient SessionClient { get; } = sessionClient;
-
-        public SemaphoreSlim ExecutionLock { get; } = new(1, 1);
-
-        public DateTimeOffset LastUsedAt { get; private set; } = DateTimeOffset.UtcNow;
-
-        public void Touch()
-        {
-            LastUsedAt = DateTimeOffset.UtcNow;
-        }
-
-        public async ValueTask DisposeAsync()
-        {
-            ExecutionLock.Dispose();
-            await SessionClient.DisposeAsync().ConfigureAwait(false);
-        }
-    }
-
-    private sealed record SessionResolution(CachedHermesSession Session, CliMessage LifecycleMessage);
 }

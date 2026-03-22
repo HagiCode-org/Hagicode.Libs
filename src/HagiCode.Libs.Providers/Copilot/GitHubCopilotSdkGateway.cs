@@ -9,34 +9,47 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
 {
     private static readonly SemaphoreSlim EnvironmentMutationLock = new(1, 1);
 
+    public async Task<ICopilotSdkRuntime> CreateRuntimeAsync(
+        CopilotSdkRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var clientOptions = BuildClientOptions(request);
+        using var startupCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        startupCancellationTokenSource.CancelAfter(request.StartupTimeout);
+
+        var environmentScope = await CopilotSdkEnvironmentScope.EnterAsync(request.EnvironmentVariables, cancellationToken);
+        CopilotClient? client = null;
+        try
+        {
+            client = new CopilotClient(clientOptions);
+            var session = await client.CreateSessionAsync(new SessionConfig
+            {
+                Model = request.Model,
+                WorkingDirectory = request.WorkingDirectory,
+                Streaming = true,
+                OnPermissionRequest = PermissionHandler.ApproveAll
+            }, startupCancellationTokenSource.Token);
+
+            return new PooledCopilotSdkRuntime(client, session, environmentScope);
+        }
+        catch
+        {
+            if (client is not null)
+            {
+                await client.DisposeAsync();
+            }
+
+            await environmentScope.DisposeAsync();
+            throw;
+        }
+    }
+
     public async IAsyncEnumerable<CopilotSdkStreamEvent> SendPromptAsync(
         CopilotSdkRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var channel = Channel.CreateUnbounded<CopilotSdkStreamEvent>();
-
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await CopyEventsAsync(SendPromptViaSdkAsync(request, cancellationToken), channel.Writer, cancellationToken);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-            }
-            catch (Exception ex)
-            {
-                channel.Writer.TryWrite(new CopilotSdkStreamEvent(
-                    CopilotSdkStreamEventType.Error,
-                    ErrorMessage: NormalizeFailureMessage(ex.Message)));
-            }
-            finally
-            {
-                channel.Writer.TryComplete();
-            }
-        }, CancellationToken.None);
-
-        await foreach (var eventData in channel.Reader.ReadAllAsync(cancellationToken))
+        await using var runtime = await CreateRuntimeAsync(request, cancellationToken).ConfigureAwait(false);
+        await foreach (var eventData in runtime.SendPromptAsync(request, cancellationToken).ConfigureAwait(false))
         {
             yield return eventData;
         }
@@ -63,6 +76,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
 
     internal static SessionEventDispatchResult DispatchSessionEvent(SessionEvent evt, bool sawDelta)
     {
+        var channel = Channel.CreateUnbounded<CopilotSdkStreamEvent>();
         var events = new List<CopilotSdkStreamEvent>();
 
         switch (evt)
@@ -174,108 +188,6 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
         await producerTask;
     }
 
-    private async IAsyncEnumerable<CopilotSdkStreamEvent> SendPromptViaSdkAsync(
-        CopilotSdkRequest request,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
-    {
-        await foreach (var eventData in StreamProducedEventsAsync(async (writer, streamCancellationToken) =>
-        {
-            var clientOptions = BuildClientOptions(request);
-            using var startupCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(streamCancellationToken);
-            startupCancellationTokenSource.CancelAfter(request.StartupTimeout);
-            CopilotSession? session = null;
-            var terminalEventWritten = false;
-
-            try
-            {
-                await using var environmentScope = await CopilotSdkEnvironmentScope.EnterAsync(request.EnvironmentVariables, streamCancellationToken);
-                await using var client = new CopilotClient(clientOptions);
-
-                session = await client.CreateSessionAsync(new SessionConfig
-                {
-                    Model = request.Model,
-                    WorkingDirectory = request.WorkingDirectory,
-                    Streaming = true,
-                    OnPermissionRequest = PermissionHandler.ApproveAll
-                }, startupCancellationTokenSource.Token);
-
-                var sawDelta = false;
-                using var subscription = session.On(evt =>
-                {
-                    var dispatchResult = DispatchSessionEvent(evt, sawDelta);
-                    sawDelta = dispatchResult.SawDelta;
-
-                    foreach (var mappedEvent in dispatchResult.Events)
-                    {
-                        if (mappedEvent.Type == CopilotSdkStreamEventType.Error)
-                        {
-                            terminalEventWritten = true;
-                        }
-
-                        writer.TryWrite(mappedEvent);
-                    }
-                });
-
-                try
-                {
-                    await session.SendAndWaitAsync(
-                        new MessageOptions { Prompt = request.Prompt },
-                        request.Timeout,
-                        streamCancellationToken);
-                }
-                catch (Exception ex)
-                {
-                    var normalizedMessage = NormalizeFailureMessage(
-                        ex.Message,
-                        startupTimedOut: ex is OperationCanceledException
-                                         && !streamCancellationToken.IsCancellationRequested
-                                         && startupCancellationTokenSource.IsCancellationRequested,
-                        startupTimeout: request.StartupTimeout);
-
-                    if (!terminalEventWritten)
-                    {
-                        terminalEventWritten = true;
-                        writer.TryWrite(new CopilotSdkStreamEvent(
-                            CopilotSdkStreamEventType.Error,
-                            ErrorMessage: normalizedMessage));
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                var normalizedMessage = NormalizeFailureMessage(
-                    ex.Message,
-                    startupTimedOut: ex is OperationCanceledException
-                                     && !streamCancellationToken.IsCancellationRequested
-                                     && startupCancellationTokenSource.IsCancellationRequested,
-                    startupTimeout: request.StartupTimeout);
-
-                if (!terminalEventWritten)
-                {
-                    terminalEventWritten = true;
-                    writer.TryWrite(new CopilotSdkStreamEvent(
-                        CopilotSdkStreamEventType.Error,
-                        ErrorMessage: normalizedMessage));
-                }
-            }
-            finally
-            {
-                if (session is not null)
-                {
-                    await session.DisposeAsync();
-                }
-
-                if (!terminalEventWritten)
-                {
-                    writer.TryWrite(new CopilotSdkStreamEvent(CopilotSdkStreamEventType.Completed));
-                }
-            }
-        }, cancellationToken))
-        {
-            yield return eventData;
-        }
-    }
-
     private static async Task CopyEventsAsync(
         IAsyncEnumerable<CopilotSdkStreamEvent> source,
         ChannelWriter<CopilotSdkStreamEvent> writer,
@@ -328,6 +240,73 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
     }
 
     internal sealed record SessionEventDispatchResult(bool SawDelta, IReadOnlyList<CopilotSdkStreamEvent> Events);
+
+    private sealed class PooledCopilotSdkRuntime(
+        CopilotClient client,
+        CopilotSession session,
+        CopilotSdkEnvironmentScope environmentScope) : ICopilotSdkRuntime
+    {
+        public async IAsyncEnumerable<CopilotSdkStreamEvent> SendPromptAsync(
+            CopilotSdkRequest request,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await foreach (var eventData in StreamProducedEventsAsync(async (writer, streamCancellationToken) =>
+            {
+                var terminalEventWritten = false;
+                var sawDelta = false;
+                using var subscription = session.On(evt =>
+                {
+                    var dispatchResult = DispatchSessionEvent(evt, sawDelta);
+                    sawDelta = dispatchResult.SawDelta;
+
+                    foreach (var mappedEvent in dispatchResult.Events)
+                    {
+                        if (mappedEvent.Type == CopilotSdkStreamEventType.Error)
+                        {
+                            terminalEventWritten = true;
+                        }
+
+                        writer.TryWrite(mappedEvent);
+                    }
+                });
+
+                try
+                {
+                    await session.SendAndWaitAsync(
+                        new MessageOptions { Prompt = request.Prompt },
+                        request.Timeout,
+                        streamCancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    if (!terminalEventWritten)
+                    {
+                        terminalEventWritten = true;
+                        writer.TryWrite(new CopilotSdkStreamEvent(
+                            CopilotSdkStreamEventType.Error,
+                            ErrorMessage: NormalizeFailureMessage(ex.Message)));
+                    }
+                }
+                finally
+                {
+                    if (!terminalEventWritten)
+                    {
+                        writer.TryWrite(new CopilotSdkStreamEvent(CopilotSdkStreamEventType.Completed));
+                    }
+                }
+            }, cancellationToken))
+            {
+                yield return eventData;
+            }
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await session.DisposeAsync();
+            await client.DisposeAsync();
+            await environmentScope.DisposeAsync();
+        }
+    }
 
     private sealed class CopilotSdkEnvironmentScope : IAsyncDisposable
     {

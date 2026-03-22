@@ -4,6 +4,8 @@ using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Environment;
 using HagiCode.Libs.Core.Process;
 using HagiCode.Libs.Core.Transport;
+using HagiCode.Libs.Core.Acp;
+using HagiCode.Libs.Providers.Pooling;
 
 namespace HagiCode.Libs.Providers.ClaudeCode;
 
@@ -16,6 +18,8 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
     private readonly CliExecutableResolver _executableResolver;
     private readonly CliProcessManager _processManager;
     private readonly IRuntimeEnvironmentResolver? _runtimeEnvironmentResolver;
+    private readonly CliProviderPoolCoordinator _poolCoordinator;
+    private readonly CliProviderPoolConfigurationRegistry _poolConfiguration;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ClaudeCodeProvider" /> class.
@@ -26,11 +30,15 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
     public ClaudeCodeProvider(
         CliExecutableResolver executableResolver,
         CliProcessManager processManager,
-        IRuntimeEnvironmentResolver? runtimeEnvironmentResolver = null)
+        IRuntimeEnvironmentResolver? runtimeEnvironmentResolver = null,
+        CliProviderPoolCoordinator? poolCoordinator = null,
+        CliProviderPoolConfigurationRegistry? poolConfiguration = null)
     {
         _executableResolver = executableResolver ?? throw new ArgumentNullException(nameof(executableResolver));
         _processManager = processManager ?? throw new ArgumentNullException(nameof(processManager));
         _runtimeEnvironmentResolver = runtimeEnvironmentResolver;
+        _poolCoordinator = poolCoordinator ?? new CliProviderPoolCoordinator();
+        _poolConfiguration = poolConfiguration ?? new CliProviderPoolConfigurationRegistry();
     }
 
     /// <inheritdoc />
@@ -60,20 +68,77 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
             EnvironmentVariables = BuildEnvironmentVariables(options, runtimeEnvironment)
         };
 
-        await using var transport = CreateTransport(startContext);
-        await transport.ConnectAsync(cancellationToken);
-        await transport.SendAsync(CreatePromptMessage(prompt, options), cancellationToken);
-
-        await foreach (var message in transport.ReceiveAsync(cancellationToken))
+        var poolSettings = ResolvePoolSettings(options);
+        if (!poolSettings.Enabled)
         {
-            yield return message;
-
-            // Claude CLI can keep the stdio session alive after emitting the final result.
-            // Stop once the terminal result arrives so one prompt execution completes cleanly.
-            if (string.Equals(message.Type, "result", StringComparison.OrdinalIgnoreCase))
+            await foreach (var message in ExecuteOneShotAsync(prompt, options, startContext, cancellationToken).ConfigureAwait(false))
             {
-                yield break;
+                yield return message;
             }
+
+            yield break;
+        }
+
+        var request = new CliRuntimePoolRequest(
+            Name,
+            ResolveLogicalSessionKey(options),
+            CliPoolFingerprintBuilder.Build(
+                executablePath,
+                options.WorkingDirectory,
+                options.Model,
+                options.MaxTurns,
+                options.SystemPrompt,
+                options.AppendSystemPrompt,
+                options.AllowedTools,
+                options.DisallowedTools,
+                options.PermissionMode,
+                options.ContinueConversation,
+                options.Resume,
+                options.SessionId,
+                options.AddDirectories,
+                options.ExtraArgs,
+                options.McpServersPath,
+                options.McpServers,
+                startContext.EnvironmentVariables),
+            poolSettings);
+
+        await using var lease = await _poolCoordinator.AcquireTransportAsync(
+            request,
+            async ct =>
+            {
+                var transport = CreateTransport(startContext);
+                await transport.ConnectAsync(ct).ConfigureAwait(false);
+                var entry = new CliRuntimePoolEntry<ICliTransport>(Name, transport, request.CompatibilityFingerprint, request.Settings);
+                entry.RegisterKey(request.LogicalSessionKey);
+                return entry;
+            },
+            cancellationToken).ConfigureAwait(false);
+
+        var shouldEvictAnonymous = request.LogicalSessionKey is null && !poolSettings.KeepAnonymousSessions;
+        var faulted = false;
+        await lease.Entry.ExecutionLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await lease.Entry.Resource.SendAsync(CreatePromptMessage(prompt, options), cancellationToken).ConfigureAwait(false);
+
+            await foreach (var message in lease.Entry.Resource.ReceiveAsync(cancellationToken).ConfigureAwait(false))
+            {
+                if (string.Equals(message.Type, "error", StringComparison.OrdinalIgnoreCase))
+                {
+                    faulted = true;
+                }
+
+                yield return message;
+                if (string.Equals(message.Type, "result", StringComparison.OrdinalIgnoreCase))
+                {
+                    break;
+                }
+            }
+        }
+        finally
+        {
+            lease.Entry.ExecutionLock.Release();
+            lease.IsFaulted = faulted || shouldEvictAnonymous;
         }
     }
 
@@ -124,7 +189,10 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
     }
 
     /// <inheritdoc />
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    public async ValueTask DisposeAsync()
+    {
+        await _poolCoordinator.DisposeTransportProviderAsync(Name).ConfigureAwait(false);
+    }
 
     internal virtual IReadOnlyList<string> BuildCommandArguments(ClaudeCodeOptions options)
     {
@@ -270,6 +338,37 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
     protected virtual ICliTransport CreateTransport(ProcessStartContext startContext)
     {
         return new SubprocessTransport(_processManager, startContext);
+    }
+
+    private CliPoolSettings ResolvePoolSettings(ClaudeCodeOptions options)
+    {
+        return CliPoolSettings.Merge(_poolConfiguration.GetSettings(Name), options.PoolSettings);
+    }
+
+    private static string? ResolveLogicalSessionKey(ClaudeCodeOptions options)
+    {
+        return ArgumentValueNormalizer.NormalizeOptionalValue(options.SessionId)
+               ?? ArgumentValueNormalizer.NormalizeOptionalValue(options.Resume);
+    }
+
+    private async IAsyncEnumerable<CliMessage> ExecuteOneShotAsync(
+        string prompt,
+        ClaudeCodeOptions options,
+        ProcessStartContext startContext,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        await using var transport = CreateTransport(startContext);
+        await transport.ConnectAsync(cancellationToken).ConfigureAwait(false);
+        await transport.SendAsync(CreatePromptMessage(prompt, options), cancellationToken).ConfigureAwait(false);
+
+        await foreach (var message in transport.ReceiveAsync(cancellationToken).ConfigureAwait(false))
+        {
+            yield return message;
+            if (string.Equals(message.Type, "result", StringComparison.OrdinalIgnoreCase))
+            {
+                yield break;
+            }
+        }
     }
 
     private async Task<IReadOnlyDictionary<string, string?>> ResolveRuntimeEnvironmentAsync(CancellationToken cancellationToken)
