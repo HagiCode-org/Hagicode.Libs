@@ -5,7 +5,7 @@
 ## Projects
 
 - `src/HagiCode.Libs.Core` - transport, process management, executable discovery, and runtime environment resolution.
-- `src/HagiCode.Libs.Providers` - provider abstractions, the Claude Code/Copilot/Codex/CodeBuddy/Hermes/QoderCLI providers, and optional DI registration.
+- `src/HagiCode.Libs.Providers` - provider abstractions, the Claude Code/Copilot/Codex/CodeBuddy/Hermes/Kimi/Kiro/QoderCLI providers, and optional DI registration.
 - `src/HagiCode.Libs.Skills` - skills-oriented infrastructure. Its first shipped capability is a typed online API client for search, well-known discovery, audit, telemetry, and GitHub metadata/tree requests.
 - `src/HagiCode.Libs.Exploration` - Git repository discovery and state inspection.
 - `tests/*` - xUnit coverage for each project.
@@ -85,7 +85,7 @@ The endpoint profile is provider-driven, so consumers can replace `IOnlineApiEnd
 
 ## Dedicated provider console
 
-`src/HagiCode.Libs.ClaudeCode.Console`, `src/HagiCode.Libs.Copilot.Console`, `src/HagiCode.Libs.Codex.Console`, `src/HagiCode.Libs.Codebuddy.Console`, `src/HagiCode.Libs.Hermes.Console`, and `src/HagiCode.Libs.QoderCli.Console` are dedicated provider consoles built on the shared `HagiCode.Libs.ConsoleTesting` harness.
+`src/HagiCode.Libs.ClaudeCode.Console`, `src/HagiCode.Libs.Copilot.Console`, `src/HagiCode.Libs.Codex.Console`, `src/HagiCode.Libs.Codebuddy.Console`, `src/HagiCode.Libs.Hermes.Console`, `src/HagiCode.Libs.Kimi.Console`, `src/HagiCode.Libs.Kiro.Console`, and `src/HagiCode.Libs.QoderCli.Console` are dedicated provider consoles built on the shared `HagiCode.Libs.ConsoleTesting` harness.
 
 From `repos/Hagicode.Libs`, you can use:
 
@@ -121,6 +121,20 @@ dotnet run --project src/HagiCode.Libs.Hermes.Console -- --test-provider-full --
 dotnet run --project src/HagiCode.Libs.Hermes.Console -- --test-provider-full --arguments "acp --profile smoke"
 dotnet run --project src/HagiCode.Libs.Hermes.Console -- --test-all hermes
 
+dotnet run --project src/HagiCode.Libs.Kimi.Console -- --help
+dotnet run --project src/HagiCode.Libs.Kimi.Console
+dotnet run --project src/HagiCode.Libs.Kimi.Console -- --test-provider kimi-cli
+dotnet run --project src/HagiCode.Libs.Kimi.Console -- --test-provider-full --repo .
+dotnet run --project src/HagiCode.Libs.Kimi.Console -- --test-provider-full --model kimi-k2.5 --arg --profile=smoke
+dotnet run --project src/HagiCode.Libs.Kimi.Console -- --test-all kimi
+
+dotnet run --project src/HagiCode.Libs.Kiro.Console -- --help
+dotnet run --project src/HagiCode.Libs.Kiro.Console
+dotnet run --project src/HagiCode.Libs.Kiro.Console -- --test-provider kiro-cli
+dotnet run --project src/HagiCode.Libs.Kiro.Console -- --test-provider-full --repo .
+dotnet run --project src/HagiCode.Libs.Kiro.Console -- --test-provider-full --model kiro-default --auth-method token --auth-token <token> --arg --profile
+dotnet run --project src/HagiCode.Libs.Kiro.Console -- --test-all kiro
+
 dotnet run --project src/HagiCode.Libs.QoderCli.Console -- --help
 dotnet run --project src/HagiCode.Libs.QoderCli.Console
 dotnet run --project src/HagiCode.Libs.QoderCli.Console -- --test-provider qodercli
@@ -151,6 +165,14 @@ dotnet run --project src/HagiCode.Libs.QoderCli.Console -- --test-all qodercli
 - Hermes 默认套件当前包含 `Ping`、`Simple Prompt`、`Complex Prompt` 和 `Memory Reuse`。
 - Hermes accepts `--model <model>`, `--executable <path>`, and `--arguments <value>` overrides.
 - Hermes repository summary remains opt-in via `--repo <path>`.
+- No arguments also run the default Kimi suite.
+- Kimi 默认套件当前包含 `Ping`、`Simple Prompt`、`Complex Prompt` 和 `Session Resume`。
+- Kimi accepts `--model <model>`, `--executable <path>`, repeated `--arg <value>` overrides, and optional `--auth-method <id>` / `--auth-token <token>` bootstrap hints.
+- Kimi repository summary remains opt-in via `--repo <path>`, and `kimi-cli` remains a dedicated-console alias for the canonical `kimi` provider name.
+- No arguments also run the default Kiro suite.
+- Kiro 默认套件当前包含 `Ping`、`Simple Prompt`、`Complex Prompt` 和 `Session Resume`。
+- Kiro accepts `--model <model>`, `--executable <path>`, repeated `--arg <value>` overrides, and optional `--auth-method <id>` / `--auth-token <token>` / `--bootstrap-method <name>` bootstrap hints.
+- Kiro repository summary remains opt-in via `--repo <path>`, and `kiro-cli` remains a dedicated-console alias for the canonical `kiro` provider name.
 - No arguments also run the default QoderCLI suite.
 - QoderCLI 默认套件当前包含 `Ping`、`Simple Prompt`、`Complex Prompt` 和 `Session Resume`。
 - QoderCLI accepts `--model <model>` for explicit model forwarding only; no default model is imposed because supported qodercli model identifiers have not been confirmed yet.
@@ -167,6 +189,8 @@ using HagiCode.Libs.Providers.Codebuddy;
 using HagiCode.Libs.Providers.Copilot;
 using HagiCode.Libs.Providers.Codex;
 using HagiCode.Libs.Providers.Hermes;
+using HagiCode.Libs.Providers.Kimi;
+using HagiCode.Libs.Providers.Kiro;
 using HagiCode.Libs.Providers.QoderCli;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -179,6 +203,8 @@ var codebuddy = provider.GetRequiredService<ICliProvider<CodebuddyOptions>>();
 var copilot = provider.GetRequiredService<ICliProvider<CopilotOptions>>();
 var codex = provider.GetRequiredService<ICliProvider<CodexOptions>>();
 var hermes = provider.GetRequiredService<ICliProvider<HermesOptions>>();
+var kimi = provider.GetRequiredService<ICliProvider<KimiOptions>>();
+var kiro = provider.GetRequiredService<ICliProvider<KiroOptions>>();
 var qoderCli = provider.GetRequiredService<ICliProvider<QoderCliOptions>>();
 ```
 
@@ -261,6 +287,48 @@ await foreach (var message in hermes.ExecuteAsync(options, "Reply with exactly t
 }
 ```
 
+Kimi execution options cover ACP bootstrap, optional authentication, and `session/load` resume without forcing consumers to handcraft JSON-RPC calls:
+
+```csharp
+var options = new KimiOptions
+{
+    WorkingDirectory = "/path/to/repo",
+    Model = "kimi-k2.5",
+    AuthenticationMethod = "token",
+    AuthenticationToken = "<token>",
+    AuthenticationInfo = new Dictionary<string, string?>
+    {
+        ["region"] = "cn"
+    },
+    ExtraArguments = ["--profile", "smoke"]
+};
+
+await foreach (var message in kimi.ExecuteAsync(options, "Reply with exactly the word 'pong'"))
+{
+    Console.WriteLine($"{message.Type}: {message.Content}");
+}
+
+Kiro execution options cover the shared ACP bootstrap path with optional authentication and custom bootstrap overrides:
+
+```csharp
+var options = new KiroOptions
+{
+    Model = "kiro-default",
+    WorkingDirectory = "/path/to/repo",
+    AuthenticationMethod = "token",
+    AuthenticationToken = "<token>",
+    ExtraArguments = ["--profile", "smoke"]
+};
+
+await foreach (var message in kiro.ExecuteAsync(options, "Reply with exactly the word 'pong'"))
+{
+    Console.WriteLine($"{message.Type}: {message.Content}");
+}
+```
+```
+
+If `initialize` advertises auth methods, the provider performs `authenticate` before creating the session. `PingAsync()` intentionally reports that state as a local-validation requirement instead of assuming credentials are available in public CI.
+
 QoderCLI execution options mirror the ACP stdio providers while keeping the model override optional. `SessionId` is forwarded to the `session/new` or `session/resume` ACP call when present, and `ExtraArguments` are appended after the managed `--acp` bootstrap switch:
 
 ```csharp
@@ -298,11 +366,12 @@ All CLI metadata is centralized in `HagiCode.Libs.Core.Discovery.CliInstallRegis
 | Codex | `@openai/codex` | 0.115.0 | Yes |
 | CodeBuddy | (private) | — | No |
 | Hermes | (private) | — | No |
+| Kimi | (local / explicit validation) | — | No |
 | QoderCLI | (private) | — | No |
 
 ### CI-covered vs. locally-installed CLIs
 
-CLIs with `IsPubliclyInstallable = true` are automatically installed and tested in CI. Today that public set is Claude Code, Copilot, and Codex. CLIs marked as not publicly installable (CodeBuddy, Hermes, QoderCLI) are skipped during CI setup and require local installation for validation.
+CLIs with `IsPubliclyInstallable = true` are automatically installed and tested in CI. Today that public set is Claude Code, Copilot, and Codex. CLIs marked as not publicly installable (CodeBuddy, Hermes, Kimi, QoderCLI) are skipped during CI setup and require local installation for validation.
 
 ### Local reproduction
 
@@ -363,6 +432,13 @@ HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.ConsoleTesting.Tests/H
 ```bash
 HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.Providers.Tests/HagiCode.Libs.Providers.Tests.csproj --filter "FullyQualifiedName~Hermes"
 HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.ConsoleTesting.Tests/HagiCode.Libs.ConsoleTesting.Tests.csproj --filter "FullyQualifiedName~Hermes"
+```
+
+**Kimi** (requires local installation and any required local auth bootstrap):
+```bash
+HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.Providers.Tests/HagiCode.Libs.Providers.Tests.csproj --filter "FullyQualifiedName~Kimi"
+HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.ConsoleTesting.Tests/HagiCode.Libs.ConsoleTesting.Tests.csproj --filter "FullyQualifiedName~Kimi"
+dotnet run --project src/HagiCode.Libs.Kimi.Console -- --test-provider-full --repo .
 ```
 
 **QoderCLI** (requires local installation):
