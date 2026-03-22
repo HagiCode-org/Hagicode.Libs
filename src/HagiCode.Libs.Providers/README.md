@@ -62,6 +62,7 @@ var copilotOptions = new CopilotOptions
 {
     WorkingDirectory = "/path/to/repo",
     Model = "claude-sonnet-4.5",
+    SessionId = "copilot-session-123",
     Permissions = new CopilotPermissionOptions
     {
         AllowAllTools = true,
@@ -74,6 +75,9 @@ await foreach (var message in copilot.ExecuteAsync(copilotOptions, "Reply with e
 {
     Console.WriteLine($"{message.Type}: {message.Content}");
 }
+
+// Reuse a persisted provider-native Copilot conversation on the next call.
+var resumedOptions = copilotOptions with { SessionId = "copilot-session-123" };
 
 var options = new CodexOptions
 {
