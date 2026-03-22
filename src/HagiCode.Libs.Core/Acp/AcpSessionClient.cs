@@ -68,6 +68,22 @@ public sealed class AcpSessionClient : IAcpSessionClient
     }
 
     /// <inheritdoc />
+    public async Task<JsonElement> InvokeBootstrapMethodAsync(
+        string method,
+        object? parameters = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(method);
+
+        await InitializeAsync(cancellationToken).ConfigureAwait(false);
+
+        return await _rpcClient.InvokeAsync<JsonElement>(
+            method,
+            parameters,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public async Task<AcpSessionHandle> StartSessionAsync(
         string workingDirectory,
         string? sessionId,

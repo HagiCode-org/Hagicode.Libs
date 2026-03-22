@@ -21,6 +21,18 @@ public interface IAcpSessionClient : IAsyncDisposable
     Task<JsonElement> InitializeAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Invokes an initialize-time bootstrap RPC such as provider authentication.
+    /// </summary>
+    /// <param name="method">The bootstrap method name.</param>
+    /// <param name="parameters">The request parameters.</param>
+    /// <param name="cancellationToken">Cancels the bootstrap request.</param>
+    /// <returns>The raw bootstrap result.</returns>
+    Task<JsonElement> InvokeBootstrapMethodAsync(
+        string method,
+        object? parameters = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Creates or resumes an ACP session.
     /// </summary>
     /// <param name="workingDirectory">The working directory bound to the session.</param>

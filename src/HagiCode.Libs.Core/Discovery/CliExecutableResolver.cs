@@ -38,25 +38,16 @@ public class CliExecutableResolver
             return null;
         }
 
-        if (Path.IsPathRooted(executableName) || executableName.Contains(Path.DirectorySeparatorChar) || executableName.Contains(Path.AltDirectorySeparatorChar))
+        if (ShouldResolveDirectly(executableName))
         {
             return ResolveDirectPath(executableName);
         }
 
-        foreach (var directory in GetProbeDirectories(environmentVariables))
+        foreach (var candidate in EnumerateProbeCandidates(executableName, environmentVariables))
         {
-            if (!Directory.Exists(directory))
+            if (File.Exists(candidate))
             {
-                continue;
-            }
-
-            var basePath = Path.Combine(directory, executableName);
-            foreach (var candidate in EnumerateCandidates(basePath, environmentVariables))
-            {
-                if (File.Exists(candidate))
-                {
-                    return Path.GetFullPath(candidate);
-                }
+                return Path.GetFullPath(candidate);
             }
         }
 
@@ -98,6 +89,38 @@ public class CliExecutableResolver
         IReadOnlyDictionary<string, string?>? environmentVariables = null)
     {
         return ResolveExecutablePath(executableName, environmentVariables) is not null;
+    }
+
+    private bool ShouldResolveDirectly(string executableName)
+    {
+        if (!_isWindows())
+        {
+            return Path.IsPathRooted(executableName)
+                   || executableName.Contains(Path.DirectorySeparatorChar)
+                   || executableName.Contains(Path.AltDirectorySeparatorChar);
+        }
+
+        return Path.IsPathFullyQualified(executableName)
+               || !string.IsNullOrWhiteSpace(Path.GetExtension(executableName));
+    }
+
+    private IEnumerable<string> EnumerateProbeCandidates(
+        string executableName,
+        IReadOnlyDictionary<string, string?>? environmentVariables)
+    {
+        foreach (var directory in GetProbeDirectories(environmentVariables))
+        {
+            if (!Directory.Exists(directory))
+            {
+                continue;
+            }
+
+            var basePath = Path.Combine(directory, executableName);
+            foreach (var candidate in EnumerateCandidates(basePath, environmentVariables))
+            {
+                yield return candidate;
+            }
+        }
     }
 
     private static string? ResolveDirectPath(string executableName)

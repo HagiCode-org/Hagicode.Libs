@@ -88,6 +88,36 @@ public sealed class AcpSessionClientTests
     }
 
     [Fact]
+    public async Task InvokeBootstrapMethodAsync_initializes_once_and_forwards_method_payload()
+    {
+        var transport = new ScriptedAcpTransport(request => request.Method switch
+        {
+            "initialize" => [CreateJsonRpcResult(request.Id, """{"protocolVersion":1,"authMethods":[{"id":"token"}]}""")],
+            "authenticate" => [CreateJsonRpcResult(request.Id, """{"accepted":true}""")],
+            _ => throw new InvalidOperationException($"Unexpected ACP method: {request.Method}")
+        });
+
+        await using var client = new AcpSessionClient(transport);
+        await client.ConnectAsync();
+
+        var result = await client.InvokeBootstrapMethodAsync(
+            "authenticate",
+            new
+            {
+                methodId = "token",
+                methodInfo = new
+                {
+                    token = "secret"
+                }
+            });
+
+        result.GetProperty("accepted").GetBoolean().ShouldBeTrue();
+        transport.SentMethods.ShouldBe(["initialize", "authenticate"]);
+        transport.Requests[1].Params.GetProperty("methodId").GetString().ShouldBe("token");
+        transport.Requests[1].Params.GetProperty("methodInfo").GetProperty("token").GetString().ShouldBe("secret");
+    }
+
+    [Fact]
     public async Task SendPromptAsync_enqueues_synthetic_prompt_completed_notification_for_end_turn_results()
     {
         var transport = new ScriptedAcpTransport(request => request.Method switch

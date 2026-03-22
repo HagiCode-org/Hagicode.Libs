@@ -1,5 +1,5 @@
-using Shouldly;
 using HagiCode.Libs.Core.Discovery;
+using Shouldly;
 
 namespace HagiCode.Libs.Core.Tests.Discovery;
 
@@ -40,15 +40,36 @@ public sealed class CliExecutableResolverTests
     }
 
     [Fact]
-    public void ResolveExecutablePath_on_windows_tries_known_extensions()
+    public void ResolveExecutablePath_on_windows_tries_known_extensions_for_npm_style_short_names()
     {
         using var sandbox = new DirectorySandbox();
-        var executable = sandbox.CreateFile("claude.cmd");
+        var executable = sandbox.CreateFile("npm.cmd");
         var resolver = new CliExecutableResolver(static () => true);
 
-        var resolved = resolver.ResolveExecutablePath("claude", sandbox.BuildEnvironment(pathExt: ".EXE;.CMD;.BAT"));
+        var resolved = resolver.ResolveExecutablePath("npm", sandbox.BuildEnvironment(pathExt: ".EXE;.CMD;.BAT"));
 
         resolved.ShouldBe(executable);
+    }
+
+    [Fact]
+    public void ResolveExecutablePath_on_windows_probes_relative_paths_without_extensions_like_cliwrap()
+    {
+        using var sandbox = new DirectorySandbox();
+        var executable = sandbox.CreateFile(Path.Combine("tools", "npm.cmd"));
+        var resolver = new CliExecutableResolver(static () => true);
+        var currentDirectory = Directory.GetCurrentDirectory();
+
+        Directory.SetCurrentDirectory(sandbox.RootPath);
+        try
+        {
+            var resolved = resolver.ResolveExecutablePath(Path.Combine("tools", "npm"), sandbox.BuildEnvironment(pathExt: ".EXE;.CMD;.BAT"));
+
+            resolved.ShouldBe(executable);
+        }
+        finally
+        {
+            Directory.SetCurrentDirectory(currentDirectory);
+        }
     }
 
     private sealed class DirectorySandbox : IDisposable
@@ -59,6 +80,8 @@ public sealed class CliExecutableResolverTests
         {
             Directory.CreateDirectory(_root);
         }
+
+        public string RootPath => _root;
 
         public string CreateFile(string relativePath)
         {

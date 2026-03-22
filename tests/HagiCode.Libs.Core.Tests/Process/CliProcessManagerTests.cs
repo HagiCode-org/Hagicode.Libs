@@ -1,5 +1,5 @@
-using Shouldly;
 using HagiCode.Libs.Core.Process;
+using Shouldly;
 
 namespace HagiCode.Libs.Core.Tests.Process;
 
@@ -8,13 +8,18 @@ public sealed class CliProcessManagerTests
     private readonly CliProcessManager _manager = new();
 
     [Fact]
-    public async Task ExecuteAsync_captures_standard_output_and_error()
+    public async Task ExecuteAsync_captures_standard_output_error_and_chunks()
     {
         var result = await _manager.ExecuteAsync(CreateShellContext("printf 'hello'; printf 'oops' >&2"));
 
         result.ExitCode.ShouldBe(0);
         result.StandardOutput.ShouldBe("hello");
         result.StandardError.ShouldBe("oops");
+        result.CapturedOutput.ShouldContain(chunk => chunk.Channel == ProcessOutputChannel.StandardOutput && chunk.Text.Contains("hello", StringComparison.Ordinal));
+        result.CapturedOutput.ShouldContain(chunk => chunk.Channel == ProcessOutputChannel.StandardError && chunk.Text.Contains("oops", StringComparison.Ordinal));
+        result.CommandPreview.ShouldContain("/bin/sh");
+        result.StartedAtUtc.ShouldNotBeNull();
+        result.CompletedAtUtc.ShouldNotBeNull();
     }
 
     [Fact]
@@ -43,7 +48,8 @@ public sealed class CliProcessManagerTests
             Timeout = TimeSpan.FromMilliseconds(100)
         });
 
-        result.ExitCode.ShouldBe(-1);
+        result.ExitCode.ShouldNotBe(0);
+        result.TimedOut.ShouldBeTrue();
         result.StandardError.ShouldContain("timed out");
     }
 
@@ -59,12 +65,12 @@ public sealed class CliProcessManagerTests
     }
 
     [Fact]
-    public void CreateStartInfo_on_windows_wraps_batch_files_with_cmd()
+    public void CreateStartInfo_on_windows_wraps_resolved_batch_files_with_cmd()
     {
-        var manager = new TestCliProcessManager();
+        var manager = new TestCliProcessManager(@"C:\tools\npm.cmd");
         var startInfo = manager.CreateStartInfo(new ProcessStartContext
         {
-            ExecutablePath = @"C:\tools\npm.cmd",
+            ExecutablePath = "npm",
             Arguments = ["install", "--global", "@openai/codex"]
         });
 
@@ -81,8 +87,11 @@ public sealed class CliProcessManagerTests
         };
     }
 
-    private sealed class TestCliProcessManager : CliProcessManager
+    private sealed class TestCliProcessManager(string resolvedExecutablePath) : CliProcessManager
     {
         protected override bool IsWindows() => true;
+
+        protected override string ResolveExecutablePath(string executablePath, IReadOnlyDictionary<string, string?>? environmentVariables)
+            => resolvedExecutablePath;
     }
 }

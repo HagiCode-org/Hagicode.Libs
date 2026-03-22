@@ -1,5 +1,7 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.Runtime.InteropServices;
+using System.Text;
+using HagiCode.Libs.Core.Discovery;
 
 namespace HagiCode.Libs.Core.Process;
 
@@ -11,6 +13,23 @@ public class CliProcessManager
     private static readonly TimeSpan GracefulStopTimeout = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan StopWaitTimeout = TimeSpan.FromSeconds(5);
 
+    private readonly CliExecutableResolver _executableResolver;
+    private readonly TimeProvider _timeProvider;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="CliProcessManager" /> class.
+    /// </summary>
+    public CliProcessManager()
+        : this(new CliExecutableResolver(), TimeProvider.System)
+    {
+    }
+
+    internal CliProcessManager(CliExecutableResolver executableResolver, TimeProvider timeProvider)
+    {
+        _executableResolver = executableResolver ?? throw new ArgumentNullException(nameof(executableResolver));
+        _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+    }
+
     /// <summary>
     /// Creates a <see cref="ProcessStartInfo" /> from a start context.
     /// </summary>
@@ -21,6 +40,7 @@ public class CliProcessManager
         ArgumentNullException.ThrowIfNull(context);
         ArgumentException.ThrowIfNullOrWhiteSpace(context.ExecutablePath);
 
+        var resolvedExecutablePath = ResolveExecutablePath(context.ExecutablePath, context.EnvironmentVariables);
         var startInfo = new ProcessStartInfo
         {
             RedirectStandardInput = true,
@@ -37,7 +57,7 @@ public class CliProcessManager
             startInfo.WorkingDirectory = context.WorkingDirectory;
         }
 
-        ConfigureExecutable(startInfo, context);
+        ConfigureExecutable(startInfo, context, resolvedExecutablePath);
         ApplyEnvironmentVariables(startInfo, context.EnvironmentVariables);
         return startInfo;
     }
@@ -51,19 +71,27 @@ public class CliProcessManager
     public virtual ValueTask<CliProcessHandle> StartAsync(ProcessStartContext context, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        ArgumentNullException.ThrowIfNull(context);
 
         var process = new System.Diagnostics.Process { StartInfo = CreateStartInfo(context) };
-        if (!process.Start())
+        try
+        {
+            if (!process.Start())
+            {
+                throw new InvalidOperationException($"Failed to start process '{context.ExecutablePath}'.");
+            }
+
+            return ValueTask.FromResult(new CliProcessHandle(
+                process,
+                process.StandardInput,
+                process.StandardOutput,
+                process.StandardError));
+        }
+        catch
         {
             process.Dispose();
-            throw new InvalidOperationException($"Failed to start process '{context.ExecutablePath}'.");
+            throw;
         }
-
-        return ValueTask.FromResult(new CliProcessHandle(
-            process,
-            process.StandardInput,
-            process.StandardOutput,
-            process.StandardError));
     }
 
     /// <summary>
@@ -76,10 +104,17 @@ public class CliProcessManager
     {
         ArgumentNullException.ThrowIfNull(context);
 
+        var startedAtUtc = _timeProvider.GetUtcNow();
         await using var handle = await StartAsync(context, cancellationToken);
-        var stdoutTask = handle.StandardOutput.ReadToEndAsync(cancellationToken);
-        var stderrTask = handle.StandardError.ReadToEndAsync(cancellationToken);
 
+        var standardOutput = new StringBuilder();
+        var standardError = new StringBuilder();
+        var capturedOutput = new ConcurrentQueue<ProcessOutputChunk>();
+
+        var stdoutTask = CaptureStreamAsync(handle.StandardOutput, ProcessOutputChannel.StandardOutput, standardOutput, capturedOutput, CancellationToken.None);
+        var stderrTask = CaptureStreamAsync(handle.StandardError, ProcessOutputChannel.StandardError, standardError, capturedOutput, CancellationToken.None);
+
+        var timedOut = false;
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         if (context.Timeout is { } timeout)
         {
@@ -89,24 +124,33 @@ public class CliProcessManager
         try
         {
             await handle.Process.WaitForExitAsync(linkedCts.Token);
-            return new ProcessResult(
-                handle.Process.ExitCode,
-                await stdoutTask,
-                await stderrTask);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && context.Timeout is not null)
         {
-            await StopAsync(handle, CancellationToken.None);
-            var standardOutput = stdoutTask.IsCompletedSuccessfully ? stdoutTask.Result : string.Empty;
-            var standardError = stderrTask.IsCompletedSuccessfully ? stderrTask.Result : string.Empty;
-            if (!string.IsNullOrWhiteSpace(standardError))
-            {
-                standardError += System.Environment.NewLine;
-            }
-
-            standardError += "The process timed out and was terminated.";
-            return new ProcessResult(-1, standardOutput, standardError);
+            timedOut = true;
+            await StopProcessAsync(handle, disposeHandle: false, CancellationToken.None);
         }
+        catch (OperationCanceledException)
+        {
+            await StopProcessAsync(handle, disposeHandle: false, CancellationToken.None);
+            throw;
+        }
+
+        await Task.WhenAll(stdoutTask, stderrTask);
+
+        var completedAtUtc = _timeProvider.GetUtcNow();
+        return new ProcessResult(
+            handle.Process.ExitCode,
+            standardOutput.ToString(),
+            AppendTimeoutMessage(standardError.ToString(), timedOut))
+        {
+            TimedOut = timedOut,
+            CommandPreview = CommandPreviewFormatter.Format(context.ExecutablePath, context.Arguments),
+            ResolvedExecutablePath = handle.Process.StartInfo.FileName,
+            StartedAtUtc = startedAtUtc,
+            CompletedAtUtc = completedAtUtc,
+            CapturedOutput = capturedOutput.ToArray()
+        };
     }
 
     /// <summary>
@@ -117,52 +161,7 @@ public class CliProcessManager
     public virtual async Task InterruptAsync(CliProcessHandle handle, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(handle);
-
-        if (handle.Process.HasExited)
-        {
-            return;
-        }
-
-        try
-        {
-            await handle.StandardInput.WriteAsync("\u0003".AsMemory(), cancellationToken);
-            await handle.StandardInput.FlushAsync(cancellationToken);
-        }
-        catch (ObjectDisposedException)
-        {
-            return;
-        }
-        catch (InvalidOperationException)
-        {
-            return;
-        }
-
-        if (!OperatingSystem.IsWindows())
-        {
-            try
-            {
-                using var signalProcess = new System.Diagnostics.Process
-                {
-                    StartInfo = new ProcessStartInfo
-                    {
-                        FileName = "kill",
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true,
-                        UseShellExecute = false,
-                        CreateNoWindow = true
-                    }
-                };
-                signalProcess.StartInfo.ArgumentList.Add("-INT");
-                signalProcess.StartInfo.ArgumentList.Add(handle.Process.Id.ToString());
-                if (signalProcess.Start())
-                {
-                    await signalProcess.WaitForExitAsync(cancellationToken);
-                }
-            }
-            catch
-            {
-            }
-        }
+        await TryInterruptAsync(handle, cancellationToken);
     }
 
     /// <summary>
@@ -170,27 +169,83 @@ public class CliProcessManager
     /// </summary>
     /// <param name="handle">The running process handle.</param>
     /// <param name="cancellationToken">Cancels the stop operation.</param>
-    public virtual async Task StopAsync(CliProcessHandle? handle, CancellationToken cancellationToken = default)
+    public virtual Task StopAsync(CliProcessHandle? handle, CancellationToken cancellationToken = default)
     {
         if (handle is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        return StopProcessAsync(handle, disposeHandle: true, cancellationToken);
+    }
+
+    internal Task StopForExecutionAsync(CliProcessHandle handle, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(handle);
+        return StopProcessAsync(handle, disposeHandle: false, cancellationToken);
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether the current platform is Windows.
+    /// </summary>
+    protected virtual bool IsWindows() => OperatingSystem.IsWindows();
+
+    /// <summary>
+    /// Resolves an executable path before launch.
+    /// </summary>
+    protected virtual string ResolveExecutablePath(
+        string executablePath,
+        IReadOnlyDictionary<string, string?>? environmentVariables)
+    {
+        return _executableResolver.ResolveExecutablePath(executablePath, environmentVariables) ?? executablePath;
+    }
+
+    private void ConfigureExecutable(ProcessStartInfo startInfo, ProcessStartContext context, string resolvedExecutablePath)
+    {
+        if (IsWindows() && IsBatchFile(resolvedExecutablePath))
+        {
+            startInfo.FileName = "cmd.exe";
+            startInfo.ArgumentList.Add("/c");
+            startInfo.ArgumentList.Add(resolvedExecutablePath);
+        }
+        else
+        {
+            startInfo.FileName = resolvedExecutablePath;
+        }
+
+        foreach (var argument in context.Arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+    }
+
+    private static void ApplyEnvironmentVariables(ProcessStartInfo startInfo, IReadOnlyDictionary<string, string?>? environmentVariables)
+    {
+        if (environmentVariables is null)
         {
             return;
         }
 
+        foreach (var entry in environmentVariables)
+        {
+            if (entry.Value is null)
+            {
+                startInfo.Environment.Remove(entry.Key);
+                continue;
+            }
+
+            startInfo.Environment[entry.Key] = entry.Value;
+        }
+    }
+
+    private async Task StopProcessAsync(CliProcessHandle handle, bool disposeHandle, CancellationToken cancellationToken)
+    {
         try
         {
             if (!handle.Process.HasExited)
             {
-                try
-                {
-                    handle.StandardInput.Close();
-                }
-                catch (ObjectDisposedException)
-                {
-                }
-                catch (InvalidOperationException)
-                {
-                }
+                await TryInterruptAsync(handle, cancellationToken);
+                TryCloseInput(handle);
 
                 using var gracefulWaitCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 gracefulWaitCts.CancelAfter(GracefulStopTimeout);
@@ -226,58 +281,134 @@ public class CliProcessManager
         }
         finally
         {
-            await handle.DisposeAsync();
+            if (disposeHandle)
+            {
+                await handle.DisposeAsync();
+            }
         }
     }
 
-    /// <summary>
-    /// Gets a value indicating whether the current platform is Windows.
-    /// </summary>
-    protected virtual bool IsWindows() => OperatingSystem.IsWindows();
-
-    private void ConfigureExecutable(ProcessStartInfo startInfo, ProcessStartContext context)
+    private async Task<bool> TryInterruptAsync(CliProcessHandle handle, CancellationToken cancellationToken)
     {
-        if (IsWindows() && IsBatchFile(context.ExecutablePath))
+        if (handle.Process.HasExited)
         {
-            startInfo.FileName = "cmd.exe";
-            startInfo.ArgumentList.Add("/c");
-            startInfo.ArgumentList.Add(context.ExecutablePath);
-        }
-        else
-        {
-            startInfo.FileName = context.ExecutablePath;
+            return false;
         }
 
-        foreach (var argument in context.Arguments)
+        var wroteControlCharacter = await TryWriteControlCharacterAsync(handle, cancellationToken);
+        if (!IsWindows())
         {
-            startInfo.ArgumentList.Add(argument);
+            var sentSignal = await TrySendInterruptSignalAsync(handle.Process.Id, cancellationToken);
+            return wroteControlCharacter || sentSignal;
+        }
+
+        return wroteControlCharacter;
+    }
+
+    private static async Task<bool> TryWriteControlCharacterAsync(CliProcessHandle handle, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await handle.StandardInput.WriteAsync("\u0003".AsMemory(), cancellationToken);
+            await handle.StandardInput.FlushAsync(cancellationToken);
+            return true;
+        }
+        catch (ObjectDisposedException)
+        {
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
         }
     }
 
-    private static void ApplyEnvironmentVariables(ProcessStartInfo startInfo, IReadOnlyDictionary<string, string?>? environmentVariables)
+    private static void TryCloseInput(CliProcessHandle handle)
     {
-        if (environmentVariables is null)
+        try
         {
-            return;
+            handle.StandardInput.Close();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
+    private static async Task<bool> TrySendInterruptSignalAsync(int processId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var signalProcess = new System.Diagnostics.Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = "kill",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                }
+            };
+            signalProcess.StartInfo.ArgumentList.Add("-INT");
+            signalProcess.StartInfo.ArgumentList.Add(processId.ToString());
+            if (!signalProcess.Start())
+            {
+                return false;
+            }
+
+            await signalProcess.WaitForExitAsync(cancellationToken);
+            return signalProcess.ExitCode == 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static async Task CaptureStreamAsync(
+        StreamReader reader,
+        ProcessOutputChannel channel,
+        StringBuilder destination,
+        ConcurrentQueue<ProcessOutputChunk> capturedOutput,
+        CancellationToken cancellationToken)
+    {
+        var buffer = new char[1024];
+        while (true)
+        {
+            var read = await reader.ReadAsync(buffer.AsMemory(), cancellationToken);
+            if (read <= 0)
+            {
+                break;
+            }
+
+            var text = new string(buffer, 0, read);
+            destination.Append(text);
+            capturedOutput.Enqueue(new ProcessOutputChunk(channel, text, DateTimeOffset.UtcNow));
+        }
+    }
+
+    private static string AppendTimeoutMessage(string standardError, bool timedOut)
+    {
+        if (!timedOut)
+        {
+            return standardError;
         }
 
-        foreach (var pair in environmentVariables)
+        if (string.IsNullOrWhiteSpace(standardError))
         {
-            if (pair.Value is null)
-            {
-                startInfo.Environment.Remove(pair.Key);
-            }
-            else
-            {
-                startInfo.Environment[pair.Key] = pair.Value;
-            }
+            return "The process timed out and was terminated.";
         }
+
+        return standardError + System.Environment.NewLine + "The process timed out and was terminated.";
     }
 
     private static bool IsBatchFile(string executablePath)
     {
         var extension = Path.GetExtension(executablePath);
         return extension.Equals(".cmd", StringComparison.OrdinalIgnoreCase)
-            || extension.Equals(".bat", StringComparison.OrdinalIgnoreCase);
+               || extension.Equals(".bat", StringComparison.OrdinalIgnoreCase);
     }
 }

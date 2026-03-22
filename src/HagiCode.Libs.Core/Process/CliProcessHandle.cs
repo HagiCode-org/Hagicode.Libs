@@ -5,6 +5,8 @@ namespace HagiCode.Libs.Core.Process;
 /// </summary>
 public sealed class CliProcessHandle : IAsyncDisposable
 {
+    private bool _disposed;
+
     internal CliProcessHandle(System.Diagnostics.Process process, StreamWriter standardInput, StreamReader standardOutput, StreamReader standardError)
     {
         Process = process;
@@ -41,6 +43,12 @@ public sealed class CliProcessHandle : IAsyncDisposable
     /// <inheritdoc />
     public ValueTask DisposeAsync()
     {
+        if (_disposed)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        _disposed = true;
         StandardInput.Dispose();
         StandardOutput.Dispose();
         StandardError.Dispose();
