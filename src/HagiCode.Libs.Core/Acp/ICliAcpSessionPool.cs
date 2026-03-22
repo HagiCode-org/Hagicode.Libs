@@ -6,6 +6,11 @@ namespace HagiCode.Libs.Core.Acp;
 public interface ICliAcpSessionPool : IAsyncDisposable
 {
     /// <summary>
+    /// Gets a read-only diagnostics snapshot for the current pool state.
+    /// </summary>
+    CliAcpSessionPoolDiagnostics GetDiagnosticsSnapshot();
+
+    /// <summary>
     /// Acquires a pooled entry or creates a new one when no compatible entry exists.
     /// </summary>
     Task<PooledAcpSessionLease> AcquireAsync(
