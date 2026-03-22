@@ -8,7 +8,7 @@
 - Runtime environment resolution, including the macOS shell-aware fallback
 - Process management helpers for launching and monitoring CLI subprocesses
 - A shared CLI execution facade with buffered and streaming result envelopes
-- Transport and ACP session primitives for higher-level integrations
+- Transport, ACP session primitives, and shared ACP pool contracts for higher-level integrations
 
 ## Install
 
@@ -62,4 +62,5 @@ For long-running or interactive commands, call `ExecuteStreamingAsync()` to rece
 
 - Use `CliExecutionFacade` when you want typed requests, policy evaluation, normalized diagnostics, and structured success/failure/timeout handling.
 - Use `CliProcessManager` directly when you need a long-lived stdio transport such as ACP or provider-specific session protocols.
+- Use the ACP pool contracts (`CliPoolSettings`, `CliAcpPoolRequest`, `PooledAcpSessionEntry`, and `CliAcpSessionPool`) when provider code needs warm session reuse, idle eviction, or deterministic fault cleanup.
 - The embedded lifecycle improvements intentionally stay behind HagiCode namespaces; callers should continue passing structured argument tokens instead of raw shell strings.

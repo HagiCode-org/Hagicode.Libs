@@ -208,6 +208,39 @@ var kiro = provider.GetRequiredService<ICliProvider<KiroOptions>>();
 var qoderCli = provider.GetRequiredService<ICliProvider<QoderCliOptions>>();
 ```
 
+## Shared pooling
+
+Built-in providers now participate in a shared pooling architecture:
+
+- ACP providers (`CodeBuddy`, `Hermes`, `Kimi`, `Kiro`, `QoderCLI`) lease warm ACP sessions from the shared `CliProviderPoolCoordinator`.
+- `Claude Code` reuses warm stdio transports when the effective session key and compatibility fingerprint match.
+- `Codex` keeps thread-resume state in the shared pool so follow-up requests can reuse the last known thread id for the same workspace.
+- `Copilot` reuses SDK-backed runtimes per compatible working directory/configuration pair.
+
+Every provider option record exposes `PoolSettings` so callers can disable pooling or tune provider-level behavior:
+
+```csharp
+var options = new CodebuddyOptions
+{
+    SessionId = "demo-session",
+    WorkingDirectory = "/path/to/repo",
+    PoolSettings = new CliPoolSettings
+    {
+        Enabled = true,
+        IdleTimeout = TimeSpan.FromMinutes(15),
+        MaxActiveSessions = 4,
+        KeepAnonymousSessions = false
+    }
+};
+```
+
+Operational notes:
+
+- Warm reuse only occurs when the logical session key and compatibility fingerprint still match.
+- Each pooled entry executes one prompt at a time through an execution lock.
+- Idle entries are evicted lazily on acquire/return or explicit reaper calls once `IdleTimeout` elapses.
+- Faulted transports, broken ACP sessions, and failed Copilot runtimes are removed immediately instead of being returned to the pool.
+
 CodeBuddy execution options cover the ACP-specific runtime settings without forcing raw command lines:
 
 ```csharp

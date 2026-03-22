@@ -9,6 +9,7 @@
 - `AddHagiCodeLibs()` for dependency injection registration
 - A provider registry for resolving providers by name or alias
 - Registration of the shared `ICliExecutionFacade` for provider-side probes or adapters
+- Registration of the shared `CliProviderPoolCoordinator`, provider-scoped pool defaults, and ACP/runtime reuse backends
 
 ## Install
 
@@ -38,6 +39,15 @@ var copilot = serviceProvider.GetRequiredService<ICliProvider<CopilotOptions>>()
 var codex = serviceProvider.GetRequiredService<ICliProvider<CodexOptions>>();
 var kimi = serviceProvider.GetRequiredService<ICliProvider<KimiOptions>>();
 var kiro = serviceProvider.GetRequiredService<ICliProvider<KiroOptions>>();
+```
+
+The same DI graph also exposes the shared pool services when advanced callers need diagnostics or explicit cleanup:
+
+```csharp
+using HagiCode.Libs.Providers.Pooling;
+
+var poolCoordinator = serviceProvider.GetRequiredService<CliProviderPoolCoordinator>();
+var poolDefaults = serviceProvider.GetRequiredService<CliProviderPoolConfigurationRegistry>();
 ```
 
 ## Provider usage
@@ -108,6 +118,34 @@ await foreach (var message in kiro.ExecuteAsync(kiroOptions, "Reply with exactly
     Console.WriteLine($"{message.Type}: {message.Content}");
 }
 ```
+
+## Pool controls
+
+Every built-in provider option record now exposes `PoolSettings`:
+
+```csharp
+var qoderOptions = new QoderCliOptions
+{
+    SessionId = "demo-session",
+    WorkingDirectory = "/path/to/repo",
+    PoolSettings = new CliPoolSettings
+    {
+        Enabled = true,
+        IdleTimeout = TimeSpan.FromMinutes(10),
+        MaxActiveSessions = 6,
+        KeepAnonymousSessions = false
+    }
+};
+```
+
+Practical boundaries:
+
+- `CodeBuddy`, `Hermes`, `Kimi`, `Kiro`, and `QoderCLI` pool live ACP sessions.
+- `Claude Code` pools warm stdio transports keyed by session or resume identity plus its effective startup shape.
+- `Codex` pools workspace/thread bindings so follow-up requests can reuse the last known thread id.
+- `Copilot` pools SDK runtimes per compatible workspace/configuration pair.
+- Pooling can be disabled per provider call, which falls back to the original one-shot behavior without changing message semantics.
+- Idle eviction is lazy and deterministic; if a lease faults, the coordinator disposes that entry immediately rather than returning it to the warm set.
 
 ## Adoption boundaries
 
