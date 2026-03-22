@@ -355,13 +355,7 @@ internal static class KimiAcpMessageMapper
 
     private static bool HasMeaningfulText(string? text)
     {
-        return !string.IsNullOrEmpty(text) &&
-               (!string.IsNullOrWhiteSpace(text) || ContainsStructuralNewline(text));
-    }
-
-    private static bool ContainsStructuralNewline(string text)
-    {
-        return text.Contains('\n') || text.Contains('\r');
+        return !string.IsNullOrEmpty(text);
     }
 
     private static bool IsFailureStopReason(string? stopReason)

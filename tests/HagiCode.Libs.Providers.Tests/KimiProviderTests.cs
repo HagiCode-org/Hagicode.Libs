@@ -319,6 +319,33 @@ public sealed class KimiProviderTests
     }
 
     [Fact]
+    public void NormalizeNotification_preserves_space_only_fragments_inside_content_arrays()
+    {
+        var notification = new AcpNotification(
+            "session/update",
+            JsonSerializer.SerializeToElement(new
+            {
+                sessionId = "session-1",
+                update = new
+                {
+                    kind = "assistant",
+                    content = new object[]
+                    {
+                        new { type = "text", text = "foo" },
+                        new { type = "text", text = " " },
+                        new { type = "text", text = "bar" }
+                    }
+                }
+            }));
+
+        var messages = KimiAcpMessageMapper.NormalizeNotification(notification);
+
+        messages.ShouldHaveSingleItem();
+        messages[0].Type.ShouldBe("assistant");
+        messages[0].Content.GetProperty("text").GetString().ShouldBe("foo bar");
+    }
+
+    [Fact]
     public void NormalizeNotification_maps_error_updates_to_terminal_failure()
     {
         var notification = new AcpNotification(
