@@ -146,6 +146,29 @@ public sealed class CopilotProviderTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_preserves_whitespace_only_sdk_deltas()
+    {
+        var provider = CreateProvider(gateway: new StubCopilotSdkGateway(
+        [
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.TextDelta, Content: " "),
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.ReasoningDelta, Content: "\n\n"),
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.TextDelta, Content: "tail"),
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.Completed)
+        ]));
+        var messages = new List<CliMessage>();
+
+        await foreach (var message in provider.ExecuteAsync(new CopilotOptions(), "hello"))
+        {
+            messages.Add(message);
+        }
+
+        messages.Select(static message => message.Type).ShouldBe(["session.started", "assistant", "reasoning", "assistant", "result"]);
+        messages[1].Content.GetProperty("text").GetString().ShouldBe(" ");
+        messages[2].Content.GetProperty("text").GetString().ShouldBe("\n\n");
+        messages[3].Content.GetProperty("text").GetString().ShouldBe("tail");
+    }
+
+    [Fact]
     public async Task ExecuteAsync_uses_explicit_session_id_for_provider_native_resume_contract()
     {
         var gateway = new StubCopilotSdkGateway(

@@ -204,6 +204,26 @@ public sealed class QoderCliProviderTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_falls_back_to_multiline_prompt_result_without_flattening_line_breaks()
+    {
+        const string multilineResult = "Paragraph one.\n\n- item one\n- item two\n\n```md\ncode fence\n```";
+        var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(
+            emitNotifications: false,
+            promptStopReason: "fallback",
+            promptOutputText: multilineResult));
+        var messages = new List<CliMessage>();
+
+        await foreach (var message in provider.ExecuteAsync(new QoderCliOptions(), "hello"))
+        {
+            messages.Add(message);
+        }
+
+        messages.Select(static message => message.Type).ShouldBe(["session.started", "assistant", "terminal.completed"]);
+        messages[1].Content.GetProperty("text").GetString().ShouldBe(multilineResult);
+        messages[2].Content.GetProperty("text").GetString().ShouldBe(multilineResult);
+    }
+
+    [Fact]
     public async Task PingAsync_reports_initialize_details_when_bootstrap_succeeds()
     {
         var provider = CreateProvider();
@@ -274,6 +294,35 @@ public sealed class QoderCliProviderTests
         messages.ShouldHaveSingleItem();
         messages[0].Type.ShouldBe("assistant");
         messages[0].Content.GetProperty("text").GetString().ShouldBe("BLUEPRINT-123");
+    }
+
+    [Fact]
+    public void NormalizeNotification_preserves_space_only_and_newline_only_fragments()
+    {
+        var notification = new AcpNotification(
+            "session/update",
+            JsonSerializer.SerializeToElement(new
+            {
+                sessionId = "session-1",
+                update = new
+                {
+                    sessionUpdate = "agent_message_chunk",
+                    content = new object[]
+                    {
+                        new { type = "text", text = "foo" },
+                        new { type = "text", text = " " },
+                        new { type = "text", text = "bar" },
+                        new { type = "text", text = "\n\n" },
+                        new { type = "text", text = "baz" }
+                    }
+                }
+            }));
+
+        var messages = QoderCliAcpMessageMapper.NormalizeNotification(notification);
+
+        messages.ShouldHaveSingleItem();
+        messages[0].Type.ShouldBe("assistant");
+        messages[0].Content.GetProperty("text").GetString().ShouldBe("foo bar\n\nbaz");
     }
 
     [Fact]
