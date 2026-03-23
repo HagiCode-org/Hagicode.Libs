@@ -124,22 +124,32 @@ internal static class QoderCliAcpMessageMapper
 
     public static bool TryExtractPromptResultText(JsonElement promptResult, out string? text)
     {
-        text = TryGetString(promptResult, "outputText") ?? TryGetString(promptResult, "text");
-        return !string.IsNullOrWhiteSpace(text);
+        text = null;
+        if (ProviderResponseTextFidelity.TryGetText(promptResult, out text, "outputText", "text"))
+        {
+            return true;
+        }
+
+        if (promptResult.ValueKind == JsonValueKind.Object)
+        {
+            if (promptResult.TryGetProperty("content", out var contentElement))
+            {
+                text = ExtractTextFromContent(contentElement);
+            }
+            else if (promptResult.TryGetProperty("message", out var messageElement))
+            {
+                text = ExtractTextFromContent(messageElement);
+            }
+        }
+
+        return ProviderResponseTextFidelity.HasText(text);
     }
 
     public static bool TryExtractMessageText(JsonElement content, out string? text)
     {
         text = null;
-        if (content.ValueKind != JsonValueKind.Object ||
-            !content.TryGetProperty("text", out var textElement) ||
-            textElement.ValueKind != JsonValueKind.String)
-        {
-            return false;
-        }
-
-        text = textElement.GetString();
-        return !string.IsNullOrWhiteSpace(text);
+        return content.ValueKind == JsonValueKind.Object &&
+               ProviderResponseTextFidelity.TryGetText(content, out text, "text");
     }
 
     public static bool IsReplayAssistantNotification(AcpNotification notification)
@@ -208,6 +218,7 @@ internal static class QoderCliAcpMessageMapper
                 ["type"] = messageType,
                 ["session_id"] = sessionId,
                 ["stop_reason"] = stopReason,
+                ["text"] = ExtractText(updateElement),
                 ["update"] = updateElement
             }));
     }
@@ -216,7 +227,8 @@ internal static class QoderCliAcpMessageMapper
     {
         if (!updateElement.TryGetProperty("content", out var contentElement))
         {
-            return null;
+            ProviderResponseTextFidelity.TryGetText(updateElement, out var directText, "text", "message");
+            return directText;
         }
 
         return ExtractTextFromContent(contentElement);
@@ -235,9 +247,14 @@ internal static class QoderCliAcpMessageMapper
 
     private static string? ExtractTextFromObject(JsonElement contentElement)
     {
-        if (TryGetString(contentElement, "text") is { Length: > 0 } directText)
+        if (ProviderResponseTextFidelity.TryGetText(contentElement, out var directText, "text"))
         {
             return directText;
+        }
+
+        if (ProviderResponseTextFidelity.TryGetText(contentElement, out var directMessage, "message"))
+        {
+            return directMessage;
         }
 
         if (contentElement.TryGetProperty("content", out var nestedContent))
@@ -254,9 +271,9 @@ internal static class QoderCliAcpMessageMapper
         foreach (var item in contentElement.EnumerateArray())
         {
             var text = ExtractTextFromContent(item);
-            if (!string.IsNullOrWhiteSpace(text))
+            if (ProviderResponseTextFidelity.HasText(text))
             {
-                parts.Add(text);
+                parts.Add(text!);
             }
         }
 

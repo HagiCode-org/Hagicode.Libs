@@ -125,8 +125,8 @@ internal static class KiroAcpMessageMapper
 
     public static bool TryExtractPromptResultText(JsonElement promptResult, out string? text)
     {
-        text = TryGetString(promptResult, "outputText") ?? TryGetString(promptResult, "text");
-        if (!string.IsNullOrWhiteSpace(text))
+        text = null;
+        if (ProviderResponseTextFidelity.TryGetText(promptResult, out text, "outputText", "text"))
         {
             return true;
         }
@@ -143,21 +143,14 @@ internal static class KiroAcpMessageMapper
             }
         }
 
-        return !string.IsNullOrWhiteSpace(text);
+        return ProviderResponseTextFidelity.HasText(text);
     }
 
     public static bool TryExtractMessageText(JsonElement content, out string? text)
     {
         text = null;
-        if (content.ValueKind != JsonValueKind.Object ||
-            !content.TryGetProperty("text", out var textElement) ||
-            textElement.ValueKind != JsonValueKind.String)
-        {
-            return false;
-        }
-
-        text = textElement.GetString();
-        return !string.IsNullOrWhiteSpace(text);
+        return content.ValueKind == JsonValueKind.Object &&
+               ProviderResponseTextFidelity.TryGetText(content, out text, "text");
     }
 
     public static bool IsReplayAssistantNotification(AcpNotification notification)
@@ -248,7 +241,8 @@ internal static class KiroAcpMessageMapper
     {
         if (!updateElement.TryGetProperty("content", out var contentElement))
         {
-            return null;
+            ProviderResponseTextFidelity.TryGetText(updateElement, out var directText, "text", "message");
+            return directText;
         }
 
         return ExtractTextFromContent(contentElement);
@@ -267,9 +261,14 @@ internal static class KiroAcpMessageMapper
 
     private static string? ExtractTextFromObject(JsonElement contentElement)
     {
-        if (TryGetString(contentElement, "text") is { Length: > 0 } directText)
+        if (ProviderResponseTextFidelity.TryGetText(contentElement, out var directText, "text"))
         {
             return directText;
+        }
+
+        if (ProviderResponseTextFidelity.TryGetText(contentElement, out var directMessage, "message"))
+        {
+            return directMessage;
         }
 
         if (contentElement.TryGetProperty("content", out var nestedContent))
@@ -286,9 +285,9 @@ internal static class KiroAcpMessageMapper
         foreach (var item in contentElement.EnumerateArray())
         {
             var text = ExtractTextFromContent(item);
-            if (!string.IsNullOrWhiteSpace(text))
+            if (ProviderResponseTextFidelity.HasText(text))
             {
-                parts.Add(text);
+                parts.Add(text!);
             }
         }
 
