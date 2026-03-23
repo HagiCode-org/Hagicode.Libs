@@ -125,7 +125,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
                     SessionId: sessionId));
                 break;
 
-            case AssistantMessageDeltaEvent deltaEvent when !string.IsNullOrWhiteSpace(deltaEvent.Data.DeltaContent):
+            case AssistantMessageDeltaEvent deltaEvent when !string.IsNullOrEmpty(deltaEvent.Data.DeltaContent):
                 sawDelta = true;
                 events.Add(new CopilotSdkStreamEvent(
                     CopilotSdkStreamEventType.TextDelta,
@@ -136,7 +136,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
             case AssistantMessageDeltaEvent:
                 break;
 
-            case AssistantMessageEvent messageEvent when !sawDelta && !string.IsNullOrWhiteSpace(messageEvent.Data.Content):
+            case AssistantMessageEvent messageEvent when !sawDelta && !string.IsNullOrEmpty(messageEvent.Data.Content):
                 events.Add(new CopilotSdkStreamEvent(
                     CopilotSdkStreamEventType.TextDelta,
                     SessionId: sessionId,
@@ -146,7 +146,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
             case AssistantMessageEvent:
                 break;
 
-            case AssistantReasoningEvent reasoningEvent when !string.IsNullOrWhiteSpace(reasoningEvent.Data.Content):
+            case AssistantReasoningEvent reasoningEvent when !string.IsNullOrEmpty(reasoningEvent.Data.Content):
                 events.Add(new CopilotSdkStreamEvent(
                     CopilotSdkStreamEventType.ReasoningDelta,
                     SessionId: sessionId,

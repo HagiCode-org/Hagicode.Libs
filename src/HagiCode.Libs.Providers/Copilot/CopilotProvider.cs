@@ -374,7 +374,7 @@ public class CopilotProvider : ICliProvider<CopilotOptions>
                     ["requested_session_id"] = requestedSessionId,
                     ["reuse_key"] = requestedSessionId ?? sessionId
                 }),
-            CopilotSdkStreamEventType.TextDelta when !string.IsNullOrWhiteSpace(eventData.Content) =>
+            CopilotSdkStreamEventType.TextDelta when !string.IsNullOrEmpty(eventData.Content) =>
                 CreateMessage("assistant", new Dictionary<string, object?>
                 {
                     ["type"] = "assistant",
@@ -382,7 +382,7 @@ public class CopilotProvider : ICliProvider<CopilotOptions>
                     ["session_id"] = sessionId,
                     ["text"] = eventData.Content
                 }),
-            CopilotSdkStreamEventType.ReasoningDelta when !string.IsNullOrWhiteSpace(eventData.Content) =>
+            CopilotSdkStreamEventType.ReasoningDelta when !string.IsNullOrEmpty(eventData.Content) =>
                 CreateMessage("reasoning", new Dictionary<string, object?>
                 {
                     ["type"] = "reasoning",
