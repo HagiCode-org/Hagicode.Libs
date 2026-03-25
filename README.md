@@ -294,6 +294,7 @@ var options = new CodexOptions
     SandboxMode = "workspace-write",
     ApprovalPolicy = "never",
     WorkingDirectory = "/path/to/repo",
+    LogicalSessionKey = "session-123|/path/to/repo|codex|gpt-5-codex",
     AddDirectories = ["/path/to/repo"],
     SkipGitRepositoryCheck = true,
 };
@@ -303,6 +304,8 @@ await foreach (var message in codex.ExecuteAsync(options, "Reply with exactly th
     Console.WriteLine(message.Type);
 }
 ```
+
+For pooled Codex sessions, `LogicalSessionKey` should remain stable for the same logical conversation and differ across parallel conversations that share a repository path. The provider now isolates execution locks by that key, records acquire/wait/reindex diagnostics, and registers a thread-based resume alias after `thread.started`.
 
 Hermes execution options cover the managed `hermes acp` bootstrap path without forcing raw process wiring. `SessionId` is treated as an in-memory conversation key for the current provider instance, rather than a cross-process resume token:
 

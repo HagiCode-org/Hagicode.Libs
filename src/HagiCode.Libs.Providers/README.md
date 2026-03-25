@@ -85,6 +85,7 @@ var options = new CodexOptions
     Model = "gpt-5-codex",
     SandboxMode = "workspace-write",
     ApprovalPolicy = "never",
+    LogicalSessionKey = "session-123|/path/to/repo|codex|gpt-5-codex",
     AddDirectories = ["/path/to/repo"],
     SkipGitRepositoryCheck = true,
 };
@@ -93,6 +94,8 @@ await foreach (var message in codex.ExecuteAsync(options, "Reply with exactly th
 {
     Console.WriteLine($"{message.Type}: {message.Content}");
 }
+
+// Reuse the same logical Codex session key to keep thread continuity on later calls.
 
 var kimiOptions = new KimiOptions
 {
