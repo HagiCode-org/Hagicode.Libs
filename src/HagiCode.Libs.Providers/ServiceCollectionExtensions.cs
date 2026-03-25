@@ -45,7 +45,7 @@ public static class ServiceCollectionExtensions
             registry.Register("claude-code", new CliPoolSettings { MaxActiveSessions = 4, IdleTimeout = TimeSpan.FromMinutes(5) });
             registry.Register("codebuddy", new CliPoolSettings { MaxActiveSessions = 8, IdleTimeout = TimeSpan.FromMinutes(10) });
             registry.Register("copilot", new CliPoolSettings { MaxActiveSessions = 4, IdleTimeout = TimeSpan.FromMinutes(10) });
-            registry.Register("codex", new CliPoolSettings { MaxActiveSessions = 8, IdleTimeout = TimeSpan.FromMinutes(10) });
+            registry.Register("codex", new CliPoolSettings { MaxActiveSessions = 20, IdleTimeout = TimeSpan.FromMinutes(10) });
             registry.Register("hermes", new CliPoolSettings { MaxActiveSessions = 8, IdleTimeout = TimeSpan.FromMinutes(10) });
             registry.Register("kimi", new CliPoolSettings { MaxActiveSessions = 8, IdleTimeout = TimeSpan.FromMinutes(10) });
             registry.Register("kiro", new CliPoolSettings { MaxActiveSessions = 8, IdleTimeout = TimeSpan.FromMinutes(10) });
