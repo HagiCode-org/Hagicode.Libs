@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using HagiCode.Libs.Core.Discovery;
@@ -7,6 +8,8 @@ using HagiCode.Libs.Core.Process;
 using HagiCode.Libs.Core.Transport;
 using HagiCode.Libs.Core.Acp;
 using HagiCode.Libs.Providers.Pooling;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace HagiCode.Libs.Providers.Codex;
 
@@ -25,6 +28,7 @@ public class CodexProvider : ICliProvider<CodexOptions>
     private readonly ICliExecutionFacade? _executionFacade;
     private readonly CliProviderPoolCoordinator _poolCoordinator;
     private readonly CliProviderPoolConfigurationRegistry _poolConfiguration;
+    private readonly ILogger<CodexProvider> _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="CodexProvider" /> class.
@@ -39,7 +43,8 @@ public class CodexProvider : ICliProvider<CodexOptions>
         IRuntimeEnvironmentResolver? runtimeEnvironmentResolver = null,
         ICliExecutionFacade? executionFacade = null,
         CliProviderPoolCoordinator? poolCoordinator = null,
-        CliProviderPoolConfigurationRegistry? poolConfiguration = null)
+        CliProviderPoolConfigurationRegistry? poolConfiguration = null,
+        ILogger<CodexProvider>? logger = null)
     {
         _executableResolver = executableResolver ?? throw new ArgumentNullException(nameof(executableResolver));
         _processManager = processManager ?? throw new ArgumentNullException(nameof(processManager));
@@ -47,6 +52,7 @@ public class CodexProvider : ICliProvider<CodexOptions>
         _executionFacade = executionFacade;
         _poolCoordinator = poolCoordinator ?? new CliProviderPoolCoordinator();
         _poolConfiguration = poolConfiguration ?? new CliProviderPoolConfigurationRegistry();
+        _logger = logger ?? NullLogger<CodexProvider>.Instance;
     }
 
     /// <inheritdoc />
@@ -79,9 +85,11 @@ public class CodexProvider : ICliProvider<CodexOptions>
             yield break;
         }
 
+        var logicalSessionKey = ResolveLogicalSessionKey(options);
+        var poolLookupKey = ResolvePoolLookupKey(options);
         var request = new CliRuntimePoolRequest(
             Name,
-            ResolveLogicalSessionKey(options),
+            poolLookupKey,
             CliPoolFingerprintBuilder.Build(
                 executablePath,
                 options.WorkingDirectory,
@@ -95,6 +103,14 @@ public class CodexProvider : ICliProvider<CodexOptions>
                 runtimeEnvironment),
             poolSettings);
 
+        _logger.LogInformation(
+            "Codex pool acquire start: provider={ProviderName}, logicalSessionKey={LogicalSessionKey}, poolLookupKey={PoolLookupKey}, threadId={ThreadId}, workingDirectory={WorkingDirectory}",
+            Name,
+            logicalSessionKey ?? "(none)",
+            poolLookupKey ?? "(none)",
+            ArgumentValueNormalizer.NormalizeOptionalValue(options.ThreadId) ?? "(none)",
+            ArgumentValueNormalizer.NormalizeOptionalValue(options.WorkingDirectory) ?? "(none)");
+
         await using var lease = await _poolCoordinator.AcquireCodexThreadAsync(
             request,
             ct => Task.FromResult(new CliRuntimePoolEntry<CodexPooledThreadState>(
@@ -107,6 +123,30 @@ public class CodexProvider : ICliProvider<CodexOptions>
                 request.Settings)),
             cancellationToken).ConfigureAwait(false);
 
+        _logger.LogInformation(
+            "Codex pool acquire complete: provider={ProviderName}, logicalSessionKey={LogicalSessionKey}, poolLookupKey={PoolLookupKey}, isWarmLease={IsWarmLease}, registeredKeyCount={RegisteredKeyCount}",
+            Name,
+            logicalSessionKey ?? "(none)",
+            poolLookupKey ?? "(none)",
+            lease.IsWarmLease,
+            lease.Entry.RegisteredKeys.Count);
+
+        var shouldEvictAnonymous = request.LogicalSessionKey is null && !poolSettings.KeepAnonymousSessions;
+        var faulted = false;
+        var lockWaitStopwatch = Stopwatch.StartNew();
+        if (lease.IsWarmLease)
+        {
+            _logger.LogInformation(
+                "Codex execution lock wait started: provider={ProviderName}, logicalSessionKey={LogicalSessionKey}, poolLookupKey={PoolLookupKey}, threadId={ThreadId}",
+                Name,
+                logicalSessionKey ?? "(none)",
+                poolLookupKey ?? "(none)",
+                ArgumentValueNormalizer.NormalizeOptionalValue(options.ThreadId) ?? "(none)");
+        }
+
+        await lease.Entry.ExecutionLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        lockWaitStopwatch.Stop();
+
         var effectiveOptions = options with { ThreadId = lease.Entry.Resource.ThreadId ?? options.ThreadId };
         var startContext = new ProcessStartContext
         {
@@ -116,9 +156,15 @@ public class CodexProvider : ICliProvider<CodexOptions>
             EnvironmentVariables = BuildEnvironmentVariables(effectiveOptions, runtimeEnvironment)
         };
 
-        var shouldEvictAnonymous = request.LogicalSessionKey is null && !poolSettings.KeepAnonymousSessions;
-        var faulted = false;
-        await lease.Entry.ExecutionLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        _logger.LogInformation(
+            "Codex execution lock acquired: provider={ProviderName}, logicalSessionKey={LogicalSessionKey}, poolLookupKey={PoolLookupKey}, waitMs={WaitMs}, resumedThreadId={ThreadId}",
+            Name,
+            logicalSessionKey ?? "(none)",
+            poolLookupKey ?? "(none)",
+            lockWaitStopwatch.ElapsedMilliseconds,
+            effectiveOptions.ThreadId ?? "(none)");
+
+        var executionStopwatch = Stopwatch.StartNew();
         try
         {
             await using var transport = CreateTransport(startContext);
@@ -130,6 +176,16 @@ public class CodexProvider : ICliProvider<CodexOptions>
                 if (TryGetThreadId(message.Content, out var threadId))
                 {
                     lease.Entry.Resource.ThreadId = threadId;
+                    if (!string.IsNullOrWhiteSpace(threadId))
+                    {
+                        await lease.RegisterKeyAsync(BuildThreadLookupKey(threadId), cancellationToken).ConfigureAwait(false);
+                        _logger.LogInformation(
+                            "Codex pool reindexed after thread acquisition: provider={ProviderName}, logicalSessionKey={LogicalSessionKey}, newThreadId={ThreadId}, registeredKeyCount={RegisteredKeyCount}",
+                            Name,
+                            logicalSessionKey ?? "(none)",
+                            threadId,
+                            lease.Entry.RegisteredKeys.Count);
+                    }
                 }
 
                 if (string.Equals(message.Type, "turn.failed", StringComparison.OrdinalIgnoreCase) ||
@@ -144,6 +200,15 @@ public class CodexProvider : ICliProvider<CodexOptions>
                     break;
                 }
             }
+
+            executionStopwatch.Stop();
+            _logger.LogInformation(
+                "Codex pooled execution finished: provider={ProviderName}, logicalSessionKey={LogicalSessionKey}, threadId={ThreadId}, faulted={Faulted}, durationMs={DurationMs}",
+                Name,
+                logicalSessionKey ?? "(none)",
+                lease.Entry.Resource.ThreadId ?? effectiveOptions.ThreadId ?? "(none)",
+                faulted,
+                executionStopwatch.ElapsedMilliseconds);
         }
         finally
         {
@@ -321,8 +386,29 @@ public class CodexProvider : ICliProvider<CodexOptions>
 
     private static string? ResolveLogicalSessionKey(CodexOptions options)
     {
-        return ArgumentValueNormalizer.NormalizeOptionalValue(options.ThreadId)
-               ?? ArgumentValueNormalizer.NormalizeOptionalValue(options.WorkingDirectory);
+        return ArgumentValueNormalizer.NormalizeOptionalValue(options.LogicalSessionKey);
+    }
+
+    private static string? ResolvePoolLookupKey(CodexOptions options)
+    {
+        var logicalSessionKey = ResolveLogicalSessionKey(options);
+        if (logicalSessionKey is not null)
+        {
+            return BuildLogicalLookupKey(logicalSessionKey);
+        }
+
+        var threadId = ArgumentValueNormalizer.NormalizeOptionalValue(options.ThreadId);
+        return threadId is null ? null : BuildThreadLookupKey(threadId);
+    }
+
+    private static string BuildLogicalLookupKey(string logicalSessionKey)
+    {
+        return $"logical::{logicalSessionKey}";
+    }
+
+    private static string BuildThreadLookupKey(string threadId)
+    {
+        return $"thread::{threadId}";
     }
 
     private async IAsyncEnumerable<CliMessage> ExecuteOneShotAsync(

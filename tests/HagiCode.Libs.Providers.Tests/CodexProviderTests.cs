@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Shouldly;
@@ -147,17 +148,106 @@ public sealed class CodexProviderTests
             ]
         ]);
 
-        await foreach (var _ in provider.ExecuteAsync(new CodexOptions { WorkingDirectory = "/tmp/project" }, "first"))
+        await foreach (var _ in provider.ExecuteAsync(
+                           new CodexOptions
+                           {
+                               WorkingDirectory = "/tmp/project",
+                               LogicalSessionKey = "session-1"
+                           },
+                           "first"))
         {
         }
 
-        await foreach (var _ in provider.ExecuteAsync(new CodexOptions { WorkingDirectory = "/tmp/project" }, "second"))
+        await foreach (var _ in provider.ExecuteAsync(
+                           new CodexOptions
+                           {
+                               WorkingDirectory = "/tmp/project",
+                               LogicalSessionKey = "session-1"
+                           },
+                           "second"))
         {
         }
 
         provider.StartContexts.Count.ShouldBe(2);
         provider.StartContexts[1].Arguments.ShouldContain("resume");
         provider.StartContexts[1].Arguments.ShouldContain("thread-xyz");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_allows_concurrent_execution_for_different_logical_sessions_in_same_directory()
+    {
+        var firstScript = new CoordinatedTransportScript(threadId: "thread-a");
+        var secondScript = new CoordinatedTransportScript(threadId: "thread-b");
+        var provider = CreateCoordinatedProvider(firstScript, secondScript);
+
+        var firstTask = DrainCliMessagesAsync(provider.ExecuteAsync(
+            new CodexOptions
+            {
+                WorkingDirectory = "/tmp/project",
+                LogicalSessionKey = "session-a"
+            },
+            "first"));
+
+        await firstScript.Started.Task.WaitAsync(TimeSpan.FromSeconds(1));
+
+        var secondTask = DrainCliMessagesAsync(provider.ExecuteAsync(
+            new CodexOptions
+            {
+                WorkingDirectory = "/tmp/project",
+                LogicalSessionKey = "session-b"
+            },
+            "second"));
+
+        await secondScript.Started.Task.WaitAsync(TimeSpan.FromSeconds(1));
+
+        firstScript.Release.TrySetResult();
+        secondScript.Release.TrySetResult();
+
+        await Task.WhenAll(firstTask, secondTask);
+
+        provider.StartContexts.Count.ShouldBe(2);
+        provider.StartContexts[0].Arguments.ShouldNotContain("resume");
+        provider.StartContexts[1].Arguments.ShouldNotContain("resume");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_serializes_same_logical_session_and_reuses_thread_after_reindex()
+    {
+        var firstScript = new CoordinatedTransportScript(threadId: "thread-serial");
+        var secondScript = new CoordinatedTransportScript();
+        var provider = CreateCoordinatedProvider(firstScript, secondScript);
+
+        var firstTask = DrainCliMessagesAsync(provider.ExecuteAsync(
+            new CodexOptions
+            {
+                WorkingDirectory = "/tmp/project",
+                LogicalSessionKey = "session-serial"
+            },
+            "first"));
+
+        await firstScript.Started.Task.WaitAsync(TimeSpan.FromSeconds(1));
+
+        var secondTask = DrainCliMessagesAsync(provider.ExecuteAsync(
+            new CodexOptions
+            {
+                WorkingDirectory = "/tmp/project",
+                LogicalSessionKey = "session-serial"
+            },
+            "second"));
+
+        await Task.Delay(150);
+        secondScript.Started.Task.IsCompleted.ShouldBeFalse();
+
+        firstScript.Release.TrySetResult();
+        await firstTask.WaitAsync(TimeSpan.FromSeconds(1));
+        await secondScript.Started.Task.WaitAsync(TimeSpan.FromSeconds(1));
+
+        secondScript.Release.TrySetResult();
+        await secondTask.WaitAsync(TimeSpan.FromSeconds(1));
+
+        provider.StartContexts.Count.ShouldBe(2);
+        provider.StartContexts[1].Arguments.ShouldContain("resume");
+        provider.StartContexts[1].Arguments.ShouldContain("thread-serial");
     }
 
     [Fact]
@@ -329,6 +419,23 @@ public sealed class CodexProviderTests
             messageBatches);
     }
 
+    private static CoordinatedCodexProvider CreateCoordinatedProvider(params CoordinatedTransportScript[] scripts)
+    {
+        return new CoordinatedCodexProvider(
+            new StubExecutableResolver(),
+            new StubCliProcessManager(),
+            new StubRuntimeEnvironmentResolver(),
+            null,
+            scripts);
+    }
+
+    private static async Task DrainCliMessagesAsync(IAsyncEnumerable<CliMessage> stream)
+    {
+        await foreach (var _ in stream)
+        {
+        }
+    }
+
     private sealed class TestCodexProvider(
         CliExecutableResolver executableResolver,
         CliProcessManager processManager,
@@ -412,6 +519,78 @@ public sealed class CodexProviderTests
             sentMessages.Add(message);
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class CoordinatedCodexProvider(
+        CliExecutableResolver executableResolver,
+        CliProcessManager processManager,
+        IRuntimeEnvironmentResolver runtimeEnvironmentResolver,
+        ICliExecutionFacade? executionFacade,
+        IReadOnlyList<CoordinatedTransportScript> scripts)
+        : CodexProvider(executableResolver, processManager, runtimeEnvironmentResolver, executionFacade)
+    {
+        private readonly Queue<CoordinatedTransportScript> _scripts = new(scripts);
+
+        public List<ProcessStartContext> StartContexts { get; } = [];
+
+        protected override ICliTransport CreateTransport(ProcessStartContext startContext)
+        {
+            StartContexts.Add(startContext);
+            return new CoordinatedTransport(_scripts.Dequeue());
+        }
+    }
+
+    private sealed class CoordinatedTransportScript(string? threadId = null)
+    {
+        public string? ThreadId { get; } = threadId;
+
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource Completed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
+
+    private sealed class CoordinatedTransport(CoordinatedTransportScript script) : ICliTransport
+    {
+        public bool IsConnected { get; private set; }
+
+        public Task ConnectAsync(CancellationToken cancellationToken = default)
+        {
+            IsConnected = true;
+            return Task.CompletedTask;
+        }
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+        public Task DisconnectAsync(CancellationToken cancellationToken = default)
+        {
+            IsConnected = false;
+            return Task.CompletedTask;
+        }
+
+        public Task InterruptAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public async IAsyncEnumerable<CliMessage> ReceiveAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            script.Started.TrySetResult();
+            await script.Release.Task.WaitAsync(cancellationToken);
+
+            if (!string.IsNullOrWhiteSpace(script.ThreadId))
+            {
+                yield return new CliMessage(
+                    "thread.started",
+                    JsonSerializer.SerializeToElement(new { type = "thread.started", thread_id = script.ThreadId }));
+            }
+
+            yield return new CliMessage(
+                "turn.completed",
+                JsonSerializer.SerializeToElement(new { type = "turn.completed" }));
+
+            script.Completed.TrySetResult();
+        }
+
+        public Task SendAsync(CliMessage message, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
     private sealed class StubExecutableResolver : CliExecutableResolver

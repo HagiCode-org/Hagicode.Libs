@@ -48,6 +48,12 @@ public sealed record CodexOptions
     public string? ThreadId { get; init; }
 
     /// <summary>
+    /// Gets or sets the caller-scoped logical session identity used for pooled entry isolation.
+    /// The value should remain stable for the same resumed Codex session and differ across parallel sessions.
+    /// </summary>
+    public string? LogicalSessionKey { get; init; }
+
+    /// <summary>
     /// Gets or sets a value indicating whether the git repository check should be skipped.
     /// </summary>
     public bool SkipGitRepositoryCheck { get; init; }
