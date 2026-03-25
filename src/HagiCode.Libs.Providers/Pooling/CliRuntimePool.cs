@@ -80,6 +80,48 @@ internal sealed class CliRuntimePool<TResource> : IAsyncDisposable
         }
     }
 
+    public async Task RegisterKeyAsync(
+        CliRuntimePoolEntry<TResource> entry,
+        string? key,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        if (_disposed)
+        {
+            return;
+        }
+
+        var normalizedKey = NormalizeKey(key);
+        if (normalizedKey is null)
+        {
+            return;
+        }
+
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!_entries.Contains(entry))
+            {
+                return;
+            }
+
+            if (_keyIndex.TryGetValue(normalizedKey, out var existingEntry) &&
+                !ReferenceEquals(existingEntry, entry))
+            {
+                throw new InvalidOperationException(
+                    $"The pooled provider '{entry.ProviderName}' already maps key '{normalizedKey}' to another entry.");
+            }
+
+            entry.RegisterKey(normalizedKey);
+            entry.Touch();
+            _keyIndex[normalizedKey] = entry;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     public async Task<int> ReapIdleEntriesAsync(string? providerName = null, CancellationToken cancellationToken = default)
     {
         if (_disposed)
@@ -201,6 +243,11 @@ internal sealed class CliRuntimePool<TResource> : IAsyncDisposable
         }
 
         return toRemove.Count;
+    }
+
+    private static string? NormalizeKey(string? key)
+    {
+        return string.IsNullOrWhiteSpace(key) ? null : key.Trim();
     }
 
     private void IndexEntry(CliRuntimePoolEntry<TResource> entry)

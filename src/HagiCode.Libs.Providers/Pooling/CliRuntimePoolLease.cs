@@ -19,6 +19,9 @@ internal sealed class CliRuntimePoolLease<TResource> : IAsyncDisposable
 
     public bool IsFaulted { get; set; }
 
+    public Task RegisterKeyAsync(string? key, CancellationToken cancellationToken = default)
+        => _pool.RegisterKeyAsync(Entry, key, cancellationToken);
+
     public async ValueTask DisposeAsync()
     {
         if (_disposed)
