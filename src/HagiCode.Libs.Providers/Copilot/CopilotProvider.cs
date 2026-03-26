@@ -463,8 +463,7 @@ public class CopilotProvider : ICliProvider<CopilotOptions>
             return $"copilot-session:{sessionId}";
         }
 
-        var workingDirectory = ArgumentValueNormalizer.NormalizeOptionalValue(options.WorkingDirectory);
-        return workingDirectory is null ? null : $"copilot-workdir:{workingDirectory}";
+        return null;
     }
 
     private static CliMessage CreateDiagnosticMessage(string message)

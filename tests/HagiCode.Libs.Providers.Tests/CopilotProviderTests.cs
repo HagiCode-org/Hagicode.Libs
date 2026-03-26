@@ -230,7 +230,7 @@ public sealed class CopilotProviderTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_reuses_warm_copilot_runtime_for_same_working_directory()
+    public async Task ExecuteAsync_does_not_reuse_warm_copilot_runtime_for_anonymous_requests_in_same_working_directory()
     {
         var gateway = new StubCopilotSdkGateway(
         [
@@ -249,9 +249,9 @@ public sealed class CopilotProviderTests
             secondMessages.Add(message);
         }
 
-        gateway.CreatedRuntimeCount.ShouldBe(1);
+        gateway.CreatedRuntimeCount.ShouldBe(2);
         gateway.SendPromptCallCount.ShouldBe(2);
-        secondMessages.First().Type.ShouldBe("session.reused");
+        secondMessages.First().Type.ShouldBe("session.started");
         secondMessages.First().Content.GetProperty("session_id").GetString().ShouldBe("copilot-session-1");
     }
 

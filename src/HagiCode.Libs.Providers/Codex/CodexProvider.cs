@@ -398,7 +398,13 @@ public class CodexProvider : ICliProvider<CodexOptions>
         }
 
         var threadId = ArgumentValueNormalizer.NormalizeOptionalValue(options.ThreadId);
-        return threadId is null ? null : BuildThreadLookupKey(threadId);
+        if (threadId is not null)
+        {
+            return BuildThreadLookupKey(threadId);
+        }
+
+        // Anonymous requests stay unkeyed until the runtime returns a stable thread id.
+        return null;
     }
 
     private static string BuildLogicalLookupKey(string logicalSessionKey)

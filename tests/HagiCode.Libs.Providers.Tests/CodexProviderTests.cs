@@ -174,6 +174,42 @@ public sealed class CodexProviderTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_does_not_reuse_anonymous_requests_for_same_working_directory()
+    {
+        var provider = CreateProvider(messageBatches:
+        [
+            [
+                new CliMessage("thread.started", JsonSerializer.SerializeToElement(new { type = "thread.started", thread_id = "thread-anon-1" })),
+                new CliMessage("turn.completed", JsonSerializer.SerializeToElement(new { type = "turn.completed" }))
+            ],
+            [
+                new CliMessage("turn.completed", JsonSerializer.SerializeToElement(new { type = "turn.completed" }))
+            ]
+        ]);
+
+        await foreach (var _ in provider.ExecuteAsync(
+                           new CodexOptions
+                           {
+                               WorkingDirectory = "/tmp/project"
+                           },
+                           "first"))
+        {
+        }
+
+        await foreach (var _ in provider.ExecuteAsync(
+                           new CodexOptions
+                           {
+                               WorkingDirectory = "/tmp/project"
+                           },
+                           "second"))
+        {
+        }
+
+        provider.StartContexts.Count.ShouldBe(2);
+        provider.StartContexts[1].Arguments.ShouldNotContain("resume");
+    }
+
+    [Fact]
     public async Task ExecuteAsync_allows_concurrent_execution_for_different_logical_sessions_in_same_directory()
     {
         var firstScript = new CoordinatedTransportScript(threadId: "thread-a");
