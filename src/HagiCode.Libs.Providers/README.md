@@ -79,6 +79,9 @@ await foreach (var message in copilot.ExecuteAsync(copilotOptions, "Reply with e
 // Reuse a persisted provider-native Copilot conversation on the next call.
 var resumedOptions = copilotOptions with { SessionId = "copilot-session-123" };
 
+// Without SessionId, Copilot requests stay anonymous; WorkingDirectory only affects
+// compatibility checks and will not hit the shared pool by itself.
+
 var options = new CodexOptions
 {
     WorkingDirectory = "/path/to/repo",
@@ -96,6 +99,8 @@ await foreach (var message in codex.ExecuteAsync(options, "Reply with exactly th
 }
 
 // Reuse the same logical Codex session key to keep thread continuity on later calls.
+// If LogicalSessionKey and ThreadId are both absent, the request remains anonymous
+// even when WorkingDirectory matches a previous call.
 
 var kimiOptions = new KimiOptions
 {

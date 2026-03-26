@@ -214,8 +214,8 @@ Built-in providers now participate in a shared pooling architecture:
 
 - ACP providers (`CodeBuddy`, `Hermes`, `Kimi`, `Kiro`, `QoderCLI`) lease warm ACP sessions from the shared `CliProviderPoolCoordinator`.
 - `Claude Code` reuses warm stdio transports when the effective session key and compatibility fingerprint match.
-- `Codex` keeps thread-resume state in the shared pool so follow-up requests can reuse the last known thread id for the same workspace.
-- `Copilot` reuses SDK-backed runtimes per explicit `SessionId` when provided, otherwise per compatible working directory/configuration pair.
+- `Codex` keeps thread-resume state in the shared pool for an explicit `LogicalSessionKey` or a stable `ThreadId`; a shared working directory alone never becomes the pool identity.
+- `Copilot` reuses SDK-backed runtimes only for an explicit `SessionId`; `WorkingDirectory` remains part of the compatibility fingerprint, not the pool identity.
 
 Every provider option record exposes `PoolSettings` so callers can disable pooling or tune provider-level behavior:
 
@@ -283,7 +283,7 @@ await foreach (var message in copilot.ExecuteAsync(options, "Reply with exactly 
 }
 ```
 
-Set `SessionId` when you want provider-native Copilot resume semantics. The provider first attempts SDK resume for that id, falls back to creating a new session pinned to the requested id when nothing persisted yet, and emits `session.started`, `session.resumed`, or `session.reused` messages accordingly.
+Set `SessionId` when you want provider-native Copilot resume semantics. The provider first attempts SDK resume for that id, falls back to creating a new session pinned to the requested id when nothing persisted yet, and emits `session.started`, `session.resumed`, or `session.reused` messages accordingly. Requests without `SessionId` stay anonymous, so the same `WorkingDirectory` alone does not trigger warm reuse.
 
 Codex execution options cover the common CLI settings without forcing raw command lines:
 
@@ -305,7 +305,7 @@ await foreach (var message in codex.ExecuteAsync(options, "Reply with exactly th
 }
 ```
 
-For pooled Codex sessions, `LogicalSessionKey` should remain stable for the same logical conversation and differ across parallel conversations that share a repository path. The provider now isolates execution locks by that key, records acquire/wait/reindex diagnostics, and registers a thread-based resume alias after `thread.started`.
+For pooled Codex sessions, `LogicalSessionKey` should remain stable for the same logical conversation and differ across parallel conversations that share a repository path. The provider isolates execution locks by that key, records acquire/wait/reindex diagnostics, and registers a thread-based resume alias after `thread.started`. If both `LogicalSessionKey` and `ThreadId` are absent, the request stays anonymous and does not reuse a pooled entry solely because the directory matches.
 
 Hermes execution options cover the managed `hermes acp` bootstrap path without forcing raw process wiring. `SessionId` is treated as an in-memory conversation key for the current provider instance, rather than a cross-process resume token:
 
