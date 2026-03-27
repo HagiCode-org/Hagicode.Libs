@@ -266,7 +266,7 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
         }
 
         var sessionId = ArgumentValueNormalizer.NormalizeOptionalValue(options.SessionId);
-        if (sessionId is not null)
+        if (sessionId is not null && !options.ContinueConversation && resume is null)
         {
             arguments.AddRange(["--session-id", sessionId]);
         }

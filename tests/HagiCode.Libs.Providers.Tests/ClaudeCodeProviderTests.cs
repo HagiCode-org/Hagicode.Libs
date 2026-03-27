@@ -26,8 +26,6 @@ public sealed class ClaudeCodeProviderTests
             AllowedTools = ["Read", "Write"],
             DisallowedTools = ["Bash"],
             PermissionMode = "plan",
-            ContinueConversation = true,
-            Resume = "resume-id",
             SessionId = "session-id",
             AddDirectories = ["/tmp/project"],
             ExtraArgs = new Dictionary<string, string?> { ["dangerously-skip-permissions"] = null }
@@ -37,10 +35,38 @@ public sealed class ClaudeCodeProviderTests
         arguments.ShouldContain("--model", "claude-sonnet");
         arguments.ShouldContain("--system-prompt", "system");
         arguments.ShouldContain("--max-turns", "3");
-        arguments.ShouldContain("--continue");
-        arguments.ShouldContain("--resume", "resume-id");
         arguments.ShouldContain("--session-id", "session-id");
         arguments.ShouldContain("--add-dir", "/tmp/project");
+    }
+
+    [Fact]
+    public void BuildCommandArguments_omits_session_id_when_continue_is_enabled()
+    {
+        var provider = CreateProvider();
+
+        var arguments = provider.BuildCommandArguments(new ClaudeCodeOptions
+        {
+            ContinueConversation = true,
+            SessionId = "session-id"
+        });
+
+        arguments.ShouldContain("--continue");
+        arguments.ShouldNotContain("--session-id");
+    }
+
+    [Fact]
+    public void BuildCommandArguments_omits_session_id_when_resume_is_specified()
+    {
+        var provider = CreateProvider();
+
+        var arguments = provider.BuildCommandArguments(new ClaudeCodeOptions
+        {
+            Resume = "resume-id",
+            SessionId = "session-id"
+        });
+
+        arguments.ShouldContain("--resume", "resume-id");
+        arguments.ShouldNotContain("--session-id");
     }
 
     [Fact]
