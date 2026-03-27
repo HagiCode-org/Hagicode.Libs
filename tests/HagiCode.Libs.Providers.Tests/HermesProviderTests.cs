@@ -127,6 +127,30 @@ public sealed class HermesProviderTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_keeps_reusing_same_session_when_hermes_model_changes()
+    {
+        var provider = CreateProvider(sessionClientFactory: _ => new FakeAcpSessionClient(emitNotifications: false));
+
+        await foreach (var _ in provider.ExecuteAsync(
+                           new HermesOptions { SessionId = "conversation-1", Model = "minimax-m2.7" },
+                           "Reply with ACK."))
+        {
+        }
+
+        var secondMessages = new List<CliMessage>();
+        await foreach (var message in provider.ExecuteAsync(
+                           new HermesOptions { SessionId = "conversation-1", Model = "minimax-m2.7-high-speed" },
+                           "Reply with ACK again."))
+        {
+            secondMessages.Add(message);
+        }
+
+        provider.CreatedSessionClients.Count.ShouldBe(1);
+        provider.CreatedSessionClients[0].StartSessionCalls.ShouldBe(2);
+        secondMessages.First().Type.ShouldBe("session.reused");
+    }
+
+    [Fact]
     public async Task ExecuteAsync_falls_back_to_prompt_result_when_notification_loop_ends_via_internal_cancellation()
     {
         var provider = CreateProvider(sessionClientFactory: _ => new FakeAcpSessionClient(emitNotifications: false, promptStopReason: "fallback"));

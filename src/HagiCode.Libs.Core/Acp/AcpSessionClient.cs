@@ -96,6 +96,7 @@ public sealed class AcpSessionClient : IAcpSessionClient
 
         var normalizedSessionId = Process.ArgumentValueNormalizer.NormalizeOptionalValue(sessionId);
         var normalizedModel = Process.ArgumentValueNormalizer.NormalizeOptionalValue(model);
+        var usesHermesSessionSettings = IsHermesInitializeResult(_initializeResult);
         JsonElement sessionResult;
         string resolvedSessionId;
         var isResumed = normalizedSessionId is not null;
@@ -119,13 +120,19 @@ public sealed class AcpSessionClient : IAcpSessionClient
                 new
                 {
                     cwd = workingDirectory,
-                    mcpServers = Array.Empty<object>()
+                    mcpServers = Array.Empty<object>(),
+                    settings = usesHermesSessionSettings && normalizedModel is not null
+                        ? new Dictionary<string, object?>(StringComparer.Ordinal)
+                        {
+                            ["model"] = normalizedModel
+                        }
+                        : null
                 },
                 cancellationToken).ConfigureAwait(false);
             resolvedSessionId = ParseSessionId(sessionResult);
         }
 
-        if (normalizedModel is not null)
+        if (normalizedModel is not null && !usesHermesSessionSettings)
         {
             await _rpcClient.InvokeAsync<JsonElement>(
                 "session/set_model",
@@ -138,6 +145,23 @@ public sealed class AcpSessionClient : IAcpSessionClient
         }
 
         return new AcpSessionHandle(resolvedSessionId, isResumed, sessionResult.Clone());
+    }
+
+    private static bool IsHermesInitializeResult(JsonElement? initializeResult)
+    {
+        if (initializeResult is not { ValueKind: JsonValueKind.Object } element)
+        {
+            return false;
+        }
+
+        if (!element.TryGetProperty("agentInfo", out var agentInfo) || agentInfo.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        return agentInfo.TryGetProperty("name", out var nameElement)
+               && nameElement.ValueKind == JsonValueKind.String
+               && string.Equals(nameElement.GetString(), "hermes", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <inheritdoc />
