@@ -221,6 +221,14 @@ var kiro = provider.GetRequiredService<ICliProvider<KiroOptions>>();
 var qoderCli = provider.GetRequiredService<ICliProvider<QoderCliOptions>>();
 ```
 
+`hagicode-core` 里的 `ClaudeCodeCliProvider`、`CodebuddyCliProvider`、`HermesCliProvider` 现已全部降为薄适配层，直接复用这里的 `ICliProvider<TOptions>` 实现。结论是：同一组 Claude raw-stream / resume、CodeBuddy ACP tool update、Hermes 会话复用与 fallback 语义，现在在 libs 与 core 间保持一致。
+
+`ProviderRegistry` 也同步暴露了新的兼容别名，便于 console、测试和上层工厂共用同一命名面：
+
+- `claude-code` -> `claude`, `claudecode`, `anthropic-claude`
+- `codebuddy` -> `codebuddy-cli`
+- `hermes` -> `hermes-cli`
+
 ## Shared pooling
 
 Built-in providers now participate in a shared pooling architecture:
@@ -262,6 +270,8 @@ var options = new CodebuddyOptions
 {
     Model = "glm-4.7",
     WorkingDirectory = "/path/to/repo",
+    SessionId = "codebuddy-session-123",
+    ModeId = "plan",
     EnvironmentVariables = new Dictionary<string, string?>
     {
         ["CODEBUDDY_TOKEN"] = "<token>"
@@ -273,6 +283,8 @@ await foreach (var message in codebuddy.ExecuteAsync(options, "Reply with exactl
     Console.WriteLine($"{message.Type}: {message.Content}");
 }
 ```
+
+`SessionId` 会命中共享 ACP 池中的兼容会话；`ModeId` 会在 `session/new` 或 warm reuse 后重新下发，确保权限/执行模式与业务层请求保持一致。
 
 Copilot execution options cover SDK-managed session startup without exposing raw prompt-mode wiring. Unsupported startup flags are filtered before launch, while compatible flags remain available through `AdditionalArgs`:
 
@@ -327,6 +339,8 @@ var options = new HermesOptions
 {
     Model = "hermes/default",
     WorkingDirectory = "/path/to/repo",
+    SessionId = "hermes-session-123",
+    ModeId = "analysis",
     Arguments = ["acp"],
     EnvironmentVariables = new Dictionary<string, string?>
     {
@@ -339,6 +353,8 @@ await foreach (var message in hermes.ExecuteAsync(options, "Reply with exactly t
     Console.WriteLine($"{message.Type}: {message.Content}");
 }
 ```
+
+Hermes 的 `SessionId` 仍表示当前 provider 实例内的会话复用键；`ModeId` 现在会进入共享池指纹，并在新建/复用 ACP 会话后重新应用。
 
 Gemini execution options cover ACP bootstrap, optional authentication, and `session/load` resume without forcing consumers to handcraft JSON-RPC calls:
 

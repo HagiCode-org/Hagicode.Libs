@@ -24,8 +24,10 @@ If your application uses dependency injection, also reference `Microsoft.Extensi
 ```csharp
 using HagiCode.Libs.Core.Execution;
 using HagiCode.Libs.Providers;
+using HagiCode.Libs.Providers.Codebuddy;
 using HagiCode.Libs.Providers.Copilot;
 using HagiCode.Libs.Providers.Codex;
+using HagiCode.Libs.Providers.Hermes;
 using HagiCode.Libs.Providers.Kimi;
 using HagiCode.Libs.Providers.Kiro;
 using Microsoft.Extensions.DependencyInjection;
@@ -35,8 +37,10 @@ services.AddHagiCodeLibs();
 
 await using var serviceProvider = services.BuildServiceProvider();
 var executionFacade = serviceProvider.GetRequiredService<ICliExecutionFacade>();
+var codebuddy = serviceProvider.GetRequiredService<ICliProvider<CodebuddyOptions>>();
 var copilot = serviceProvider.GetRequiredService<ICliProvider<CopilotOptions>>();
 var codex = serviceProvider.GetRequiredService<ICliProvider<CodexOptions>>();
+var hermes = serviceProvider.GetRequiredService<ICliProvider<HermesOptions>>();
 var kimi = serviceProvider.GetRequiredService<ICliProvider<KimiOptions>>();
 var kiro = serviceProvider.GetRequiredService<ICliProvider<KiroOptions>>();
 ```
@@ -50,13 +54,56 @@ var poolCoordinator = serviceProvider.GetRequiredService<CliProviderPoolCoordina
 var poolDefaults = serviceProvider.GetRequiredService<CliProviderPoolConfigurationRegistry>();
 ```
 
+## Shared adapter parity
+
+`Claude Code`、`CodeBuddy`、`Hermes` 现在与 `hagicode-core` 的对应 provider 薄适配层共享同一套 libs-backed 实现。重点是：
+
+- `Claude Code` 继续保留 raw stream / resume 语义，但真实执行与 warm transport reuse 统一落在 `ClaudeCodeProvider`
+- `CodeBuddy` 的 ACP session reuse、tool update 归一化与 permission-mode 映射统一落在 `CodebuddyProvider`
+- `Hermes` 的 ACP session reuse、fallback 文本聚合与 lifecycle 诊断统一落在 `HermesProvider`
+
+`ProviderRegistry` 的规范名称与兼容别名也已统一：
+
+- `claude-code` -> `claude`, `claudecode`, `anthropic-claude`
+- `codebuddy` -> `codebuddy-cli`
+- `hermes` -> `hermes-cli`
+
 ## Provider usage
 
 ```csharp
 using HagiCode.Libs.Providers.Copilot;
 using HagiCode.Libs.Providers.Codex;
+using HagiCode.Libs.Providers.Codebuddy;
+using HagiCode.Libs.Providers.Hermes;
 using HagiCode.Libs.Providers.Kimi;
 using HagiCode.Libs.Providers.Kiro;
+
+var codebuddyOptions = new CodebuddyOptions
+{
+    WorkingDirectory = "/path/to/repo",
+    SessionId = "codebuddy-session-123",
+    ModeId = "plan",
+    Model = "glm-4.7"
+};
+
+await foreach (var message in codebuddy.ExecuteAsync(codebuddyOptions, "Reply with exactly the word 'pong'"))
+{
+    Console.WriteLine($"{message.Type}: {message.Content}");
+}
+
+var hermesOptions = new HermesOptions
+{
+    WorkingDirectory = "/path/to/repo",
+    SessionId = "hermes-session-123",
+    ModeId = "analysis",
+    Model = "hermes/default",
+    Arguments = ["acp"]
+};
+
+await foreach (var message in hermes.ExecuteAsync(hermesOptions, "Reply with exactly the word 'pong'"))
+{
+    Console.WriteLine($"{message.Type}: {message.Content}");
+}
 
 var copilotOptions = new CopilotOptions
 {
@@ -156,6 +203,7 @@ Practical boundaries:
 - `Claude Code` pools warm stdio transports keyed by session or resume identity plus its effective startup shape.
 - `Codex` pools workspace/thread bindings so follow-up requests can reuse the last known thread id.
 - `Copilot` pools SDK runtimes per compatible workspace/configuration pair.
+- `CodeBuddy` and `Hermes` now include `ModeId` in their reuse fingerprint and re-apply it after `session/new` or warm reuse.
 - Pooling can be disabled per provider call, which falls back to the original one-shot behavior without changing message semantics.
 - Idle eviction is lazy and deterministic; if a lease faults, the coordinator disposes that entry immediately rather than returning it to the warm set.
 
