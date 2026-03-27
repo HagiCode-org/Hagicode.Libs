@@ -1,5 +1,7 @@
 using Shouldly;
 using HagiCode.Libs.Providers;
+using HagiCode.Libs.Providers.Gemini;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace HagiCode.Libs.Providers.Tests;
 
@@ -36,6 +38,20 @@ public sealed class ProviderRegistryTests
 
         registry.GetProvider("stub-cli").ShouldBeSameAs(provider);
         registry.GetAllProviders().ShouldHaveSingleItem();
+    }
+
+    [Fact]
+    public async Task AddHagiCodeLibs_registers_gemini_aliases_in_provider_registry()
+    {
+        var services = new ServiceCollection();
+        services.AddHagiCodeLibs();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var registry = serviceProvider.GetRequiredService<ProviderRegistry>();
+
+        registry.GetProvider("gemini-cli").ShouldNotBeNull();
+        registry.GetProvider<GeminiOptions>("gemini").ShouldBeOfType<GeminiProvider>();
+        registry.GetProvider<GeminiOptions>("gemini-cli").ShouldBeOfType<GeminiProvider>();
     }
 
     private sealed class StubProvider(string name, bool isAvailable) : ICliProvider

@@ -7,6 +7,7 @@ using HagiCode.Libs.Providers.ClaudeCode;
 using HagiCode.Libs.Providers.Codebuddy;
 using HagiCode.Libs.Providers.Copilot;
 using HagiCode.Libs.Providers.Codex;
+using HagiCode.Libs.Providers.Gemini;
 using HagiCode.Libs.Providers.Hermes;
 using HagiCode.Libs.Providers.Kimi;
 using HagiCode.Libs.Providers.Kiro;
@@ -46,6 +47,7 @@ public static class ServiceCollectionExtensions
             registry.Register("codebuddy", new CliPoolSettings { MaxActiveSessions = 8, IdleTimeout = TimeSpan.FromMinutes(10) });
             registry.Register("copilot", new CliPoolSettings { MaxActiveSessions = 4, IdleTimeout = TimeSpan.FromMinutes(10) });
             registry.Register("codex", new CliPoolSettings { MaxActiveSessions = 20, IdleTimeout = TimeSpan.FromMinutes(10) });
+            registry.Register("gemini", new CliPoolSettings { MaxActiveSessions = 8, IdleTimeout = TimeSpan.FromMinutes(10) });
             registry.Register("hermes", new CliPoolSettings { MaxActiveSessions = 8, IdleTimeout = TimeSpan.FromMinutes(10) });
             registry.Register("kimi", new CliPoolSettings { MaxActiveSessions = 8, IdleTimeout = TimeSpan.FromMinutes(10) });
             registry.Register("kiro", new CliPoolSettings { MaxActiveSessions = 8, IdleTimeout = TimeSpan.FromMinutes(10) });
@@ -60,6 +62,7 @@ public static class ServiceCollectionExtensions
             serviceProvider.GetRequiredService<ICopilotSdkGateway>(),
             serviceProvider.GetRequiredService<IRuntimeEnvironmentResolver>()));
         services.AddSingleton<CodexProvider>();
+        services.AddSingleton<GeminiProvider>();
         services.AddSingleton<HermesProvider>();
         services.AddSingleton<KimiProvider>();
         services.AddSingleton<KiroProvider>();
@@ -68,6 +71,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<CodebuddyProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<CopilotProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<CodexProvider>());
+        services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<GeminiProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<HermesProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<KimiProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<KiroProvider>());
@@ -76,6 +80,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICliProvider<CodebuddyOptions>>(serviceProvider => serviceProvider.GetRequiredService<CodebuddyProvider>());
         services.AddSingleton<ICliProvider<CopilotOptions>>(serviceProvider => serviceProvider.GetRequiredService<CopilotProvider>());
         services.AddSingleton<ICliProvider<CodexOptions>>(serviceProvider => serviceProvider.GetRequiredService<CodexProvider>());
+        services.AddSingleton<ICliProvider<GeminiOptions>>(serviceProvider => serviceProvider.GetRequiredService<GeminiProvider>());
         services.AddSingleton<ICliProvider<HermesOptions>>(serviceProvider => serviceProvider.GetRequiredService<HermesProvider>());
         services.AddSingleton<ICliProvider<KimiOptions>>(serviceProvider => serviceProvider.GetRequiredService<KimiProvider>());
         services.AddSingleton<ICliProvider<KiroOptions>>(serviceProvider => serviceProvider.GetRequiredService<KiroProvider>());
@@ -85,6 +90,12 @@ public static class ServiceCollectionExtensions
             var registry = new ProviderRegistry();
             foreach (var provider in serviceProvider.GetServices<ICliProvider>())
             {
+                if (provider is GeminiProvider)
+                {
+                    registry.Register(provider.Name, provider, ["gemini-cli"]);
+                    continue;
+                }
+
                 if (provider is HermesProvider)
                 {
                     registry.Register(provider.Name, provider, ["hermes-cli"]);
