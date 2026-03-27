@@ -152,7 +152,7 @@ var qoderOptions = new QoderCliOptions
 
 Practical boundaries:
 
-- `CodeBuddy`, `Hermes`, `Kimi`, `Kiro`, and `QoderCLI` pool live ACP sessions.
+- `CodeBuddy`, `Gemini`, `Hermes`, `Kimi`, `Kiro`, and `QoderCLI` pool live ACP sessions.
 - `Claude Code` pools warm stdio transports keyed by session or resume identity plus its effective startup shape.
 - `Codex` pools workspace/thread bindings so follow-up requests can reuse the last known thread id.
 - `Copilot` pools SDK runtimes per compatible workspace/configuration pair.
@@ -164,6 +164,7 @@ Practical boundaries:
 - Interactive provider transports still use `CliProcessManager` directly because they need open stdio sessions.
 - The new execution facade is intended for provider-facing adapters, diagnostics, and one-shot probes such as version checks.
 - Provider callers should continue passing structured option models; the new facade is additive and does not replace provider-specific option records.
+- `gemini` is the canonical built-in provider name; `ProviderRegistry` and the dedicated console also accept `gemini-cli` as an alias.
 - `kimi` is the canonical built-in provider name; `ProviderRegistry` and the dedicated console also accept `kimi-cli` as an alias.
 - `kiro` is the canonical built-in provider name; `ProviderRegistry` and the dedicated console also accept `kiro-cli` as an alias.
-- `CliInstallRegistry` currently marks both Kimi and Kiro as local-only validation metadata (`IsPubliclyInstallable = false`), so default public CI does not assume their credentials or installation are available.
+- `CliInstallRegistry` currently marks Gemini, Kimi, and Kiro as local-only validation metadata (`IsPubliclyInstallable = false`), so default public CI does not assume their credentials or installation are available.
