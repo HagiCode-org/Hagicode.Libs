@@ -28,6 +28,17 @@ public sealed class CliInstallRegistryTests
     }
 
     [Fact]
+    public void Descriptors_include_gemini_with_explicit_local_only_metadata()
+    {
+        var descriptor = CliInstallRegistry.Descriptors.Single(d => d.ProviderName == "Gemini");
+
+        descriptor.NpmPackage.ShouldBeEmpty();
+        descriptor.PinnedVersion.ShouldBeEmpty();
+        descriptor.ExecutableCandidates.ShouldBe(["gemini", "gemini-cli"]);
+        descriptor.IsPubliclyInstallable.ShouldBeFalse();
+    }
+
+    [Fact]
     public void Descriptors_include_kiro_with_explicit_local_only_metadata()
     {
         var descriptor = CliInstallRegistry.Descriptors.Single(d => d.ProviderName == "Kiro");

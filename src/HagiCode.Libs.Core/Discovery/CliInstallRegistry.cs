@@ -41,6 +41,13 @@ public static class CliInstallRegistry
             IsPubliclyInstallable: false),
 
         new CliInstallDescriptor(
+            ProviderName: "Gemini",
+            NpmPackage: string.Empty,
+            PinnedVersion: string.Empty,
+            ExecutableCandidates: ["gemini", "gemini-cli"],
+            IsPubliclyInstallable: false),
+
+        new CliInstallDescriptor(
             ProviderName: "Hermes",
             NpmPackage: string.Empty,
             PinnedVersion: string.Empty,
