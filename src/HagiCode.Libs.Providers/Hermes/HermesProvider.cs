@@ -88,7 +88,12 @@ public class HermesProvider : ICliProvider<HermesOptions>
         var request = new CliAcpPoolRequest(
             Name,
             logicalSessionKey,
-            CliPoolFingerprintBuilder.Build(executablePath, workingDirectory, startContext.Arguments, startContext.EnvironmentVariables, options.ModeId),
+            CliPoolFingerprintBuilder.Build(
+                executablePath,
+                workingDirectory,
+                startContext.Arguments,
+                startContext.EnvironmentVariables,
+                options.ModeId),
             poolSettings);
 
         await using var lease = await _poolCoordinator.AcquireAcpSessionAsync(
