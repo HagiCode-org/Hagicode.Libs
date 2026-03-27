@@ -87,7 +87,7 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
         var request = new CliAcpPoolRequest(
             Name,
             logicalSessionKey,
-            CliPoolFingerprintBuilder.Build(executablePath, workingDirectory, startContext.Arguments, startContext.EnvironmentVariables),
+            CliPoolFingerprintBuilder.Build(executablePath, workingDirectory, startContext.Arguments, startContext.EnvironmentVariables, options.ModeId),
             poolSettings);
 
         await using var lease = await _poolCoordinator.AcquireAcpSessionAsync(
@@ -103,6 +103,7 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
                 options.Model,
                 cancellationToken).ConfigureAwait(false);
             lease.Entry.RefreshSession(normalizedHandle, request.CompatibilityFingerprint);
+            await EnsureModeAsync(lease.Entry.SessionClient, lease.Entry.SessionId, options.ModeId, cancellationToken).ConfigureAwait(false);
         }
 
         var lifecycleHandle = lease.IsWarmLease
@@ -280,6 +281,7 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
                 options.SessionId,
                 options.Model,
                 startupCts.Token).ConfigureAwait(false);
+            await EnsureModeAsync(sessionClient, sessionHandle.SessionId, options.ModeId, startupCts.Token).ConfigureAwait(false);
             return new PooledAcpSessionEntry(
                 Name,
                 sessionHandle.SessionId,
@@ -313,6 +315,7 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
             options.SessionId,
             options.Model,
             startupCts.Token).ConfigureAwait(false);
+        await EnsureModeAsync(sessionClient, sessionHandle.SessionId, options.ModeId, startupCts.Token).ConfigureAwait(false);
 
         yield return CodebuddyAcpMessageMapper.CreateSessionLifecycleMessage(sessionHandle);
 
@@ -533,5 +536,20 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
     {
         return string.Equals(messageType, "terminal.completed", StringComparison.OrdinalIgnoreCase) ||
                string.Equals(messageType, "terminal.failed", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static async Task EnsureModeAsync(
+        IAcpSessionClient sessionClient,
+        string sessionId,
+        string? modeId,
+        CancellationToken cancellationToken)
+    {
+        var normalizedModeId = ArgumentValueNormalizer.NormalizeOptionalValue(modeId);
+        if (normalizedModeId is null)
+        {
+            return;
+        }
+
+        await sessionClient.SetModeAsync(sessionId, normalizedModeId, cancellationToken).ConfigureAwait(false);
     }
 }

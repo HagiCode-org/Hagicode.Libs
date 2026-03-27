@@ -28,6 +28,11 @@ public sealed record CodebuddyOptions
     public string? SessionId { get; init; }
 
     /// <summary>
+    /// Gets or sets the ACP mode identifier applied after session bootstrap.
+    /// </summary>
+    public string? ModeId { get; init; }
+
+    /// <summary>
     /// Gets a value indicating whether session reuse was requested.
     /// </summary>
     public bool ReuseSession => !string.IsNullOrWhiteSpace(SessionId);

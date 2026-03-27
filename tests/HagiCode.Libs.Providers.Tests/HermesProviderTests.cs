@@ -78,6 +78,24 @@ public sealed class HermesProviderTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_applies_mode_when_requested()
+    {
+        var provider = CreateProvider(sessionClientFactory: _ => new FakeAcpSessionClient());
+
+        await foreach (var _ in provider.ExecuteAsync(
+                           new HermesOptions
+                           {
+                               ModeId = "analysis"
+                           },
+                           "hello"))
+        {
+        }
+
+        provider.CreatedSessionClients[0].ModeUpdateCalls.ShouldBe(1);
+        provider.CreatedSessionClients[0].LastModeId.ShouldBe("analysis");
+    }
+
+    [Fact]
     public async Task ExecuteAsync_reuses_in_memory_session_collection_without_restarting_transport()
     {
         var provider = CreateProvider(sessionClientFactory: _ => new FakeAcpSessionClient(emitNotifications: false));
@@ -339,6 +357,10 @@ public sealed class HermesProviderTests
 
         public string? LastModel { get; private set; }
 
+        public int ModeUpdateCalls { get; private set; }
+
+        public string? LastModeId { get; private set; }
+
         public Task ConnectAsync(CancellationToken cancellationToken = default)
         {
             ConnectCalls++;
@@ -387,6 +409,8 @@ public sealed class HermesProviderTests
 
         public Task<JsonElement> SetModeAsync(string sessionId, string modeId, CancellationToken cancellationToken = default)
         {
+            ModeUpdateCalls++;
+            LastModeId = modeId;
             return Task.FromResult(JsonSerializer.SerializeToElement(new { }));
         }
 

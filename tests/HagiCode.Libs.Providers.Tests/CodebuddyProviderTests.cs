@@ -76,6 +76,24 @@ public sealed class CodebuddyProviderTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_applies_mode_when_requested()
+    {
+        var provider = CreateProvider(sessionClient: new FakeAcpSessionClient());
+
+        await foreach (var _ in provider.ExecuteAsync(
+                           new CodebuddyOptions
+                           {
+                               ModeId = "plan"
+                           },
+                           "hello"))
+        {
+        }
+
+        provider.SessionClient!.ModeUpdateCalls.ShouldBe(1);
+        provider.SessionClient.LastModeId.ShouldBe("plan");
+    }
+
+    [Fact]
     public async Task ExecuteAsync_uses_supplied_session_identifier_for_session_reuse()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(resumedSessionId: "session-resume"));
@@ -382,6 +400,10 @@ public sealed class CodebuddyProviderTests
 
         public string? LastModel { get; private set; }
 
+        public int ModeUpdateCalls { get; private set; }
+
+        public string? LastModeId { get; private set; }
+
         public Task ConnectAsync(CancellationToken cancellationToken = default)
         {
             ConnectCalls++;
@@ -420,6 +442,8 @@ public sealed class CodebuddyProviderTests
 
         public Task<JsonElement> SetModeAsync(string sessionId, string modeId, CancellationToken cancellationToken = default)
         {
+            ModeUpdateCalls++;
+            LastModeId = modeId;
             return Task.FromResult(JsonSerializer.SerializeToElement(new { }));
         }
 
