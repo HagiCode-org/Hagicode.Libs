@@ -46,7 +46,10 @@ public sealed class DependencyInjectionTests
         poolCoordinator.ShouldNotBeNull();
         poolConfiguration.GetSettings("hermes").Enabled.ShouldBeTrue();
         registry.GetProvider("claude-code").ShouldNotBeNull();
+        registry.GetProvider("claude").ShouldNotBeNull();
+        registry.GetProvider("claudecode").ShouldNotBeNull();
         registry.GetProvider("codebuddy").ShouldNotBeNull();
+        registry.GetProvider("codebuddy-cli").ShouldNotBeNull();
         registry.GetProvider("copilot").ShouldNotBeNull();
         registry.GetProvider("github-copilot").ShouldNotBeNull();
         registry.GetProvider("githubcopilot").ShouldNotBeNull();
@@ -76,6 +79,9 @@ public sealed class DependencyInjectionTests
         registry.GetProvider<CopilotOptions>("copilot").ShouldBeOfType<CopilotProvider>();
         registry.GetProvider<CopilotOptions>("github-copilot").ShouldBeOfType<CopilotProvider>();
         registry.GetProvider<CopilotOptions>("githubcopilot").ShouldBeOfType<CopilotProvider>();
+        registry.GetProvider<ClaudeCodeOptions>("claude").ShouldBeOfType<ClaudeCodeProvider>();
+        registry.GetProvider<ClaudeCodeOptions>("claudecode").ShouldBeOfType<ClaudeCodeProvider>();
+        registry.GetProvider<CodebuddyOptions>("codebuddy-cli").ShouldBeOfType<CodebuddyProvider>();
         registry.GetProvider<GeminiOptions>("gemini").ShouldBeOfType<GeminiProvider>();
         registry.GetProvider<GeminiOptions>("gemini-cli").ShouldBeOfType<GeminiProvider>();
         registry.GetProvider<HermesOptions>("hermes").ShouldBeOfType<HermesProvider>();

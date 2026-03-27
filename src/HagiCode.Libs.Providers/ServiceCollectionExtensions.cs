@@ -102,6 +102,18 @@ public static class ServiceCollectionExtensions
                     continue;
                 }
 
+                if (provider is ClaudeCodeProvider)
+                {
+                    registry.Register(provider.Name, provider, ["claude", "claudecode", "anthropic-claude"]);
+                    continue;
+                }
+
+                if (provider is CodebuddyProvider)
+                {
+                    registry.Register(provider.Name, provider, ["codebuddy-cli"]);
+                    continue;
+                }
+
                 if (provider is CopilotProvider)
                 {
                     registry.Register(provider.Name, provider, ["github-copilot", "githubcopilot"]);

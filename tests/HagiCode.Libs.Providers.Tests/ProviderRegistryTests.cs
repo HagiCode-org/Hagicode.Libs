@@ -1,5 +1,7 @@
 using Shouldly;
 using HagiCode.Libs.Providers;
+using HagiCode.Libs.Providers.ClaudeCode;
+using HagiCode.Libs.Providers.Codebuddy;
 using HagiCode.Libs.Providers.Gemini;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -52,6 +54,23 @@ public sealed class ProviderRegistryTests
         registry.GetProvider("gemini-cli").ShouldNotBeNull();
         registry.GetProvider<GeminiOptions>("gemini").ShouldBeOfType<GeminiProvider>();
         registry.GetProvider<GeminiOptions>("gemini-cli").ShouldBeOfType<GeminiProvider>();
+    }
+
+    [Fact]
+    public async Task AddHagiCodeLibs_registers_claude_and_codebuddy_aliases_in_provider_registry()
+    {
+        var services = new ServiceCollection();
+        services.AddHagiCodeLibs();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var registry = serviceProvider.GetRequiredService<ProviderRegistry>();
+
+        registry.GetProvider("claude").ShouldBeOfType<ClaudeCodeProvider>();
+        registry.GetProvider("claudecode").ShouldBeOfType<ClaudeCodeProvider>();
+        registry.GetProvider("anthropic-claude").ShouldBeOfType<ClaudeCodeProvider>();
+        registry.GetProvider("codebuddy-cli").ShouldBeOfType<CodebuddyProvider>();
+        registry.GetProvider<ClaudeCodeOptions>("claude").ShouldBeOfType<ClaudeCodeProvider>();
+        registry.GetProvider<CodebuddyOptions>("codebuddy-cli").ShouldBeOfType<CodebuddyProvider>();
     }
 
     private sealed class StubProvider(string name, bool isAvailable) : ICliProvider
