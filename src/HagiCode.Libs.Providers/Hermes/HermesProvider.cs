@@ -242,7 +242,7 @@ public class HermesProvider : ICliProvider<HermesOptions>
     /// <returns>The ACP session client.</returns>
     protected virtual IAcpSessionClient CreateSessionClient(ProcessStartContext startContext)
     {
-        return new AcpSessionClient(CreateAcpTransport(startContext));
+        return new AcpSessionClient(CreateAcpTransport(startContext), Name);
     }
 
     /// <summary>

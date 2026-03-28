@@ -12,6 +12,7 @@ public sealed class AcpSessionClient : IAcpSessionClient
     private readonly AcpJsonRpcClient _rpcClient;
     private readonly Channel<AcpNotification> _sessionNotifications = Channel.CreateUnbounded<AcpNotification>();
     private readonly CancellationTokenSource _disposeCts = new();
+    private readonly string? _agentNameHint;
     private JsonElement? _initializeResult;
     private Task? _notificationPumpTask;
     private bool _disposed;
@@ -20,10 +21,12 @@ public sealed class AcpSessionClient : IAcpSessionClient
     /// Initializes a new instance of the <see cref="AcpSessionClient" /> class.
     /// </summary>
     /// <param name="transport">The raw ACP transport.</param>
-    public AcpSessionClient(IAcpTransport transport)
+    /// <param name="agentNameHint">An optional provider hint used when the agent does not advertise capabilities during initialize.</param>
+    public AcpSessionClient(IAcpTransport transport, string? agentNameHint = null)
     {
         ArgumentNullException.ThrowIfNull(transport);
         _rpcClient = new AcpJsonRpcClient(transport);
+        _agentNameHint = Process.ArgumentValueNormalizer.NormalizeOptionalValue(agentNameHint);
     }
 
     /// <inheritdoc />
@@ -96,7 +99,7 @@ public sealed class AcpSessionClient : IAcpSessionClient
 
         var normalizedSessionId = Process.ArgumentValueNormalizer.NormalizeOptionalValue(sessionId);
         var normalizedModel = Process.ArgumentValueNormalizer.NormalizeOptionalValue(model);
-        var usesHermesSessionSettings = IsHermesInitializeResult(_initializeResult);
+        var usesHermesSessionSettings = UsesHermesSessionSettings(_initializeResult, _agentNameHint);
         JsonElement sessionResult;
         string resolvedSessionId;
         var isResumed = normalizedSessionId is not null;
@@ -147,8 +150,13 @@ public sealed class AcpSessionClient : IAcpSessionClient
         return new AcpSessionHandle(resolvedSessionId, isResumed, sessionResult.Clone());
     }
 
-    private static bool IsHermesInitializeResult(JsonElement? initializeResult)
+    private static bool UsesHermesSessionSettings(JsonElement? initializeResult, string? agentNameHint)
     {
+        if (string.Equals(agentNameHint, "hermes", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
         if (initializeResult is not { ValueKind: JsonValueKind.Object } element)
         {
             return false;

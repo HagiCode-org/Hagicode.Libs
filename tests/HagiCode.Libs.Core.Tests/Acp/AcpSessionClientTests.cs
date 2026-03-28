@@ -109,6 +109,26 @@ public sealed class AcpSessionClientTests
     }
 
     [Fact]
+    public async Task StartSessionAsync_skips_session_set_model_when_hermes_hint_is_supplied()
+    {
+        var transport = new ScriptedAcpTransport(request => request.Method switch
+        {
+            "initialize" => [CreateJsonRpcResult(request.Id, """{"protocolVersion":1}""")],
+            "session/load" => [CreateJsonRpcResult(request.Id, """{"sessionId":"session-hermes"}""")],
+            _ => throw new InvalidOperationException($"Unexpected ACP method: {request.Method}")
+        });
+
+        await using var client = new AcpSessionClient(transport, "hermes");
+        await client.ConnectAsync();
+
+        var session = await client.StartSessionAsync("/tmp/project", "  session-hermes  ", "  minimax-m2.7  ");
+
+        session.SessionId.ShouldBe("session-hermes");
+        session.IsResumed.ShouldBeTrue();
+        transport.SentMethods.ShouldBe(["initialize", "session/load"]);
+    }
+
+    [Fact]
     public async Task StartSessionAsync_treats_whitespace_only_optional_values_as_absent()
     {
         var transport = new ScriptedAcpTransport(request => request.Method switch
