@@ -26,6 +26,10 @@ public sealed class OpenCodeProviderTests
             "Reply with exactly the word 'pong'"));
 
         messages.Select(static message => message.Type).ShouldBe(["session.started", "assistant", "terminal.completed"]);
+        messages[0].Content.GetProperty("resumeMode").GetString().ShouldBe("started");
+        messages[0].Content.GetProperty("runtimeFingerprint").GetString().ShouldNotBeNullOrWhiteSpace();
+        messages[0].Content.GetProperty("poolFingerprint").GetString()
+            .ShouldBe(messages[0].Content.GetProperty("sessionId").GetString());
         messages[1].Content.GetProperty("text").GetString().ShouldBe("pong");
     }
 
@@ -71,6 +75,10 @@ public sealed class OpenCodeProviderTests
             "What was the secret word I told you earlier? Reply with just the word."));
 
         resumedMessages[0].Type.ShouldBe("session.resumed");
+        resumedMessages[0].Content.GetProperty("resumeMode").GetString().ShouldBe("resumed");
+        resumedMessages[0].Content.GetProperty("requestedSessionId").GetString().ShouldBe(sessionId);
+        resumedMessages[0].Content.GetProperty("poolFingerprint").GetString().ShouldBe(sessionId);
+        resumedMessages[1].Content.GetProperty("resumeMode").GetString().ShouldBe("resumed");
         resumedMessages[1].Content.GetProperty("text").GetString().ShouldContain("BLUEPRINT-");
     }
 
@@ -91,6 +99,9 @@ public sealed class OpenCodeProviderTests
 
         messages[0].Type.ShouldBe("session.started");
         messages[0].Content.GetProperty("requested_session_id").GetString().ShouldBe("missing-session");
+        messages[0].Content.GetProperty("requestedSessionId").GetString().ShouldBe("missing-session");
+        messages[0].Content.GetProperty("resumeMode").GetString().ShouldBe("restarted");
+        messages[0].Content.GetProperty("poolFingerprint").GetString().ShouldBe("missing-session");
         messages[0].Content.GetProperty("restarted").GetBoolean().ShouldBeTrue();
     }
 
@@ -154,6 +165,8 @@ public sealed class OpenCodeProviderTests
             "hello"));
 
         messages[1].Content.GetProperty("text").GetString().ShouldBe(multiline);
+        messages[1].Content.GetProperty("sessionId").GetString().ShouldNotBeNullOrWhiteSpace();
+        messages[1].Content.GetProperty("resumeMode").GetString().ShouldBe("started");
         messages[2].Content.GetProperty("text").GetString().ShouldBe(multiline);
     }
 

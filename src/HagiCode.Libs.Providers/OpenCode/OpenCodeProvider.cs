@@ -46,12 +46,15 @@ public class OpenCodeProvider : ICliProvider<OpenCodeOptions>
 
         var runtime = await _standaloneServerClient.AcquireAsync(ToStandaloneOptions(options), cancellationToken).ConfigureAwait(false);
         var sessionResolution = await ResolveSessionAsync(runtime, options, cancellationToken).ConfigureAwait(false);
+        var debugContext = BuildDebugContext(sessionResolution);
         var lifecycleMessages = new List<CliMessage>
         {
             OpenCodeMessageMapper.CreateSessionLifecycleMessage(
                 sessionResolution.SessionId,
-                sessionResolution.Resumed,
-                sessionResolution.RequestedSessionId)
+                sessionResolution.ResumeMode,
+                sessionResolution.RequestedSessionId,
+                sessionResolution.RuntimeFingerprint,
+                sessionResolution.PoolFingerprint)
         };
 
         var request = OpenCodeSessionPromptRequest.FromText(prompt, ResolveModelSelection(options.Model));
@@ -67,12 +70,15 @@ public class OpenCodeProvider : ICliProvider<OpenCodeOptions>
                 reason: "OpenCode prompt failed and requested a fresh runtime.",
                 cancellationToken).ConfigureAwait(false);
             runtime = await _standaloneServerClient.AcquireAsync(ToStandaloneOptions(options), cancellationToken).ConfigureAwait(false);
-            sessionResolution = await ResolveSessionAsync(runtime, options with { SessionId = null }, cancellationToken).ConfigureAwait(false);
+            sessionResolution = await ResolveSessionAsync(runtime, options, cancellationToken).ConfigureAwait(false);
+            debugContext = BuildDebugContext(sessionResolution);
             lifecycleMessages.Add(
                 OpenCodeMessageMapper.CreateSessionLifecycleMessage(
                     sessionResolution.SessionId,
-                    false,
-                    options.SessionId));
+                    sessionResolution.ResumeMode,
+                    sessionResolution.RequestedSessionId,
+                    sessionResolution.RuntimeFingerprint,
+                    sessionResolution.PoolFingerprint));
             response = await runtime.Client.PromptAsync(sessionResolution.SessionId, request, cancellationToken).ConfigureAwait(false);
         }
 
@@ -87,8 +93,8 @@ public class OpenCodeProvider : ICliProvider<OpenCodeOptions>
             throw new InvalidOperationException(response.BuildDiagnosticSummary());
         }
 
-        yield return OpenCodeMessageMapper.CreateAssistantMessage(sessionResolution.SessionId, assistantText, response.MessageId);
-        yield return OpenCodeMessageMapper.CreateTerminalCompletedMessage(sessionResolution.SessionId, assistantText, response.MessageId);
+        yield return OpenCodeMessageMapper.CreateAssistantMessage(sessionResolution.SessionId, assistantText, response.MessageId, debugContext);
+        yield return OpenCodeMessageMapper.CreateTerminalCompletedMessage(sessionResolution.SessionId, assistantText, response.MessageId, debugContext);
     }
 
     /// <inheritdoc />
@@ -169,19 +175,28 @@ public class OpenCodeProvider : ICliProvider<OpenCodeOptions>
         ArgumentNullException.ThrowIfNull(options);
 
         var requestedSessionId = string.IsNullOrWhiteSpace(options.SessionId) ? null : options.SessionId.Trim();
+        var runtimeFingerprint = runtime.RuntimeKey;
         if (requestedSessionId is not null)
         {
             var sessions = await runtime.Client.ListSessionsAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
             if (sessions.Any(session => string.Equals(session.Id, requestedSessionId, StringComparison.Ordinal)))
             {
-                return new OpenCodeSessionResolution(requestedSessionId, true, requestedSessionId);
+                return new OpenCodeSessionResolution(
+                    requestedSessionId,
+                    requestedSessionId,
+                    ResumeModeResumed,
+                    runtimeFingerprint,
+                    BuildPoolFingerprint(requestedSessionId, requestedSessionId));
             }
         }
 
+        var createdSessionId = (await CreateSessionWithRecoveryAsync(runtime, options, cancellationToken).ConfigureAwait(false)).Id;
         return new OpenCodeSessionResolution(
-            (await CreateSessionWithRecoveryAsync(runtime, options, cancellationToken).ConfigureAwait(false)).Id,
-            false,
-            requestedSessionId);
+            createdSessionId,
+            requestedSessionId,
+            string.IsNullOrWhiteSpace(requestedSessionId) ? ResumeModeStarted : ResumeModeRestarted,
+            runtimeFingerprint,
+            BuildPoolFingerprint(requestedSessionId, createdSessionId));
     }
 
     private async Task<OpenCodeSession> CreateSessionWithRecoveryAsync(
@@ -231,6 +246,24 @@ public class OpenCodeProvider : ICliProvider<OpenCodeOptions>
         };
     }
 
+    private static OpenCodeMessageDebugContext BuildDebugContext(OpenCodeSessionResolution sessionResolution)
+    {
+        return new OpenCodeMessageDebugContext(
+            sessionResolution.SessionId,
+            sessionResolution.RequestedSessionId,
+            sessionResolution.RuntimeFingerprint,
+            sessionResolution.PoolFingerprint,
+            sessionResolution.ResumeMode,
+            DateTime.UtcNow);
+    }
+
+    private static string BuildPoolFingerprint(string? requestedSessionId, string sessionId)
+    {
+        return string.IsNullOrWhiteSpace(requestedSessionId)
+            ? sessionId
+            : requestedSessionId.Trim();
+    }
+
     private void ThrowIfDisposed()
     {
         if (Volatile.Read(ref _disposed) == 1)
@@ -239,5 +272,14 @@ public class OpenCodeProvider : ICliProvider<OpenCodeOptions>
         }
     }
 
-    private sealed record OpenCodeSessionResolution(string SessionId, bool Resumed, string? RequestedSessionId);
+    private const string ResumeModeStarted = "started";
+    private const string ResumeModeResumed = "resumed";
+    private const string ResumeModeRestarted = "restarted";
+
+    private sealed record OpenCodeSessionResolution(
+        string SessionId,
+        string? RequestedSessionId,
+        string ResumeMode,
+        string RuntimeFingerprint,
+        string PoolFingerprint);
 }

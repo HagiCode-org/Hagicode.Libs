@@ -1,5 +1,8 @@
 using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Environment;
 using HagiCode.Libs.Core.Process;
@@ -71,7 +74,29 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
         var poolSettings = ResolvePoolSettings(options);
         if (!poolSettings.Enabled)
         {
-            await foreach (var message in ExecuteOneShotAsync(prompt, options, startContext, cancellationToken).ConfigureAwait(false))
+            var debugContext = CreateDebugContext(
+                ResolveLogicalSessionKey(options),
+                CliPoolFingerprintBuilder.Build(
+                    executablePath,
+                    options.WorkingDirectory,
+                    options.Model,
+                    options.MaxTurns,
+                    options.SystemPrompt,
+                    options.AppendSystemPrompt,
+                    options.AllowedTools,
+                    options.DisallowedTools,
+                    options.PermissionMode,
+                    options.ContinueConversation,
+                    options.Resume,
+                    options.SessionId,
+                    options.AddDirectories,
+                    options.ExtraArgs,
+                    options.McpServersPath,
+                    options.McpServers,
+                    startContext.EnvironmentVariables),
+                leaseIsWarm: false);
+
+            await foreach (var message in ExecuteOneShotAsync(prompt, options, startContext, debugContext, cancellationToken).ConfigureAwait(false))
             {
                 yield return message;
             }
@@ -101,6 +126,8 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
                 options.McpServers,
                 startContext.EnvironmentVariables),
             poolSettings);
+        var runtimeFingerprint = BuildCompactFingerprint(request.CompatibilityFingerprint);
+        var poolFingerprint = BuildPoolFingerprint(request.LogicalSessionKey);
 
         await using var lease = await _poolCoordinator.AcquireTransportAsync(
             request,
@@ -125,12 +152,22 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
 
             await foreach (var message in lease.Entry.Resource.ReceiveAsync(cancellationToken).ConfigureAwait(false))
             {
+                var enrichedMessage = EnrichMessageWithDebugMetadata(
+                    message,
+                    new ClaudeCodeDebugContext(
+                        request.LogicalSessionKey,
+                        request.LogicalSessionKey,
+                        runtimeFingerprint,
+                        poolFingerprint,
+                        lease.IsWarmLease ? "resumed" : "started",
+                        DateTime.UtcNow));
+
                 if (string.Equals(message.Type, "error", StringComparison.OrdinalIgnoreCase))
                 {
                     faulted = true;
                 }
 
-                yield return message;
+                yield return enrichedMessage;
                 if (string.Equals(message.Type, "result", StringComparison.OrdinalIgnoreCase))
                 {
                     break;
@@ -387,6 +424,7 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
         string prompt,
         ClaudeCodeOptions options,
         ProcessStartContext startContext,
+        ClaudeCodeDebugContext debugContext,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         await using var transport = CreateTransport(startContext);
@@ -395,7 +433,7 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
 
         await foreach (var message in transport.ReceiveAsync(cancellationToken).ConfigureAwait(false))
         {
-            yield return message;
+            yield return EnrichMessageWithDebugMetadata(message, debugContext);
             if (string.Equals(message.Type, "result", StringComparison.OrdinalIgnoreCase))
             {
                 yield break;
@@ -438,4 +476,73 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
 
         return new CliMessage("user", payload);
     }
+
+    private static ClaudeCodeDebugContext CreateDebugContext(
+        string? logicalSessionKey,
+        string compatibilityFingerprint,
+        bool leaseIsWarm)
+    {
+        var runtimeFingerprint = BuildCompactFingerprint(compatibilityFingerprint);
+        return new ClaudeCodeDebugContext(
+            logicalSessionKey,
+            logicalSessionKey,
+            runtimeFingerprint,
+            BuildPoolFingerprint(logicalSessionKey),
+            leaseIsWarm ? "resumed" : "started",
+            DateTime.UtcNow);
+    }
+
+    private static CliMessage EnrichMessageWithDebugMetadata(CliMessage message, ClaudeCodeDebugContext debugContext)
+    {
+        if (message.Content.ValueKind != JsonValueKind.Object)
+        {
+            return message;
+        }
+
+        var rootNode = JsonNode.Parse(message.Content.GetRawText()) as JsonObject;
+        if (rootNode is null)
+        {
+            return message;
+        }
+
+        UpsertString(rootNode, "requested_session_id", debugContext.RequestedSessionId);
+        UpsertString(rootNode, "binding_key", debugContext.BindingKey);
+        UpsertString(rootNode, "runtime_fingerprint", debugContext.RuntimeFingerprint);
+        UpsertString(rootNode, "pool_fingerprint", debugContext.PoolFingerprint);
+        UpsertString(rootNode, "resume_mode", debugContext.ResumeMode);
+        UpsertString(rootNode, "event_timestamp", debugContext.EventTimestampUtc.ToString("O"));
+
+        return message with
+        {
+            Content = JsonSerializer.SerializeToElement(rootNode)
+        };
+    }
+
+    private static string BuildCompactFingerprint(string rawFingerprint)
+    {
+        var normalizedFingerprint = string.IsNullOrWhiteSpace(rawFingerprint) ? "(empty)" : rawFingerprint;
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(normalizedFingerprint));
+        return Convert.ToHexString(hash[..6]).ToLowerInvariant();
+    }
+
+    private static string BuildPoolFingerprint(string? logicalSessionKey)
+    {
+        return string.IsNullOrWhiteSpace(logicalSessionKey) ? "anonymous" : logicalSessionKey.Trim();
+    }
+
+    private static void UpsertString(JsonObject rootNode, string propertyName, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            rootNode[propertyName] = value.Trim();
+        }
+    }
+
+    private sealed record ClaudeCodeDebugContext(
+        string? RequestedSessionId,
+        string? BindingKey,
+        string RuntimeFingerprint,
+        string PoolFingerprint,
+        string ResumeMode,
+        DateTime EventTimestampUtc);
 }
