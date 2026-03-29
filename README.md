@@ -5,7 +5,7 @@
 ## Projects
 
 - `src/HagiCode.Libs.Core` - transport, process management, executable discovery, and runtime environment resolution.
-- `src/HagiCode.Libs.Providers` - provider abstractions, the Claude Code/Copilot/Codex/CodeBuddy/Gemini/Hermes/Kimi/Kiro/QoderCLI providers, and optional DI registration.
+- `src/HagiCode.Libs.Providers` - provider abstractions, the Claude Code/Copilot/Codex/CodeBuddy/Gemini/Hermes/Kimi/Kiro/OpenCode/QoderCLI providers, and optional DI registration.
 - `src/HagiCode.Libs.Skills` - skills-oriented infrastructure. Its first shipped capability is a typed online API client for search, well-known discovery, audit, telemetry, and GitHub metadata/tree requests.
 - `src/HagiCode.Libs.Exploration` - Git repository discovery and state inspection.
 - `tests/*` - xUnit coverage for each project.
@@ -85,7 +85,9 @@ The endpoint profile is provider-driven, so consumers can replace `IOnlineApiEnd
 
 ## Dedicated provider console
 
-`src/HagiCode.Libs.ClaudeCode.Console`, `src/HagiCode.Libs.Copilot.Console`, `src/HagiCode.Libs.Codex.Console`, `src/HagiCode.Libs.Codebuddy.Console`, `src/HagiCode.Libs.Gemini.Console`, `src/HagiCode.Libs.Hermes.Console`, `src/HagiCode.Libs.Kimi.Console`, `src/HagiCode.Libs.Kiro.Console`, and `src/HagiCode.Libs.QoderCli.Console` are dedicated provider consoles built on the shared `HagiCode.Libs.ConsoleTesting` harness.
+`src/HagiCode.Libs.ClaudeCode.Console`, `src/HagiCode.Libs.Copilot.Console`, `src/HagiCode.Libs.Codex.Console`, `src/HagiCode.Libs.Codebuddy.Console`, `src/HagiCode.Libs.Gemini.Console`, `src/HagiCode.Libs.Hermes.Console`, `src/HagiCode.Libs.Kimi.Console`, `src/HagiCode.Libs.Kiro.Console`, `src/HagiCode.Libs.OpenCode.Console`, and `src/HagiCode.Libs.QoderCli.Console` are dedicated provider consoles built on the shared `HagiCode.Libs.ConsoleTesting` harness.
+
+`src/HagiCode.Libs.Providers/OpenCode` now owns the canonical OpenCode typed runtime/session surface and the reusable `OpenCodeFixtureServer` test fixture. `hagicode-core` consumes that boundary through adapter-level tests and no longer ships a second OpenCode console or runtime project.
 
 From `repos/Hagicode.Libs`, you can use:
 
@@ -142,6 +144,13 @@ dotnet run --project src/HagiCode.Libs.Kiro.Console -- --test-provider-full --re
 dotnet run --project src/HagiCode.Libs.Kiro.Console -- --test-provider-full --model kiro-default --auth-method token --auth-token <token> --arg --profile
 dotnet run --project src/HagiCode.Libs.Kiro.Console -- --test-all kiro
 
+dotnet run --project src/HagiCode.Libs.OpenCode.Console -- --help
+dotnet run --project src/HagiCode.Libs.OpenCode.Console
+dotnet run --project src/HagiCode.Libs.OpenCode.Console -- --test-provider open-code
+dotnet run --project src/HagiCode.Libs.OpenCode.Console -- --test-provider-full --repo .
+dotnet run --project src/HagiCode.Libs.OpenCode.Console -- --test-provider-full --model anthropic/claude-sonnet-4 --base-url http://127.0.0.1:4096
+dotnet run --project src/HagiCode.Libs.OpenCode.Console -- --test-all opencode
+
 dotnet run --project src/HagiCode.Libs.QoderCli.Console -- --help
 dotnet run --project src/HagiCode.Libs.QoderCli.Console
 dotnet run --project src/HagiCode.Libs.QoderCli.Console -- --test-provider qodercli
@@ -184,6 +193,10 @@ dotnet run --project src/HagiCode.Libs.QoderCli.Console -- --test-all qodercli
 - Kiro 默认套件当前包含 `Ping`、`Simple Prompt`、`Complex Prompt` 和 `Session Resume`。
 - Kiro accepts `--model <model>`, `--executable <path>`, repeated `--arg <value>` overrides, and optional `--auth-method <id>` / `--auth-token <token>` / `--bootstrap-method <name>` bootstrap hints.
 - Kiro repository summary remains opt-in via `--repo <path>`, and `kiro-cli` remains a dedicated-console alias for the canonical `kiro` provider name.
+- No arguments also run the default OpenCode suite.
+- OpenCode 默认套件当前包含 `Ping`、`Simple Prompt`、`Complex Prompt` 和 `Session Resume`。
+- OpenCode accepts `--model <model>`, `--executable <path>`, `--base-url <url>`, `--workspace <id>`, and repeated `--arg <value>`.
+- OpenCode repository summary remains opt-in via `--repo <path>`, and `open-code` / `opencode-cli` both normalize to the canonical `opencode` provider name.
 - No arguments also run the default QoderCLI suite.
 - QoderCLI 默认套件当前包含 `Ping`、`Simple Prompt`、`Complex Prompt` 和 `Session Resume`。
 - QoderCLI accepts `--model <model>` for explicit model forwarding only; no default model is imposed because supported qodercli model identifiers have not been confirmed yet.
@@ -203,6 +216,7 @@ using HagiCode.Libs.Providers.Gemini;
 using HagiCode.Libs.Providers.Hermes;
 using HagiCode.Libs.Providers.Kimi;
 using HagiCode.Libs.Providers.Kiro;
+using HagiCode.Libs.Providers.OpenCode;
 using HagiCode.Libs.Providers.QoderCli;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -218,7 +232,23 @@ var gemini = provider.GetRequiredService<ICliProvider<GeminiOptions>>();
 var hermes = provider.GetRequiredService<ICliProvider<HermesOptions>>();
 var kimi = provider.GetRequiredService<ICliProvider<KimiOptions>>();
 var kiro = provider.GetRequiredService<ICliProvider<KiroOptions>>();
+var opencode = provider.GetRequiredService<ICliProvider<OpenCodeOptions>>();
 var qoderCli = provider.GetRequiredService<ICliProvider<QoderCliOptions>>();
+```
+
+OpenCode uses an HTTP runtime/session model instead of ACP. Consumers can attach to an existing runtime or launch a local `opencode serve`:
+
+```csharp
+await foreach (var message in opencode.ExecuteAsync(
+                   new OpenCodeOptions
+                   {
+                       WorkingDirectory = "/path/to/repo",
+                       Model = "anthropic/claude-sonnet-4",
+                   },
+                   "Reply with exactly the word 'pong'"))
+{
+    Console.WriteLine($"{message.Type}: {message.Content}");
+}
 ```
 
 `hagicode-core` 里的 `ClaudeCodeCliProvider`、`CodebuddyCliProvider`、`HermesCliProvider` 现已全部降为薄适配层，直接复用这里的 `ICliProvider<TOptions>` 实现。结论是：同一组 Claude raw-stream / resume、CodeBuddy ACP tool update、Hermes 会话复用与 fallback 语义，现在在 libs 与 core 间保持一致。
@@ -228,6 +258,17 @@ var qoderCli = provider.GetRequiredService<ICliProvider<QoderCliOptions>>();
 - `claude-code` -> `claude`, `claudecode`, `anthropic-claude`
 - `codebuddy` -> `codebuddy-cli`
 - `hermes` -> `hermes-cli`
+- `opencode` -> `open-code`, `opencode-cli`
+
+## OpenCode install metadata
+
+`CliInstallRegistry` now tracks OpenCode as a publicly installable CLI descriptor:
+
+- npm package: `opencode-ai@1.3.3`
+- executable candidates: `opencode`
+- public installability: `true`
+
+The descriptor is aligned with the official OpenCode install guidance (`npm i -g opencode-ai@latest`) plus the pinned npm version snapshot resolved for this repository on `2026-03-28`. Real CLI validation still stays behind the `HAGICODE_REAL_CLI_TESTS` gate, so the default automated suite remains deterministic even when OpenCode is not installed locally.
 
 ## Shared pooling
 
