@@ -159,6 +159,65 @@ public sealed class ClaudeCodeProviderTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_does_not_release_lock_when_wait_is_cancelled_before_acquire()
+    {
+        using var executionLock = new SemaphoreSlim(1, 1);
+        await executionLock.WaitAsync();
+        using var cancellationTokenSource = new CancellationTokenSource();
+        cancellationTokenSource.Cancel();
+
+        var provider = CreateProvider();
+        provider.OverrideExecutionLock = executionLock;
+
+        await Should.ThrowAsync<OperationCanceledException>(async () =>
+        {
+            await foreach (var _ in provider.ExecuteAsync(
+                               new ClaudeCodeOptions
+                               {
+                                   SessionId = "session-1",
+                                   WorkingDirectory = "/tmp/project"
+                               },
+                               "hello",
+                               cancellationTokenSource.Token))
+            {
+            }
+        });
+
+        executionLock.Wait(0).ShouldBeFalse();
+        provider.ReleaseExecutionLockCallCount.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_marks_lease_faulted_when_lock_release_hits_disposed_lock()
+    {
+        var provider = CreateProvider();
+        provider.ThrowOnReleaseCount = 1;
+
+        await foreach (var _ in provider.ExecuteAsync(
+                           new ClaudeCodeOptions
+                           {
+                               SessionId = "session-1",
+                               WorkingDirectory = "/tmp/project"
+                           },
+                           "hello"))
+        {
+        }
+
+        await foreach (var _ in provider.ExecuteAsync(
+                           new ClaudeCodeOptions
+                           {
+                               SessionId = "session-1",
+                               WorkingDirectory = "/tmp/project"
+                           },
+                           "follow up"))
+        {
+        }
+
+        provider.CreatedTransportCount.ShouldBe(2);
+        provider.ReleaseExecutionLockCallCount.ShouldBe(2);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_uses_one_shot_transport_when_pooling_is_disabled()
     {
         var provider = CreateProvider();
@@ -266,12 +325,34 @@ public sealed class ClaudeCodeProviderTests
         public ProcessStartContext? LastStartContext { get; private set; }
         public List<CliMessage> SentMessages { get; } = [];
         public int CreatedTransportCount { get; private set; }
+        public SemaphoreSlim? OverrideExecutionLock { get; set; }
+        public int ReleaseExecutionLockCallCount { get; private set; }
+        public int ThrowOnReleaseCount { get; set; }
 
         protected override ICliTransport CreateTransport(ProcessStartContext startContext)
         {
             LastStartContext = startContext;
             CreatedTransportCount++;
             return new StubTransport(SentMessages);
+        }
+
+        protected override Task AcquireExecutionLockAsync(
+            SemaphoreSlim executionLock,
+            CancellationToken cancellationToken)
+        {
+            return (OverrideExecutionLock ?? executionLock).WaitAsync(cancellationToken);
+        }
+
+        protected override void ReleaseExecutionLock(SemaphoreSlim executionLock)
+        {
+            ReleaseExecutionLockCallCount++;
+            if (ThrowOnReleaseCount > 0)
+            {
+                ThrowOnReleaseCount--;
+                throw new ObjectDisposedException(nameof(SemaphoreSlim));
+            }
+
+            (OverrideExecutionLock ?? executionLock).Release();
         }
     }
 

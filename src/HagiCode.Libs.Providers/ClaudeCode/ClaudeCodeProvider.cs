@@ -116,7 +116,9 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
 
         var shouldEvictAnonymous = request.LogicalSessionKey is null && !poolSettings.KeepAnonymousSessions;
         var faulted = false;
-        await lease.Entry.ExecutionLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var lockAcquired = false;
+        await AcquireExecutionLockAsync(lease.Entry.ExecutionLock, cancellationToken).ConfigureAwait(false);
+        lockAcquired = true;
         try
         {
             await lease.Entry.Resource.SendAsync(CreatePromptMessage(prompt, options), cancellationToken).ConfigureAwait(false);
@@ -137,8 +139,20 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
         }
         finally
         {
-            lease.Entry.ExecutionLock.Release();
-            lease.IsFaulted = faulted || shouldEvictAnonymous;
+            var shouldFaultLease = faulted || shouldEvictAnonymous;
+            if (lockAcquired)
+            {
+                try
+                {
+                    ReleaseExecutionLock(lease.Entry.ExecutionLock);
+                }
+                catch (ObjectDisposedException)
+                {
+                    shouldFaultLease = true;
+                }
+            }
+
+            lease.IsFaulted = shouldFaultLease;
         }
     }
 
@@ -338,6 +352,24 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
     protected virtual ICliTransport CreateTransport(ProcessStartContext startContext)
     {
         return new SubprocessTransport(_processManager, startContext);
+    }
+
+    /// <summary>
+    /// Waits for the pooled execution lock.
+    /// </summary>
+    protected virtual Task AcquireExecutionLockAsync(SemaphoreSlim executionLock, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(executionLock);
+        return executionLock.WaitAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Releases the pooled execution lock.
+    /// </summary>
+    protected virtual void ReleaseExecutionLock(SemaphoreSlim executionLock)
+    {
+        ArgumentNullException.ThrowIfNull(executionLock);
+        executionLock.Release();
     }
 
     private CliPoolSettings ResolvePoolSettings(ClaudeCodeOptions options)
