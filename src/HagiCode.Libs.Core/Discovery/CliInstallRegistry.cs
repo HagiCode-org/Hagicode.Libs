@@ -34,6 +34,13 @@ public static class CliInstallRegistry
             IsPubliclyInstallable: true),
 
         new CliInstallDescriptor(
+            ProviderName: "OpenCode",
+            NpmPackage: "opencode-ai",
+            PinnedVersion: "1.3.3",
+            ExecutableCandidates: ["opencode"],
+            IsPubliclyInstallable: true),
+
+        new CliInstallDescriptor(
             ProviderName: "Codebuddy",
             NpmPackage: string.Empty,
             PinnedVersion: string.Empty,

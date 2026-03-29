@@ -11,6 +11,7 @@ using HagiCode.Libs.Providers.Gemini;
 using HagiCode.Libs.Providers.Hermes;
 using HagiCode.Libs.Providers.Kimi;
 using HagiCode.Libs.Providers.Kiro;
+using HagiCode.Libs.Providers.OpenCode;
 using HagiCode.Libs.Providers.Pooling;
 using HagiCode.Libs.Providers.QoderCli;
 using Microsoft.Extensions.DependencyInjection;
@@ -66,6 +67,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<HermesProvider>();
         services.AddSingleton<KimiProvider>();
         services.AddSingleton<KiroProvider>();
+        services.AddSingleton<OpenCodeStandaloneServerHost>();
+        services.AddSingleton<IOpenCodeStandaloneServerClient>(serviceProvider => serviceProvider.GetRequiredService<OpenCodeStandaloneServerHost>());
+        services.AddSingleton<OpenCodeProvider>();
         services.AddSingleton<QoderCliProvider>();
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<ClaudeCodeProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<CodebuddyProvider>());
@@ -75,6 +79,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<HermesProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<KimiProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<KiroProvider>());
+        services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<OpenCodeProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<QoderCliProvider>());
         services.AddSingleton<ICliProvider<ClaudeCodeOptions>>(serviceProvider => serviceProvider.GetRequiredService<ClaudeCodeProvider>());
         services.AddSingleton<ICliProvider<CodebuddyOptions>>(serviceProvider => serviceProvider.GetRequiredService<CodebuddyProvider>());
@@ -84,6 +89,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICliProvider<HermesOptions>>(serviceProvider => serviceProvider.GetRequiredService<HermesProvider>());
         services.AddSingleton<ICliProvider<KimiOptions>>(serviceProvider => serviceProvider.GetRequiredService<KimiProvider>());
         services.AddSingleton<ICliProvider<KiroOptions>>(serviceProvider => serviceProvider.GetRequiredService<KiroProvider>());
+        services.AddSingleton<ICliProvider<OpenCodeOptions>>(serviceProvider => serviceProvider.GetRequiredService<OpenCodeProvider>());
         services.AddSingleton<ICliProvider<QoderCliOptions>>(serviceProvider => serviceProvider.GetRequiredService<QoderCliProvider>());
         services.AddSingleton(static serviceProvider =>
         {
@@ -129,6 +135,12 @@ public static class ServiceCollectionExtensions
                 if (provider is KiroProvider)
                 {
                     registry.Register(provider.Name, provider, ["kiro-cli"]);
+                    continue;
+                }
+
+                if (provider is OpenCodeProvider)
+                {
+                    registry.Register(provider.Name, provider, ["open-code", "opencode-cli"]);
                     continue;
                 }
 

@@ -10,6 +10,7 @@ using HagiCode.Libs.Providers.Gemini;
 using HagiCode.Libs.Providers.Hermes;
 using HagiCode.Libs.Providers.Kimi;
 using HagiCode.Libs.Providers.Kiro;
+using HagiCode.Libs.Providers.OpenCode;
 using HagiCode.Libs.Providers.Pooling;
 using HagiCode.Libs.Providers.QoderCli;
 using Microsoft.Extensions.DependencyInjection;
@@ -38,6 +39,7 @@ public sealed class DependencyInjectionTests
         var hermesProvider = serviceProvider.GetRequiredService<ICliProvider<HermesOptions>>();
         var kimiProvider = serviceProvider.GetRequiredService<ICliProvider<KimiOptions>>();
         var kiroProvider = serviceProvider.GetRequiredService<ICliProvider<KiroOptions>>();
+        var openCodeProvider = serviceProvider.GetRequiredService<ICliProvider<OpenCodeOptions>>();
         var qoderCliProvider = serviceProvider.GetRequiredService<ICliProvider<QoderCliOptions>>();
         var allProviders = serviceProvider.GetServices<ICliProvider>().ToArray();
 
@@ -62,6 +64,9 @@ public sealed class DependencyInjectionTests
         registry.GetProvider("kimi-cli").ShouldNotBeNull();
         registry.GetProvider("kiro").ShouldNotBeNull();
         registry.GetProvider("kiro-cli").ShouldNotBeNull();
+        registry.GetProvider("opencode").ShouldNotBeNull();
+        registry.GetProvider("open-code").ShouldNotBeNull();
+        registry.GetProvider("opencode-cli").ShouldNotBeNull();
         registry.GetProvider("qodercli").ShouldNotBeNull();
         claudeProvider.ShouldBeOfType<ClaudeCodeProvider>();
         codebuddyProvider.ShouldBeOfType<CodebuddyProvider>();
@@ -71,11 +76,13 @@ public sealed class DependencyInjectionTests
         hermesProvider.ShouldBeOfType<HermesProvider>();
         kimiProvider.ShouldBeOfType<KimiProvider>();
         kiroProvider.ShouldBeOfType<KiroProvider>();
+        openCodeProvider.ShouldBeOfType<OpenCodeProvider>();
         qoderCliProvider.ShouldBeOfType<QoderCliProvider>();
         allProviders.ShouldContain(provider => provider is GeminiProvider);
         allProviders.ShouldContain(provider => provider is HermesProvider);
         allProviders.ShouldContain(provider => provider is KimiProvider);
         allProviders.ShouldContain(provider => provider is KiroProvider);
+        allProviders.ShouldContain(provider => provider is OpenCodeProvider);
         registry.GetProvider<CopilotOptions>("copilot").ShouldBeOfType<CopilotProvider>();
         registry.GetProvider<CopilotOptions>("github-copilot").ShouldBeOfType<CopilotProvider>();
         registry.GetProvider<CopilotOptions>("githubcopilot").ShouldBeOfType<CopilotProvider>();
@@ -90,7 +97,10 @@ public sealed class DependencyInjectionTests
         registry.GetProvider<KimiOptions>("kimi-cli").ShouldBeOfType<KimiProvider>();
         registry.GetProvider<KiroOptions>("kiro").ShouldBeOfType<KiroProvider>();
         registry.GetProvider<KiroOptions>("kiro-cli").ShouldBeOfType<KiroProvider>();
+        registry.GetProvider<OpenCodeOptions>("opencode").ShouldBeOfType<OpenCodeProvider>();
+        registry.GetProvider<OpenCodeOptions>("open-code").ShouldBeOfType<OpenCodeProvider>();
+        registry.GetProvider<OpenCodeOptions>("opencode-cli").ShouldBeOfType<OpenCodeProvider>();
         registry.GetProvider<QoderCliOptions>("qodercli").ShouldBeOfType<QoderCliProvider>();
-        registry.GetAllProviders().Select(static provider => provider.Name).ShouldBe(["claude-code", "codebuddy", "copilot", "codex", "gemini", "hermes", "kimi", "kiro", "qodercli"], ignoreOrder: true);
+        registry.GetAllProviders().Select(static provider => provider.Name).ShouldBe(["claude-code", "codebuddy", "copilot", "codex", "gemini", "hermes", "kimi", "kiro", "opencode", "qodercli"], ignoreOrder: true);
     }
 }

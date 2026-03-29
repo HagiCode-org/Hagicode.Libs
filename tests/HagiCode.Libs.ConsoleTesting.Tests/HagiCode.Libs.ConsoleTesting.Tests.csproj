@@ -32,6 +32,7 @@
     <ProjectReference Include="..\..\src\HagiCode.Libs.Hermes.Console\HagiCode.Libs.Hermes.Console.csproj" />
     <ProjectReference Include="..\..\src\HagiCode.Libs.Kiro.Console\HagiCode.Libs.Kiro.Console.csproj" />
     <ProjectReference Include="..\..\src\HagiCode.Libs.Kimi.Console\HagiCode.Libs.Kimi.Console.csproj" />
+    <ProjectReference Include="..\..\src\HagiCode.Libs.OpenCode.Console\HagiCode.Libs.OpenCode.Console.csproj" />
     <ProjectReference Include="..\..\src\HagiCode.Libs.QoderCli.Console\HagiCode.Libs.QoderCli.Console.csproj" />
     <ProjectReference Include="..\..\src\HagiCode.Libs.ConsoleTesting\HagiCode.Libs.ConsoleTesting.csproj" />
     <ProjectReference Include="..\..\src\HagiCode.Libs.Providers\HagiCode.Libs.Providers.csproj" />
