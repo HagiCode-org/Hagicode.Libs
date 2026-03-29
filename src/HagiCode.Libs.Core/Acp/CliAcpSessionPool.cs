@@ -273,7 +273,8 @@ public sealed class CliAcpSessionPool : ICliAcpSessionPool
     {
         return string.Equals(entry.ProviderName, request.ProviderName, StringComparison.Ordinal)
                && !entry.IsFaulted
-               && string.Equals(entry.CompatibilityFingerprint, request.CompatibilityFingerprint, StringComparison.Ordinal);
+               && (!string.IsNullOrWhiteSpace(request.LogicalSessionKey)
+                   || string.Equals(entry.CompatibilityFingerprint, request.CompatibilityFingerprint, StringComparison.Ordinal));
     }
 
     private async Task EnforceCapacityUnsafeAsync(string providerName, CliPoolSettings settings)

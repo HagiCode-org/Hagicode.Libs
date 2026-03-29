@@ -28,6 +28,7 @@ internal sealed class CliRuntimePool<TResource> : IAsyncDisposable
             {
                 if (CanReuse(existingEntry, request))
                 {
+                    existingEntry.RefreshFingerprint(request.CompatibilityFingerprint);
                     existingEntry.IsLeased = true;
                     existingEntry.Touch();
                     return new CliRuntimePoolLease<TResource>(this, existingEntry, true);
@@ -192,7 +193,8 @@ internal sealed class CliRuntimePool<TResource> : IAsyncDisposable
     {
         return string.Equals(entry.ProviderName, request.ProviderName, StringComparison.Ordinal)
                && !entry.IsFaulted
-               && string.Equals(entry.CompatibilityFingerprint, request.CompatibilityFingerprint, StringComparison.Ordinal);
+               && (!string.IsNullOrWhiteSpace(request.LogicalSessionKey)
+                   || string.Equals(entry.CompatibilityFingerprint, request.CompatibilityFingerprint, StringComparison.Ordinal));
     }
 
     private async Task EnforceCapacityUnsafeAsync(string providerName, CliPoolSettings settings)

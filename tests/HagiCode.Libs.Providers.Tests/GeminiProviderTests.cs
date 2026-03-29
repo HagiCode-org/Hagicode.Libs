@@ -113,6 +113,40 @@ public sealed class GeminiProviderTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_reuses_pooled_session_when_runtime_inputs_change_but_session_id_matches()
+    {
+        var provider = CreateProvider(sessionClient: new FakeAcpSessionClient());
+
+        await foreach (var _ in provider.ExecuteAsync(
+                           new GeminiOptions
+                           {
+                               SessionId = "session-key",
+                               WorkingDirectory = "/tmp/project-a",
+                               Model = "gemini-2.5-pro"
+                           },
+                           "first"))
+        {
+        }
+
+        await foreach (var _ in provider.ExecuteAsync(
+                           new GeminiOptions
+                           {
+                               SessionId = "session-key",
+                               WorkingDirectory = "/tmp/project-b",
+                               Model = "gemini-2.5-flash"
+                           },
+                           "second"))
+        {
+        }
+
+        provider.SessionClient!.ConnectCalls.ShouldBe(1);
+        provider.SessionClient.StartSessionCalls.ShouldBe(2);
+        provider.SessionClient.LastSessionId.ShouldBe("session-key");
+        provider.SessionClient.LastWorkingDirectory.ShouldBe("/tmp/project-b");
+        provider.SessionClient.LastModel.ShouldBe("gemini-2.5-flash");
+    }
+
+    [Fact]
     public async Task ExecuteAsync_uses_one_shot_path_when_pooling_is_disabled()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient());

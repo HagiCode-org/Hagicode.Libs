@@ -159,6 +159,77 @@ public sealed class ClaudeCodeProviderTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_reuses_warm_transport_when_runtime_inputs_change_but_session_key_matches()
+    {
+        var provider = CreateProvider();
+
+        await foreach (var _ in provider.ExecuteAsync(
+                           new ClaudeCodeOptions
+                           {
+                               SessionId = "session-1",
+                               WorkingDirectory = "/tmp/project-a",
+                               Model = "claude-sonnet"
+                           },
+                           "hello"))
+        {
+        }
+
+        await foreach (var _ in provider.ExecuteAsync(
+                           new ClaudeCodeOptions
+                           {
+                               SessionId = "session-1",
+                               WorkingDirectory = "/tmp/project-b",
+                               Model = "claude-opus"
+                           },
+                           "follow up"))
+        {
+        }
+
+        provider.CreatedTransportCount.ShouldBe(1);
+        provider.SentMessages.Count.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_emits_debug_metadata_for_pooled_messages()
+    {
+        var provider = CreateProvider();
+
+        var initialMessages = new List<CliMessage>();
+        await foreach (var message in provider.ExecuteAsync(
+                           new ClaudeCodeOptions
+                           {
+                               SessionId = "session-1",
+                               WorkingDirectory = "/tmp/project"
+                           },
+                           "hello"))
+        {
+            initialMessages.Add(message);
+        }
+
+        var resumedMessages = new List<CliMessage>();
+        await foreach (var message in provider.ExecuteAsync(
+                           new ClaudeCodeOptions
+                           {
+                               SessionId = "session-1",
+                               WorkingDirectory = "/tmp/project"
+                           },
+                           "follow up"))
+        {
+            resumedMessages.Add(message);
+        }
+
+        initialMessages[0].Content.GetProperty("requested_session_id").GetString().ShouldBe("session-1");
+        initialMessages[0].Content.GetProperty("binding_key").GetString().ShouldBe("session-1");
+        initialMessages[0].Content.GetProperty("runtime_fingerprint").GetString().ShouldNotBeNullOrWhiteSpace();
+        initialMessages[0].Content.GetProperty("pool_fingerprint").GetString().ShouldBe("session-1");
+        initialMessages[0].Content.GetProperty("resume_mode").GetString().ShouldBe("started");
+        initialMessages[0].Content.GetProperty("event_timestamp").GetString().ShouldNotBeNullOrWhiteSpace();
+
+        resumedMessages[0].Content.GetProperty("resume_mode").GetString().ShouldBe("resumed");
+        resumedMessages[1].Content.GetProperty("pool_fingerprint").GetString().ShouldBe("session-1");
+    }
+
+    [Fact]
     public async Task ExecuteAsync_does_not_release_lock_when_wait_is_cancelled_before_acquire()
     {
         using var executionLock = new SemaphoreSlim(1, 1);

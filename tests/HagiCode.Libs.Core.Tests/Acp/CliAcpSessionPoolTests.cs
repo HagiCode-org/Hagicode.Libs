@@ -43,7 +43,7 @@ public sealed class CliAcpSessionPoolTests
     }
 
     [Fact]
-    public async Task AcquireAsync_replaces_incompatible_entry_before_reuse()
+    public async Task AcquireAsync_reuses_named_entry_even_when_compatibility_fingerprint_changes()
     {
         var timeProvider = new ManualTimeProvider();
         await using var pool = new CliAcpSessionPool(timeProvider);
@@ -67,19 +67,16 @@ public sealed class CliAcpSessionPoolTests
             CreateRequest("session-key", "fp-2"),
             _ => Task.FromResult(CreateEntry("session-2", "fp-2", timeProvider, ref createdEntries)));
 
-        secondLease.IsWarmLease.ShouldBeFalse();
-        secondLease.Entry.SessionId.ShouldBe("session-2");
-        firstClient.DisposeCalls.ShouldBe(1);
-        createdEntries.ShouldBe(1);
+        secondLease.IsWarmLease.ShouldBeTrue();
+        secondLease.Entry.SessionId.ShouldBe("session-1");
+        firstClient.DisposeCalls.ShouldBe(0);
+        createdEntries.ShouldBe(0);
         var diagnostics = pool.GetDiagnosticsSnapshot();
-        diagnostics.HitCount.ShouldBe(0);
-        diagnostics.MissCount.ShouldBe(2);
-        diagnostics.EvictionCount.ShouldBe(1);
+        diagnostics.HitCount.ShouldBe(1);
+        diagnostics.MissCount.ShouldBe(1);
+        diagnostics.EvictionCount.ShouldBe(0);
         diagnostics.FaultCount.ShouldBe(0);
-        diagnostics.LastEviction.ShouldNotBeNull();
-        diagnostics.LastEviction.ProviderName.ShouldBe("codebuddy");
-        diagnostics.LastEviction.SessionId.ShouldBe("session-1");
-        diagnostics.LastEviction.Reason.ShouldBe(CliAcpSessionPoolEventReason.CompatibilityMismatch);
+        diagnostics.LastEviction.ShouldBeNull();
     }
 
     [Fact]
