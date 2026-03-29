@@ -189,6 +189,92 @@ public sealed class QoderCliProviderTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_resumed_session_prefers_latest_turn_chunks_when_replay_uses_different_turn_metadata()
+    {
+        var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(
+            resumedSessionId: "session-resume",
+            emitPromptOutputText: false,
+            historicalReplayChunks: ["PREVIOUS-TURN"],
+            replayRequestId: "request-old",
+            replayTurnId: "turn-old",
+            replayStreamed: true,
+            assistantChunks: ["CURRENT-", "TURN"]));
+        var assistantMessages = new List<string>();
+
+        await foreach (var message in provider.ExecuteAsync(
+                           new QoderCliOptions
+                           {
+                               SessionId = "session-resume"
+                           },
+                           "resume prompt"))
+        {
+            if (message.Type == "assistant")
+            {
+                message.Content.GetProperty("text").GetString().ShouldNotBeNull();
+                assistantMessages.Add(message.Content.GetProperty("text").GetString()!);
+            }
+        }
+
+        assistantMessages.ShouldBe(["CURRENT-", "TURN"]);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_resumed_session_prefers_clean_stream_chunks_when_prompt_result_contains_replayed_prefix()
+    {
+        var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(
+            resumedSessionId: "session-resume",
+            promptOutputText: "PREVIOUS-TURNCURRENT-TURN",
+            assistantChunks: ["CURRENT-", "TURN"]));
+        var assistantMessages = new List<string>();
+
+        await foreach (var message in provider.ExecuteAsync(
+                           new QoderCliOptions
+                           {
+                               SessionId = "session-resume"
+                           },
+                           "resume prompt"))
+        {
+            if (message.Type == "assistant")
+            {
+                message.Content.GetProperty("text").GetString().ShouldNotBeNull();
+                assistantMessages.Add(message.Content.GetProperty("text").GetString()!);
+            }
+        }
+
+        assistantMessages.ShouldBe(["CURRENT-", "TURN"]);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_resumed_session_discards_completed_replay_prefix_even_when_metadata_matches_current_turn()
+    {
+        var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(
+            resumedSessionId: "session-resume",
+            promptOutputText: "2刚才您问的是\"1+1\"，我回答了\"2\"。",
+            historicalReplayChunks: ["2"],
+            replayRequestId: "request-1",
+            replayTurnId: "turn-1",
+            replayStreamed: true,
+            assistantChunks: ["刚才您问的是", "\"1+1\"，我回答了\"2\"。"]));
+        var assistantMessages = new List<string>();
+
+        await foreach (var message in provider.ExecuteAsync(
+                           new QoderCliOptions
+                           {
+                               SessionId = "session-resume"
+                           },
+                           "刚才问了什么"))
+        {
+            if (message.Type == "assistant")
+            {
+                message.Content.GetProperty("text").GetString().ShouldNotBeNull();
+                assistantMessages.Add(message.Content.GetProperty("text").GetString()!);
+            }
+        }
+
+        assistantMessages.ShouldBe(["刚才您问的是", "\"1+1\"，我回答了\"2\"。"]);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_falls_back_to_prompt_result_when_notification_loop_ends_via_internal_cancellation()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(emitNotifications: false, promptStopReason: "fallback"));
@@ -475,7 +561,11 @@ public sealed class QoderCliProviderTests
         string? promptStopReason = "end_turn",
         string? promptOutputText = null,
         IReadOnlyList<string>? historicalReplayChunks = null,
-        IReadOnlyList<string>? assistantChunks = null) : IAcpSessionClient
+        IReadOnlyList<string>? assistantChunks = null,
+        bool emitPromptOutputText = true,
+        bool replayStreamed = false,
+        string? replayRequestId = "",
+        string? replayTurnId = "") : IAcpSessionClient
     {
         public int ConnectCalls { get; private set; }
 
@@ -538,11 +628,16 @@ public sealed class QoderCliProviderTests
         public Task<JsonElement> SendPromptAsync(string sessionId, string prompt, CancellationToken cancellationToken = default)
         {
             PromptCalls++;
-            return Task.FromResult(JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+            var payload = new Dictionary<string, object?>
             {
-                ["stopReason"] = promptStopReason,
-                ["outputText"] = promptOutputText ?? (prompt.Contains("resume", StringComparison.OrdinalIgnoreCase) ? "session ready" : "pong")
-            }));
+                ["stopReason"] = promptStopReason
+            };
+            if (emitPromptOutputText)
+            {
+                payload["outputText"] = promptOutputText ?? (prompt.Contains("resume", StringComparison.OrdinalIgnoreCase) ? "session ready" : "pong");
+            }
+
+            return Task.FromResult(JsonSerializer.SerializeToElement(payload));
         }
 
         public async IAsyncEnumerable<AcpNotification> ReceiveNotificationsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -563,9 +658,9 @@ public sealed class QoderCliProviderTests
                         _meta = new Dictionary<string, object?>
                         {
                             ["ai-coding/message-end"] = true,
-                            ["ai-coding/request-id"] = string.Empty,
-                            ["ai-coding/streamed"] = false,
-                            ["ai-coding/turn-id"] = string.Empty
+                            ["ai-coding/request-id"] = replayRequestId,
+                            ["ai-coding/streamed"] = replayStreamed,
+                            ["ai-coding/turn-id"] = replayTurnId
                         },
                         update = new
                         {

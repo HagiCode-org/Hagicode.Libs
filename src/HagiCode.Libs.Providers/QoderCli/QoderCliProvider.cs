@@ -25,6 +25,12 @@ public class QoderCliProvider : ICliProvider<QoderCliOptions>
     private readonly CliProviderPoolCoordinator _poolCoordinator;
     private readonly CliProviderPoolConfigurationRegistry _poolConfiguration;
 
+    private sealed record BufferedAssistantChunk(
+        CliMessage Message,
+        string? RequestId,
+        string? TurnId,
+        bool MessageEnd);
+
     /// <summary>
     /// Initializes a new instance of the <see cref="QoderCliProvider" /> class.
     /// </summary>
@@ -406,7 +412,7 @@ public class QoderCliProvider : ICliProvider<QoderCliOptions>
     {
         var sawTerminalMessage = false;
         var sawAssistantText = false;
-        var bufferedAssistantMessages = isResumedSession ? new List<CliMessage>() : null;
+        var bufferedAssistantMessages = isResumedSession ? new List<BufferedAssistantChunk>() : null;
         CliMessage? terminalMessage = null;
         using var receiveUpdatesCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _ = CancelReceiveLoopWhenPromptCompletesAsync(promptTask, receiveUpdatesCancellation);
@@ -450,6 +456,10 @@ public class QoderCliProvider : ICliProvider<QoderCliOptions>
                 continue;
             }
 
+            var notificationRequestId = TryGetNotificationMetaString(notification, "ai-coding/request-id");
+            var notificationTurnId = TryGetNotificationMetaString(notification, "ai-coding/turn-id");
+            var notificationMessageEnd = TryGetNotificationMetaBoolean(notification, "ai-coding/message-end") == true;
+
             foreach (var message in QoderCliAcpMessageMapper.NormalizeNotification(notification))
             {
                 if (string.Equals(message.Type, "assistant", StringComparison.OrdinalIgnoreCase) &&
@@ -458,7 +468,11 @@ public class QoderCliProvider : ICliProvider<QoderCliOptions>
                     sawAssistantText = true;
                     if (isResumedSession)
                     {
-                        bufferedAssistantMessages!.Add(message);
+                        bufferedAssistantMessages!.Add(new BufferedAssistantChunk(
+                            message,
+                            notificationRequestId,
+                            notificationTurnId,
+                            notificationMessageEnd));
                         continue;
                     }
                 }
@@ -569,21 +583,12 @@ public class QoderCliProvider : ICliProvider<QoderCliOptions>
     private static IEnumerable<CliMessage> BuildResumedSessionMessages(
         string sessionId,
         JsonElement promptResult,
-        IReadOnlyList<CliMessage> bufferedAssistantMessages,
+        IReadOnlyList<BufferedAssistantChunk> bufferedAssistantMessages,
         CliMessage? terminalMessage)
     {
-        if (!QoderCliAcpMessageMapper.IsFailurePromptResult(promptResult) &&
-            QoderCliAcpMessageMapper.TryExtractPromptResultText(promptResult, out var promptText) &&
-            !string.IsNullOrWhiteSpace(promptText))
+        foreach (var assistantMessage in ResolveResumedAssistantMessages(sessionId, promptResult, bufferedAssistantMessages))
         {
-            yield return QoderCliAcpMessageMapper.CreateAssistantMessage(sessionId, promptText, promptResult);
-        }
-        else
-        {
-            foreach (var assistantMessage in bufferedAssistantMessages)
-            {
-                yield return assistantMessage;
-            }
+            yield return assistantMessage;
         }
 
         if (terminalMessage is not null)
@@ -593,6 +598,154 @@ public class QoderCliProvider : ICliProvider<QoderCliOptions>
         }
 
         yield return QoderCliAcpMessageMapper.CreateTerminalMessage(sessionId, promptResult);
+    }
+
+    private static IReadOnlyList<CliMessage> ResolveResumedAssistantMessages(
+        string sessionId,
+        JsonElement promptResult,
+        IReadOnlyList<BufferedAssistantChunk> bufferedAssistantMessages)
+    {
+        var selectedBufferedMessages = SelectCurrentTurnAssistantMessages(bufferedAssistantMessages);
+        var bufferedText = ConcatenateAssistantText(selectedBufferedMessages);
+        string? promptText = null;
+        var hasPromptText = !QoderCliAcpMessageMapper.IsFailurePromptResult(promptResult) &&
+                            QoderCliAcpMessageMapper.TryExtractPromptResultText(promptResult, out promptText) &&
+                            !string.IsNullOrWhiteSpace(promptText);
+
+        if (selectedBufferedMessages.Count > 0)
+        {
+            if (hasPromptText)
+            {
+                if (string.Equals(bufferedText, promptText, StringComparison.Ordinal) ||
+                    promptText!.Contains(bufferedText, StringComparison.Ordinal))
+                {
+                    return selectedBufferedMessages;
+                }
+
+                if (bufferedText.Contains(promptText!, StringComparison.Ordinal))
+                {
+                    return
+                    [
+                        QoderCliAcpMessageMapper.CreateAssistantMessage(sessionId, promptText, promptResult)
+                    ];
+                }
+            }
+
+            return selectedBufferedMessages;
+        }
+
+        if (hasPromptText)
+        {
+            return
+            [
+                QoderCliAcpMessageMapper.CreateAssistantMessage(sessionId, promptText, promptResult)
+            ];
+        }
+
+        return [];
+    }
+
+    private static IReadOnlyList<CliMessage> SelectCurrentTurnAssistantMessages(
+        IReadOnlyList<BufferedAssistantChunk> bufferedAssistantMessages)
+    {
+        if (bufferedAssistantMessages.Count == 0)
+        {
+            return [];
+        }
+
+        IReadOnlyList<BufferedAssistantChunk> selectedBufferedMessages = bufferedAssistantMessages;
+        var lastTurnKey = bufferedAssistantMessages
+            .Select(static chunk => CreateTurnKey(chunk.RequestId, chunk.TurnId))
+            .LastOrDefault(static key => key is not null);
+        if (!string.IsNullOrWhiteSpace(lastTurnKey))
+        {
+            var matchedMessages = bufferedAssistantMessages
+                .Where(chunk => string.Equals(CreateTurnKey(chunk.RequestId, chunk.TurnId), lastTurnKey, StringComparison.Ordinal))
+                .ToList();
+            if (matchedMessages.Count > 0)
+            {
+                selectedBufferedMessages = matchedMessages;
+            }
+        }
+
+        var replayTrimmedMessages = TrimReplayChunksBeforeLatestCompletedBoundary(selectedBufferedMessages);
+        return replayTrimmedMessages.Select(static chunk => chunk.Message).ToList();
+    }
+
+    private static string ConcatenateAssistantText(IReadOnlyList<CliMessage> messages)
+    {
+        if (messages.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        return string.Concat(messages
+            .Select(static message => QoderCliAcpMessageMapper.TryExtractMessageText(message.Content, out var text) ? text : null)
+            .Where(static text => !string.IsNullOrEmpty(text)));
+    }
+
+    private static string? CreateTurnKey(string? requestId, string? turnId)
+    {
+        if (string.IsNullOrWhiteSpace(requestId) && string.IsNullOrWhiteSpace(turnId))
+        {
+            return null;
+        }
+
+        return $"{requestId ?? string.Empty}::{turnId ?? string.Empty}";
+    }
+
+    private static string? TryGetNotificationMetaString(AcpNotification notification, string propertyName)
+    {
+        if (!string.Equals(notification.Method, "session/update", StringComparison.OrdinalIgnoreCase) ||
+            notification.Parameters.ValueKind != JsonValueKind.Object ||
+            !notification.Parameters.TryGetProperty("_meta", out var metaElement) ||
+            metaElement.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        return metaElement.TryGetProperty(propertyName, out var propertyElement) &&
+               propertyElement.ValueKind == JsonValueKind.String
+            ? propertyElement.GetString()
+            : null;
+    }
+
+    private static bool? TryGetNotificationMetaBoolean(AcpNotification notification, string propertyName)
+    {
+        if (!string.Equals(notification.Method, "session/update", StringComparison.OrdinalIgnoreCase) ||
+            notification.Parameters.ValueKind != JsonValueKind.Object ||
+            !notification.Parameters.TryGetProperty("_meta", out var metaElement) ||
+            metaElement.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        return metaElement.TryGetProperty(propertyName, out var propertyElement) &&
+               (propertyElement.ValueKind == JsonValueKind.True || propertyElement.ValueKind == JsonValueKind.False)
+            ? propertyElement.GetBoolean()
+            : null;
+    }
+
+    private static IReadOnlyList<BufferedAssistantChunk> TrimReplayChunksBeforeLatestCompletedBoundary(
+        IReadOnlyList<BufferedAssistantChunk> bufferedAssistantMessages)
+    {
+        if (bufferedAssistantMessages.Count <= 1)
+        {
+            return bufferedAssistantMessages;
+        }
+
+        var lastCompletedBoundaryIndex = -1;
+        for (var index = 0; index < bufferedAssistantMessages.Count - 1; index++)
+        {
+            if (bufferedAssistantMessages[index].MessageEnd)
+            {
+                lastCompletedBoundaryIndex = index;
+            }
+        }
+
+        return lastCompletedBoundaryIndex >= 0
+            ? bufferedAssistantMessages.Skip(lastCompletedBoundaryIndex + 1).ToList()
+            : bufferedAssistantMessages;
     }
 
     private static void TryCancelReceiveLoop(CancellationTokenSource cancellationTokenSource)
