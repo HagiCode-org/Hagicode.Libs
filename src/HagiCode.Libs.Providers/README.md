@@ -191,7 +191,7 @@ var qoderOptions = new QoderCliOptions
     {
         Enabled = true,
         IdleTimeout = TimeSpan.FromMinutes(10),
-        MaxActiveSessions = 6,
+        MaxActiveSessions = 50,
         KeepAnonymousSessions = false
     }
 };

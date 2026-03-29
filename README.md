@@ -290,7 +290,7 @@ var options = new CodebuddyOptions
     {
         Enabled = true,
         IdleTimeout = TimeSpan.FromMinutes(15),
-        MaxActiveSessions = 4,
+        MaxActiveSessions = 50,
         KeepAnonymousSessions = false
     }
 };
