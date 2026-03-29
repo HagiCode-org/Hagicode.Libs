@@ -13,7 +13,7 @@ public sealed record CliPoolSettings
     /// <summary>
     /// Default upper bound for pooled entries per provider.
     /// </summary>
-    public static readonly int DefaultMaxActiveSessions = 8;
+    public static readonly int DefaultMaxActiveSessions = 50;
 
     /// <summary>
     /// Gets or sets a value indicating whether pooling is enabled.
