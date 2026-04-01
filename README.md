@@ -5,7 +5,7 @@
 ## Projects
 
 - `src/HagiCode.Libs.Core` - transport, process management, executable discovery, and runtime environment resolution.
-- `src/HagiCode.Libs.Providers` - provider abstractions, the Claude Code/Copilot/Codex/CodeBuddy/Gemini/Hermes/Kimi/Kiro/OpenCode/QoderCLI providers, and optional DI registration.
+- `src/HagiCode.Libs.Providers` - provider abstractions, the Claude Code/Copilot/Codex/DeepAgents/CodeBuddy/Gemini/Hermes/Kimi/Kiro/OpenCode/QoderCLI providers, and optional DI registration.
 - `src/HagiCode.Libs.Skills` - skills-oriented infrastructure. Its first shipped capability is a typed online API client for search, well-known discovery, audit, telemetry, and GitHub metadata/tree requests.
 - `src/HagiCode.Libs.Exploration` - Git repository discovery and state inspection.
 - `tests/*` - xUnit coverage for each project.
@@ -85,7 +85,7 @@ The endpoint profile is provider-driven, so consumers can replace `IOnlineApiEnd
 
 ## Dedicated provider console
 
-`src/HagiCode.Libs.ClaudeCode.Console`, `src/HagiCode.Libs.Copilot.Console`, `src/HagiCode.Libs.Codex.Console`, `src/HagiCode.Libs.Codebuddy.Console`, `src/HagiCode.Libs.Gemini.Console`, `src/HagiCode.Libs.Hermes.Console`, `src/HagiCode.Libs.Kimi.Console`, `src/HagiCode.Libs.Kiro.Console`, `src/HagiCode.Libs.OpenCode.Console`, and `src/HagiCode.Libs.QoderCli.Console` are dedicated provider consoles built on the shared `HagiCode.Libs.ConsoleTesting` harness.
+`src/HagiCode.Libs.ClaudeCode.Console`, `src/HagiCode.Libs.Copilot.Console`, `src/HagiCode.Libs.Codex.Console`, `src/HagiCode.Libs.DeepAgents.Console`, `src/HagiCode.Libs.Codebuddy.Console`, `src/HagiCode.Libs.Gemini.Console`, `src/HagiCode.Libs.Hermes.Console`, `src/HagiCode.Libs.Kimi.Console`, `src/HagiCode.Libs.Kiro.Console`, `src/HagiCode.Libs.OpenCode.Console`, and `src/HagiCode.Libs.QoderCli.Console` are dedicated provider consoles built on the shared `HagiCode.Libs.ConsoleTesting` harness.
 
 `src/HagiCode.Libs.Providers/OpenCode` now owns the canonical OpenCode typed runtime/session surface and the reusable `OpenCodeFixtureServer` test fixture. `hagicode-core` consumes that boundary through adapter-level tests and no longer ships a second OpenCode console or runtime project.
 
@@ -109,6 +109,14 @@ dotnet run --project src/HagiCode.Libs.Codex.Console
 dotnet run --project src/HagiCode.Libs.Codex.Console -- --test-provider codex-cli
 dotnet run --project src/HagiCode.Libs.Codex.Console -- --test-provider-full --sandbox workspace-write --repo .
 dotnet run --project src/HagiCode.Libs.Codex.Console -- --test-all codex
+
+npm install --global deepagents-acp@0.1.7
+dotnet run --project src/HagiCode.Libs.DeepAgents.Console -- --help
+dotnet run --project src/HagiCode.Libs.DeepAgents.Console
+dotnet run --project src/HagiCode.Libs.DeepAgents.Console -- --test-provider deepagents-acp
+dotnet run --project src/HagiCode.Libs.DeepAgents.Console -- --test-provider-full --model glm-5.1 --workspace . --skill ./skills --arg --debug
+dotnet run --project src/HagiCode.Libs.DeepAgents.Console -- --test-provider-full --repo .
+dotnet run --project src/HagiCode.Libs.DeepAgents.Console -- --test-all deepagents
 
 dotnet run --project src/HagiCode.Libs.Codebuddy.Console -- --help
 dotnet run --project src/HagiCode.Libs.Codebuddy.Console
@@ -173,6 +181,11 @@ dotnet run --project src/HagiCode.Libs.QoderCli.Console -- --test-all qodercli
 - Codex 默认套件当前包含 `Ping`、`Simple Prompt`、`Complex Prompt` 和 `Session Resume`。
 - Codex accepts `--model <model>`, `--sandbox <mode>`, `--approval-policy <mode>`, `--api-key <key>`, and `--base-url <url>` overrides.
 - Codex repository analysis remains opt-in via `--repo <path>` and reuses the same shared report formatter.
+- No arguments also run the default DeepAgents suite.
+- DeepAgents 默认套件当前包含 `Ping`、`Simple Prompt`、`Complex Prompt` 和 `Session Resume`。
+- DeepAgents accepts `--model <model>`, `--workspace <path>`, `--name <name>`, `--description <text>`, repeated `--skill <path>`, repeated `--memory <path>`, `--executable <path>`, and repeated `--arg <value>` overrides.
+- DeepAgents repository summary remains opt-in via `--repo <path>`, `deepagents-acp` normalizes to the canonical `deepagents` provider name, and the runtime prefers an explicit executable, then `deepagents-acp`, then `npx deepagents-acp`.
+- DeepAgents is publicly installable in CI via `npm install --global deepagents-acp@0.1.7`; local validation can be reproduced with `dotnet run --project src/HagiCode.Libs.CiSetup.Console -- --install --verify` plus the dedicated console commands above.
 - No arguments also run the default CodeBuddy suite.
 - CodeBuddy 默认套件当前包含 `Ping`、`Simple Prompt`、`Complex Prompt` 和 `Session Resume`。
 - CodeBuddy accepts `--model <model>` and defaults to `glm-4.7` when no explicit model override is supplied.
@@ -212,6 +225,7 @@ using HagiCode.Libs.Providers.ClaudeCode;
 using HagiCode.Libs.Providers.Codebuddy;
 using HagiCode.Libs.Providers.Copilot;
 using HagiCode.Libs.Providers.Codex;
+using HagiCode.Libs.Providers.DeepAgents;
 using HagiCode.Libs.Providers.Gemini;
 using HagiCode.Libs.Providers.Hermes;
 using HagiCode.Libs.Providers.Kimi;
@@ -228,6 +242,7 @@ var claude = provider.GetRequiredService<ICliProvider<ClaudeCodeOptions>>();
 var codebuddy = provider.GetRequiredService<ICliProvider<CodebuddyOptions>>();
 var copilot = provider.GetRequiredService<ICliProvider<CopilotOptions>>();
 var codex = provider.GetRequiredService<ICliProvider<CodexOptions>>();
+var deepAgents = provider.GetRequiredService<ICliProvider<DeepAgentsOptions>>();
 var gemini = provider.GetRequiredService<ICliProvider<GeminiOptions>>();
 var hermes = provider.GetRequiredService<ICliProvider<HermesOptions>>();
 var kimi = provider.GetRequiredService<ICliProvider<KimiOptions>>();
@@ -257,6 +272,7 @@ await foreach (var message in opencode.ExecuteAsync(
 
 - `claude-code` -> `claude`, `claudecode`, `anthropic-claude`
 - `codebuddy` -> `codebuddy-cli`
+- `deepagents` -> `deepagents-acp`
 - `hermes` -> `hermes-cli`
 - `opencode` -> `open-code`, `opencode-cli`
 

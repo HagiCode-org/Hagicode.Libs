@@ -1,6 +1,6 @@
 # HagiCode.Libs.Providers
 
-`HagiCode.Libs.Providers` builds on `HagiCode.Libs.Core` and adds reusable provider abstractions plus built-in integrations for Claude Code, Copilot, Codex, CodeBuddy, Hermes, Kimi, Kiro, and QoderCLI.
+`HagiCode.Libs.Providers` builds on `HagiCode.Libs.Core` and adds reusable provider abstractions plus built-in integrations for Claude Code, Copilot, Codex, DeepAgents, CodeBuddy, Hermes, Kimi, Kiro, and QoderCLI.
 
 ## What is included
 
@@ -27,6 +27,7 @@ using HagiCode.Libs.Providers;
 using HagiCode.Libs.Providers.Codebuddy;
 using HagiCode.Libs.Providers.Copilot;
 using HagiCode.Libs.Providers.Codex;
+using HagiCode.Libs.Providers.DeepAgents;
 using HagiCode.Libs.Providers.Hermes;
 using HagiCode.Libs.Providers.Kimi;
 using HagiCode.Libs.Providers.Kiro;
@@ -40,6 +41,7 @@ var executionFacade = serviceProvider.GetRequiredService<ICliExecutionFacade>();
 var codebuddy = serviceProvider.GetRequiredService<ICliProvider<CodebuddyOptions>>();
 var copilot = serviceProvider.GetRequiredService<ICliProvider<CopilotOptions>>();
 var codex = serviceProvider.GetRequiredService<ICliProvider<CodexOptions>>();
+var deepAgents = serviceProvider.GetRequiredService<ICliProvider<DeepAgentsOptions>>();
 var hermes = serviceProvider.GetRequiredService<ICliProvider<HermesOptions>>();
 var kimi = serviceProvider.GetRequiredService<ICliProvider<KimiOptions>>();
 var kiro = serviceProvider.GetRequiredService<ICliProvider<KiroOptions>>();
@@ -66,6 +68,7 @@ var poolDefaults = serviceProvider.GetRequiredService<CliProviderPoolConfigurati
 
 - `claude-code` -> `claude`, `claudecode`, `anthropic-claude`
 - `codebuddy` -> `codebuddy-cli`
+- `deepagents` -> `deepagents-acp`
 - `hermes` -> `hermes-cli`
 
 ## Provider usage
@@ -74,6 +77,7 @@ var poolDefaults = serviceProvider.GetRequiredService<CliProviderPoolConfigurati
 using HagiCode.Libs.Providers.Copilot;
 using HagiCode.Libs.Providers.Codex;
 using HagiCode.Libs.Providers.Codebuddy;
+using HagiCode.Libs.Providers.DeepAgents;
 using HagiCode.Libs.Providers.Hermes;
 using HagiCode.Libs.Providers.Kimi;
 using HagiCode.Libs.Providers.Kiro;
@@ -145,6 +149,21 @@ await foreach (var message in codex.ExecuteAsync(options, "Reply with exactly th
     Console.WriteLine($"{message.Type}: {message.Content}");
 }
 
+var deepAgentsOptions = new DeepAgentsOptions
+{
+    Model = "glm-5.1",
+    WorkspaceRoot = "/path/to/repo",
+    AgentName = "coding-assistant",
+    AgentDescription = "Repo-aware DeepAgents ACP runner",
+    SkillsDirectories = ["/path/to/skills"],
+    ExtraArguments = ["--debug"]
+};
+
+await foreach (var message in deepAgents.ExecuteAsync(deepAgentsOptions, "Reply with exactly the word 'pong'"))
+{
+    Console.WriteLine($"{message.Type}: {message.Content}");
+}
+
 // Reuse the same logical Codex session key to keep thread continuity on later calls.
 // If LogicalSessionKey and ThreadId are both absent, the request remains anonymous
 // even when WorkingDirectory matches a previous call.
@@ -200,6 +219,7 @@ var qoderOptions = new QoderCliOptions
 Practical boundaries:
 
 - `CodeBuddy`, `Gemini`, `Hermes`, `Kimi`, `Kiro`, and `QoderCLI` pool live ACP sessions.
+- `DeepAgents` pools live ACP sessions and fingerprints workspace plus managed launcher arguments before warm reuse.
 - `Claude Code` pools warm stdio transports keyed by session or resume identity plus its effective startup shape.
 - `Codex` pools workspace/thread bindings so follow-up requests can reuse the last known thread id.
 - `Copilot` pools SDK runtimes per compatible workspace/configuration pair.
@@ -213,6 +233,7 @@ Practical boundaries:
 - The new execution facade is intended for provider-facing adapters, diagnostics, and one-shot probes such as version checks.
 - Provider callers should continue passing structured option models; the new facade is additive and does not replace provider-specific option records.
 - `gemini` is the canonical built-in provider name; `ProviderRegistry` and the dedicated console also accept `gemini-cli` as an alias.
+- `deepagents` is the canonical built-in provider name; `ProviderRegistry` and the dedicated console also accept `deepagents-acp` as an alias.
 - `kimi` is the canonical built-in provider name; `ProviderRegistry` and the dedicated console also accept `kimi-cli` as an alias.
 - `kiro` is the canonical built-in provider name; `ProviderRegistry` and the dedicated console also accept `kiro-cli` as an alias.
-- `CliInstallRegistry` currently marks Gemini, Kimi, and Kiro as local-only validation metadata (`IsPubliclyInstallable = false`), so default public CI does not assume their credentials or installation are available.
+- `CliInstallRegistry` marks DeepAgents as publicly installable via `deepagents-acp@0.1.7`, while Gemini, Kimi, and Kiro remain local-only validation metadata (`IsPubliclyInstallable = false`).
