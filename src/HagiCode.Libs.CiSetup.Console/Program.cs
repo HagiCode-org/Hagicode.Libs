@@ -51,7 +51,7 @@ public static class Program
 
         foreach (var descriptor in CliInstallRegistry.PubliclyInstallable)
         {
-            System.Console.WriteLine($"  [INSTALL] {descriptor.FullPackageSpecifier}...");
+            System.Console.WriteLine($"  [INSTALL] {descriptor.ProviderName}: {descriptor.FullPackageSpecifier}...");
             var result = await processManager.ExecuteAsync(new ProcessStartContext
             {
                 ExecutablePath = npmExecutable,
@@ -94,7 +94,7 @@ public static class Program
             var path = resolver.ResolveFirstAvailablePath(descriptor.ExecutableCandidates);
             if (path is not null)
             {
-                System.Console.WriteLine($"  [OK] {descriptor.ProviderName} found at: {path}");
+                System.Console.WriteLine($"  [OK] {descriptor.ProviderName} found at: {path} (candidates: {string.Join(", ", descriptor.ExecutableCandidates)})");
             }
             else
             {
