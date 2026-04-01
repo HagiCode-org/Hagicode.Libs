@@ -2,6 +2,7 @@ using Shouldly;
 using HagiCode.Libs.Providers;
 using HagiCode.Libs.Providers.ClaudeCode;
 using HagiCode.Libs.Providers.Codebuddy;
+using HagiCode.Libs.Providers.DeepAgents;
 using HagiCode.Libs.Providers.Gemini;
 using HagiCode.Libs.Providers.OpenCode;
 using Microsoft.Extensions.DependencyInjection;
@@ -72,6 +73,20 @@ public sealed class ProviderRegistryTests
         registry.GetProvider("codebuddy-cli").ShouldBeOfType<CodebuddyProvider>();
         registry.GetProvider<ClaudeCodeOptions>("claude").ShouldBeOfType<ClaudeCodeProvider>();
         registry.GetProvider<CodebuddyOptions>("codebuddy-cli").ShouldBeOfType<CodebuddyProvider>();
+    }
+
+    [Fact]
+    public async Task AddHagiCodeLibs_registers_deepagents_aliases_in_provider_registry()
+    {
+        var services = new ServiceCollection();
+        services.AddHagiCodeLibs();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var registry = serviceProvider.GetRequiredService<ProviderRegistry>();
+
+        registry.GetProvider("deepagents").ShouldBeOfType<DeepAgentsProvider>();
+        registry.GetProvider("deepagents-acp").ShouldBeOfType<DeepAgentsProvider>();
+        registry.GetProvider<DeepAgentsOptions>("deepagents-acp").ShouldBeOfType<DeepAgentsProvider>();
     }
 
     [Fact]

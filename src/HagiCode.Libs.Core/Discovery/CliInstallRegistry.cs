@@ -34,6 +34,13 @@ public static class CliInstallRegistry
             IsPubliclyInstallable: true),
 
         new CliInstallDescriptor(
+            ProviderName: "DeepAgents",
+            NpmPackage: "deepagents-acp",
+            PinnedVersion: "0.1.7",
+            ExecutableCandidates: ["deepagents-acp"],
+            IsPubliclyInstallable: true),
+
+        new CliInstallDescriptor(
             ProviderName: "OpenCode",
             NpmPackage: "opencode-ai",
             PinnedVersion: "1.3.3",

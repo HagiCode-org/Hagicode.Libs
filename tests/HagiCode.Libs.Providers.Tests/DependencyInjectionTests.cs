@@ -6,6 +6,7 @@ using HagiCode.Libs.Providers.ClaudeCode;
 using HagiCode.Libs.Providers.Codebuddy;
 using HagiCode.Libs.Providers.Copilot;
 using HagiCode.Libs.Providers.Codex;
+using HagiCode.Libs.Providers.DeepAgents;
 using HagiCode.Libs.Providers.Gemini;
 using HagiCode.Libs.Providers.Hermes;
 using HagiCode.Libs.Providers.Kimi;
@@ -35,6 +36,7 @@ public sealed class DependencyInjectionTests
         var codebuddyProvider = serviceProvider.GetRequiredService<ICliProvider<CodebuddyOptions>>();
         var copilotProvider = serviceProvider.GetRequiredService<ICliProvider<CopilotOptions>>();
         var codexProvider = serviceProvider.GetRequiredService<ICliProvider<CodexOptions>>();
+        var deepAgentsProvider = serviceProvider.GetRequiredService<ICliProvider<DeepAgentsOptions>>();
         var geminiProvider = serviceProvider.GetRequiredService<ICliProvider<GeminiOptions>>();
         var hermesProvider = serviceProvider.GetRequiredService<ICliProvider<HermesOptions>>();
         var kimiProvider = serviceProvider.GetRequiredService<ICliProvider<KimiOptions>>();
@@ -56,6 +58,8 @@ public sealed class DependencyInjectionTests
         registry.GetProvider("github-copilot").ShouldNotBeNull();
         registry.GetProvider("githubcopilot").ShouldNotBeNull();
         registry.GetProvider("codex").ShouldNotBeNull();
+        registry.GetProvider("deepagents").ShouldNotBeNull();
+        registry.GetProvider("deepagents-acp").ShouldNotBeNull();
         registry.GetProvider("gemini").ShouldNotBeNull();
         registry.GetProvider("gemini-cli").ShouldNotBeNull();
         registry.GetProvider("hermes").ShouldNotBeNull();
@@ -72,6 +76,7 @@ public sealed class DependencyInjectionTests
         codebuddyProvider.ShouldBeOfType<CodebuddyProvider>();
         copilotProvider.ShouldBeOfType<CopilotProvider>();
         codexProvider.ShouldBeOfType<CodexProvider>();
+        deepAgentsProvider.ShouldBeOfType<DeepAgentsProvider>();
         geminiProvider.ShouldBeOfType<GeminiProvider>();
         hermesProvider.ShouldBeOfType<HermesProvider>();
         kimiProvider.ShouldBeOfType<KimiProvider>();
@@ -83,12 +88,15 @@ public sealed class DependencyInjectionTests
         allProviders.ShouldContain(provider => provider is KimiProvider);
         allProviders.ShouldContain(provider => provider is KiroProvider);
         allProviders.ShouldContain(provider => provider is OpenCodeProvider);
+        allProviders.ShouldContain(provider => provider is DeepAgentsProvider);
         registry.GetProvider<CopilotOptions>("copilot").ShouldBeOfType<CopilotProvider>();
         registry.GetProvider<CopilotOptions>("github-copilot").ShouldBeOfType<CopilotProvider>();
         registry.GetProvider<CopilotOptions>("githubcopilot").ShouldBeOfType<CopilotProvider>();
         registry.GetProvider<ClaudeCodeOptions>("claude").ShouldBeOfType<ClaudeCodeProvider>();
         registry.GetProvider<ClaudeCodeOptions>("claudecode").ShouldBeOfType<ClaudeCodeProvider>();
         registry.GetProvider<CodebuddyOptions>("codebuddy-cli").ShouldBeOfType<CodebuddyProvider>();
+        registry.GetProvider<DeepAgentsOptions>("deepagents").ShouldBeOfType<DeepAgentsProvider>();
+        registry.GetProvider<DeepAgentsOptions>("deepagents-acp").ShouldBeOfType<DeepAgentsProvider>();
         registry.GetProvider<GeminiOptions>("gemini").ShouldBeOfType<GeminiProvider>();
         registry.GetProvider<GeminiOptions>("gemini-cli").ShouldBeOfType<GeminiProvider>();
         registry.GetProvider<HermesOptions>("hermes").ShouldBeOfType<HermesProvider>();
@@ -101,6 +109,6 @@ public sealed class DependencyInjectionTests
         registry.GetProvider<OpenCodeOptions>("open-code").ShouldBeOfType<OpenCodeProvider>();
         registry.GetProvider<OpenCodeOptions>("opencode-cli").ShouldBeOfType<OpenCodeProvider>();
         registry.GetProvider<QoderCliOptions>("qodercli").ShouldBeOfType<QoderCliProvider>();
-        registry.GetAllProviders().Select(static provider => provider.Name).ShouldBe(["claude-code", "codebuddy", "copilot", "codex", "gemini", "hermes", "kimi", "kiro", "opencode", "qodercli"], ignoreOrder: true);
+        registry.GetAllProviders().Select(static provider => provider.Name).ShouldBe(["claude-code", "codebuddy", "copilot", "codex", "deepagents", "gemini", "hermes", "kimi", "kiro", "opencode", "qodercli"], ignoreOrder: true);
     }
 }

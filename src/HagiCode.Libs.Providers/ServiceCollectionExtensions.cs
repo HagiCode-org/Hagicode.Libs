@@ -7,6 +7,7 @@ using HagiCode.Libs.Providers.ClaudeCode;
 using HagiCode.Libs.Providers.Codebuddy;
 using HagiCode.Libs.Providers.Copilot;
 using HagiCode.Libs.Providers.Codex;
+using HagiCode.Libs.Providers.DeepAgents;
 using HagiCode.Libs.Providers.Gemini;
 using HagiCode.Libs.Providers.Hermes;
 using HagiCode.Libs.Providers.Kimi;
@@ -48,6 +49,7 @@ public static class ServiceCollectionExtensions
             registry.Register("codebuddy", new CliPoolSettings { MaxActiveSessions = 50, IdleTimeout = TimeSpan.FromMinutes(10) });
             registry.Register("copilot", new CliPoolSettings { MaxActiveSessions = 50, IdleTimeout = TimeSpan.FromMinutes(10) });
             registry.Register("codex", new CliPoolSettings { MaxActiveSessions = 50, IdleTimeout = TimeSpan.FromMinutes(10) });
+            registry.Register("deepagents", new CliPoolSettings { MaxActiveSessions = 50, IdleTimeout = TimeSpan.FromMinutes(10) });
             registry.Register("gemini", new CliPoolSettings { MaxActiveSessions = 50, IdleTimeout = TimeSpan.FromMinutes(10) });
             registry.Register("hermes", new CliPoolSettings { MaxActiveSessions = 50, IdleTimeout = TimeSpan.FromMinutes(10) });
             registry.Register("kimi", new CliPoolSettings { MaxActiveSessions = 50, IdleTimeout = TimeSpan.FromMinutes(10) });
@@ -63,6 +65,7 @@ public static class ServiceCollectionExtensions
             serviceProvider.GetRequiredService<ICopilotSdkGateway>(),
             serviceProvider.GetRequiredService<IRuntimeEnvironmentResolver>()));
         services.AddSingleton<CodexProvider>();
+        services.AddSingleton<DeepAgentsProvider>();
         services.AddSingleton<GeminiProvider>();
         services.AddSingleton<HermesProvider>();
         services.AddSingleton<KimiProvider>();
@@ -75,6 +78,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<CodebuddyProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<CopilotProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<CodexProvider>());
+        services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<DeepAgentsProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<GeminiProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<HermesProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<KimiProvider>());
@@ -85,6 +89,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICliProvider<CodebuddyOptions>>(serviceProvider => serviceProvider.GetRequiredService<CodebuddyProvider>());
         services.AddSingleton<ICliProvider<CopilotOptions>>(serviceProvider => serviceProvider.GetRequiredService<CopilotProvider>());
         services.AddSingleton<ICliProvider<CodexOptions>>(serviceProvider => serviceProvider.GetRequiredService<CodexProvider>());
+        services.AddSingleton<ICliProvider<DeepAgentsOptions>>(serviceProvider => serviceProvider.GetRequiredService<DeepAgentsProvider>());
         services.AddSingleton<ICliProvider<GeminiOptions>>(serviceProvider => serviceProvider.GetRequiredService<GeminiProvider>());
         services.AddSingleton<ICliProvider<HermesOptions>>(serviceProvider => serviceProvider.GetRequiredService<HermesProvider>());
         services.AddSingleton<ICliProvider<KimiOptions>>(serviceProvider => serviceProvider.GetRequiredService<KimiProvider>());
@@ -111,6 +116,12 @@ public static class ServiceCollectionExtensions
                 if (provider is ClaudeCodeProvider)
                 {
                     registry.Register(provider.Name, provider, ["claude", "claudecode", "anthropic-claude"]);
+                    continue;
+                }
+
+                if (provider is DeepAgentsProvider)
+                {
+                    registry.Register(provider.Name, provider, ["deepagents-acp"]);
                     continue;
                 }
 
