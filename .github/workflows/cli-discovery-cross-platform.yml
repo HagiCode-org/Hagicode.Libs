@@ -81,5 +81,5 @@ jobs:
           echo "Running CI-targeted real CLI tests on ${RUNNER_OS}"
           dotnet test tests/HagiCode.Libs.Providers.Tests/HagiCode.Libs.Providers.Tests.csproj \
             --no-restore \
-            --filter "FullyQualifiedName~ClaudeCodeProviderTests|FullyQualifiedName~CopilotProviderTests|FullyQualifiedName~CodexProviderTests" \
+            --filter "FullyQualifiedName~ClaudeCodeProviderTests|FullyQualifiedName~CopilotProviderTests|FullyQualifiedName~CodexProviderTests|FullyQualifiedName~DeepAgentsProviderTests" \
             --logger "console;verbosity=normal"
