@@ -119,12 +119,6 @@ public static class ServiceCollectionExtensions
                     continue;
                 }
 
-                if (provider is DeepAgentsProvider)
-                {
-                    registry.Register(provider.Name, provider, ["deepagents-acp"]);
-                    continue;
-                }
-
                 if (provider is CodebuddyProvider)
                 {
                     registry.Register(provider.Name, provider, ["codebuddy-cli"]);

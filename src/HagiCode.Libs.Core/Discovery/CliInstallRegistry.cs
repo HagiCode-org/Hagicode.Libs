@@ -35,10 +35,10 @@ public static class CliInstallRegistry
 
         new CliInstallDescriptor(
             ProviderName: "DeepAgents",
-            NpmPackage: "deepagents-acp",
-            PinnedVersion: "0.1.7",
-            ExecutableCandidates: ["deepagents-acp"],
-            IsPubliclyInstallable: true),
+            NpmPackage: string.Empty,
+            PinnedVersion: string.Empty,
+            ExecutableCandidates: ["deepagents"],
+            IsPubliclyInstallable: false),
 
         new CliInstallDescriptor(
             ProviderName: "OpenCode",

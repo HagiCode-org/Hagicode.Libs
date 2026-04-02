@@ -39,14 +39,14 @@ public sealed class CliInstallRegistryTests
     }
 
     [Fact]
-    public void Descriptors_include_deepagents_with_public_install_metadata()
+    public void Descriptors_include_deepagents_with_explicit_local_only_metadata()
     {
         var descriptor = CliInstallRegistry.Descriptors.Single(d => d.ProviderName == "DeepAgents");
 
-        descriptor.NpmPackage.ShouldBe("deepagents-acp");
-        descriptor.PinnedVersion.ShouldBe("0.1.7");
-        descriptor.ExecutableCandidates.ShouldBe(["deepagents-acp"]);
-        descriptor.IsPubliclyInstallable.ShouldBeTrue();
+        descriptor.NpmPackage.ShouldBeEmpty();
+        descriptor.PinnedVersion.ShouldBeEmpty();
+        descriptor.ExecutableCandidates.ShouldBe(["deepagents"]);
+        descriptor.IsPubliclyInstallable.ShouldBeFalse();
     }
 
     [Fact]
@@ -76,6 +76,6 @@ public sealed class CliInstallRegistryTests
     {
         CliInstallRegistry.PubliclyInstallable
             .Select(static descriptor => descriptor.ProviderName)
-            .ShouldBe(["ClaudeCode", "Copilot", "Codex", "DeepAgents", "OpenCode"], ignoreOrder: true);
+            .ShouldBe(["ClaudeCode", "Copilot", "Codex", "OpenCode"], ignoreOrder: true);
     }
 }
