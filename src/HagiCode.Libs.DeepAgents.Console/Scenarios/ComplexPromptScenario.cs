@@ -25,16 +25,18 @@ public static class ComplexPromptScenario
     {
         var prompt = "Give two short bullet points about software testing: " +
                      "one advantage and one trade-off. Mention both labels explicitly.";
+        var options = executionOptions.CreateBaseOptions();
 
         var result = await DeepAgentsScenarioMessageReader.ReadExecutionResultAsync(
             provider,
-            executionOptions.CreateBaseOptions(),
+            options,
             prompt,
             cancellationToken);
+        var detailLines = DeepAgentsScenarioMessageReader.BuildDetailLines(executionOptions, options, prompt, result);
 
         if (result.Messages.Count == 0)
         {
-            return new ProviderConsoleScenarioResult(provider.Name, "Complex Prompt", false, 0, ErrorMessage: "No assistant messages received from provider.");
+            return new ProviderConsoleScenarioResult(provider.Name, "Complex Prompt", false, 0, ErrorMessage: "No assistant messages received from provider.", DetailLines: detailLines);
         }
 
         var combined = result.AssistantText;
@@ -45,7 +47,8 @@ public static class ComplexPromptScenario
                 "Complex Prompt",
                 false,
                 0,
-                ErrorMessage: $"Response too short: {combined.Length} chars (minimum {MinResponseLength}). Response: {combined}");
+                ErrorMessage: $"Response too short: {combined.Length} chars (minimum {MinResponseLength}). Response: {combined}",
+                DetailLines: detailLines);
         }
 
         var normalized = combined.ToLowerInvariant();
@@ -62,9 +65,10 @@ public static class ComplexPromptScenario
                 "Complex Prompt",
                 false,
                 0,
-                ErrorMessage: $"Response must mention both an advantage and a trade-off. Response: {combined}");
+                ErrorMessage: $"Response must mention both an advantage and a trade-off. Response: {combined}",
+                DetailLines: detailLines);
         }
 
-        return new ProviderConsoleScenarioResult(provider.Name, "Complex Prompt", true, 0);
+        return new ProviderConsoleScenarioResult(provider.Name, "Complex Prompt", true, 0, DetailLines: detailLines);
     }
 }

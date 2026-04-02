@@ -50,20 +50,22 @@ public static class RepositorySummaryScenario
             options,
             prompt,
             cancellationToken);
+        var detailLines = DeepAgentsScenarioMessageReader.BuildDetailLines(executionOptions, options, prompt, result);
 
         if (result.Messages.Count == 0)
         {
-            return new ProviderConsoleScenarioResult(provider.Name, "Repository Summary", false, 0, ErrorMessage: "No assistant messages received from provider.");
+            return new ProviderConsoleScenarioResult(provider.Name, "Repository Summary", false, 0, ErrorMessage: "No assistant messages received from provider.", DetailLines: detailLines);
         }
 
         return ContainsRepositoryReference(result.AssistantText, repositoryPath)
-            ? new ProviderConsoleScenarioResult(provider.Name, "Repository Summary", true, 0)
+            ? new ProviderConsoleScenarioResult(provider.Name, "Repository Summary", true, 0, DetailLines: detailLines)
             : new ProviderConsoleScenarioResult(
                 provider.Name,
                 "Repository Summary",
                 false,
                 0,
-                ErrorMessage: $"Response does not contain concrete repository references. Response: {result.AssistantText}");
+                ErrorMessage: $"Response does not contain concrete repository references. Response: {result.AssistantText}",
+                DetailLines: detailLines);
     }
 
     private static bool ContainsRepositoryReference(string response, string repositoryPath)

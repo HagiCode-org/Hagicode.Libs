@@ -23,11 +23,18 @@ public static class SessionResumeScenario
     {
         var secret = $"BLUEPRINT-{Guid.NewGuid():N}";
         var initialPrompt = $"Remember the secret word: {secret}. Reply with exactly ACK.";
+        var initialOptions = executionOptions.CreateBaseOptions();
         var initialResult = await DeepAgentsScenarioMessageReader.ReadExecutionResultAsync(
             provider,
-            executionOptions.CreateBaseOptions(),
+            initialOptions,
             initialPrompt,
             cancellationToken);
+        var initialDetailLines = DeepAgentsScenarioMessageReader.BuildDetailLines(
+            executionOptions,
+            initialOptions,
+            initialPrompt,
+            initialResult,
+            "Initial");
 
         if (initialResult.Messages.Count == 0)
         {
@@ -36,7 +43,8 @@ public static class SessionResumeScenario
                 "Session Resume",
                 false,
                 0,
-                ErrorMessage: "Initial request returned no assistant messages.");
+                ErrorMessage: "Initial request returned no assistant messages.",
+                DetailLines: initialDetailLines);
         }
 
         if (!initialResult.AssistantText.Contains("ACK", StringComparison.OrdinalIgnoreCase))
@@ -46,7 +54,8 @@ public static class SessionResumeScenario
                 "Session Resume",
                 false,
                 0,
-                ErrorMessage: $"Initial request did not acknowledge the setup prompt. Response: {initialResult.AssistantText}");
+                ErrorMessage: $"Initial request did not acknowledge the setup prompt. Response: {initialResult.AssistantText}",
+                DetailLines: initialDetailLines);
         }
 
         if (string.IsNullOrWhiteSpace(initialResult.SessionId))
@@ -56,7 +65,8 @@ public static class SessionResumeScenario
                 "Session Resume",
                 false,
                 0,
-                ErrorMessage: "DeepAgents did not expose a session identifier, so the session could not be resumed.");
+                ErrorMessage: "DeepAgents did not expose a session identifier, so the session could not be resumed.",
+                DetailLines: initialDetailLines);
         }
 
         var resumedOptions = executionOptions.CreateBaseOptions() with
@@ -69,6 +79,13 @@ public static class SessionResumeScenario
             resumedOptions,
             "What was the secret word I told you earlier? Reply with just the word.",
             cancellationToken);
+        var followUpDetailLines = DeepAgentsScenarioMessageReader.BuildDetailLines(
+            executionOptions,
+            resumedOptions,
+            "What was the secret word I told you earlier? Reply with just the word.",
+            followUpResult,
+            "Resume");
+        var combinedDetailLines = DeepAgentsScenarioMessageReader.CombineDetailLines(initialDetailLines, followUpDetailLines);
 
         if (followUpResult.Messages.Count == 0)
         {
@@ -77,17 +94,19 @@ public static class SessionResumeScenario
                 "Session Resume",
                 false,
                 0,
-                ErrorMessage: "Resume request returned no assistant messages.");
+                ErrorMessage: "Resume request returned no assistant messages.",
+                DetailLines: combinedDetailLines);
         }
 
         var normalized = followUpResult.AssistantText.Replace("`", string.Empty, StringComparison.Ordinal).Trim();
         return normalized.Contains(secret, StringComparison.OrdinalIgnoreCase)
-            ? new ProviderConsoleScenarioResult(provider.Name, "Session Resume", true, 0)
+            ? new ProviderConsoleScenarioResult(provider.Name, "Session Resume", true, 0, DetailLines: combinedDetailLines)
             : new ProviderConsoleScenarioResult(
                 provider.Name,
                 "Session Resume",
                 false,
                 0,
-                ErrorMessage: $"Resume request did not return the remembered secret. Expected: {secret}. Response: {followUpResult.AssistantText}");
+                ErrorMessage: $"Resume request did not return the remembered secret. Expected: {secret}. Response: {followUpResult.AssistantText}",
+                DetailLines: combinedDetailLines);
     }
 }

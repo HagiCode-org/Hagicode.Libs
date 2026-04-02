@@ -4,15 +4,15 @@ using HagiCode.Libs.Providers.DeepAgents;
 
 namespace HagiCode.Libs.DeepAgents.Console.Scenarios;
 
-public static class SimplePromptScenario
+public static class BypassBashPingScenario
 {
     public static ProviderConsoleScenario<ICliProvider<DeepAgentsOptions>> Create(DeepAgentsConsoleExecutionOptions executionOptions)
     {
         ArgumentNullException.ThrowIfNull(executionOptions);
 
         return new ProviderConsoleScenario<ICliProvider<DeepAgentsOptions>>(
-            "Simple Prompt",
-            "Send a basic prompt and validate the expected pong response.",
+            "Bypass Bash Ping",
+            "Verify that bypass mode can execute a bash-based network ping without permission callbacks.",
             (provider, cancellationToken) => ExecuteAsync(provider, executionOptions, cancellationToken));
     }
 
@@ -22,7 +22,15 @@ public static class SimplePromptScenario
         CancellationToken cancellationToken)
     {
         var options = executionOptions.CreateBaseOptions();
-        const string prompt = "Reply with exactly the word 'pong'";
+        const string prompt = """
+Use the bash tool to run exactly this command without asking for confirmation:
+ping -c 1 1.1.1.1
+
+If the command succeeds, reply with exactly PING_OK.
+If the command fails, reply with exactly PING_FAIL.
+Do not include any extra words.
+""";
+
         var result = await DeepAgentsScenarioMessageReader.ReadExecutionResultAsync(
             provider,
             options,
@@ -32,17 +40,23 @@ public static class SimplePromptScenario
 
         if (result.Messages.Count == 0)
         {
-            return new ProviderConsoleScenarioResult(provider.Name, "Simple Prompt", false, 0, ErrorMessage: "No assistant messages received from provider.", DetailLines: detailLines);
-        }
-
-        return result.AssistantText.Contains("pong", StringComparison.OrdinalIgnoreCase)
-            ? new ProviderConsoleScenarioResult(provider.Name, "Simple Prompt", true, 0, DetailLines: detailLines)
-            : new ProviderConsoleScenarioResult(
+            return new ProviderConsoleScenarioResult(
                 provider.Name,
-                "Simple Prompt",
+                "Bypass Bash Ping",
                 false,
                 0,
-                ErrorMessage: $"Expected response to contain 'pong' but got: {result.AssistantText}",
+                ErrorMessage: "No assistant messages received from provider.",
+                DetailLines: detailLines);
+        }
+
+        return string.Equals(result.AssistantText.Trim(), "PING_OK", StringComparison.Ordinal)
+            ? new ProviderConsoleScenarioResult(provider.Name, "Bypass Bash Ping", true, 0, DetailLines: detailLines)
+            : new ProviderConsoleScenarioResult(
+                provider.Name,
+                "Bypass Bash Ping",
+                false,
+                0,
+                ErrorMessage: $"Expected response to be exactly 'PING_OK' but got: {result.AssistantText}",
                 DetailLines: detailLines);
     }
 }

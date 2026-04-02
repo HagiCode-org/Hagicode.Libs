@@ -7,6 +7,8 @@ namespace HagiCode.Libs.DeepAgents.Console.Scenarios;
 
 internal static class DeepAgentsScenarioMessageReader
 {
+    private const int PreviewMaxLength = 240;
+
     public static async Task<DeepAgentsScenarioExecutionResult> ReadExecutionResultAsync(
         ICliProvider<DeepAgentsOptions> provider,
         DeepAgentsOptions options,
@@ -14,11 +16,14 @@ internal static class DeepAgentsScenarioMessageReader
         CancellationToken cancellationToken = default)
     {
         var messages = new List<string>();
+        var messageTypes = new List<string>();
         var assistantTextBuilder = new StringBuilder();
         string? sessionId = null;
 
         await foreach (var message in provider.ExecuteAsync(options, prompt, cancellationToken))
         {
+            messageTypes.Add(message.Type);
+
             if (TryGetFailureMessage(message.Content, out var failureMessage))
             {
                 throw new InvalidOperationException(failureMessage);
@@ -43,7 +48,49 @@ internal static class DeepAgentsScenarioMessageReader
             }
         }
 
-        return new DeepAgentsScenarioExecutionResult(messages, assistantTextBuilder.ToString().Trim(), sessionId);
+        return new DeepAgentsScenarioExecutionResult(messages, assistantTextBuilder.ToString().Trim(), sessionId, messageTypes);
+    }
+
+    public static IReadOnlyList<string>? BuildDetailLines(
+        DeepAgentsConsoleExecutionOptions executionOptions,
+        DeepAgentsOptions options,
+        string prompt,
+        DeepAgentsScenarioExecutionResult result,
+        string? prefix = null)
+    {
+        if (!executionOptions.Verbose)
+        {
+            return null;
+        }
+
+        var labelPrefix = string.IsNullOrWhiteSpace(prefix) ? string.Empty : $"{prefix} ";
+        return
+        [
+            $"{labelPrefix}Prompt: {BuildPreview(prompt)}",
+            $"{labelPrefix}Model: {options.Model ?? "(default)"}",
+            $"{labelPrefix}Mode: {options.ModeId ?? "(default)"}",
+            $"{labelPrefix}Workspace: {options.WorkspaceRoot ?? options.WorkingDirectory ?? "(default)"}",
+            $"{labelPrefix}SessionId: {result.SessionId ?? "(none)"}",
+            $"{labelPrefix}MessageTypes: {(result.MessageTypes.Count == 0 ? "(none)" : string.Join(" -> ", result.MessageTypes))}",
+            $"{labelPrefix}AssistantChars: {result.AssistantText.Length}",
+            $"{labelPrefix}AssistantPreview: {BuildPreview(result.AssistantText)}"
+        ];
+    }
+
+    public static IReadOnlyList<string>? CombineDetailLines(params IReadOnlyList<string>?[] blocks)
+    {
+        var combined = new List<string>();
+        foreach (var block in blocks)
+        {
+            if (block is null)
+            {
+                continue;
+            }
+
+            combined.AddRange(block);
+        }
+
+        return combined.Count == 0 ? null : combined;
     }
 
     private static bool TryGetSessionId(JsonElement content, out string? sessionId)
@@ -94,9 +141,26 @@ internal static class DeepAgentsScenarioMessageReader
 
         return false;
     }
+
+    private static string BuildPreview(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "(empty)";
+        }
+
+        var normalized = value
+            .Trim()
+            .Replace("\r", "\\r", StringComparison.Ordinal)
+            .Replace("\n", "\\n", StringComparison.Ordinal);
+        return normalized.Length <= PreviewMaxLength
+            ? normalized
+            : $"{normalized[..PreviewMaxLength]}...";
+    }
 }
 
 internal sealed record DeepAgentsScenarioExecutionResult(
     IReadOnlyList<string> Messages,
     string AssistantText,
-    string? SessionId);
+    string? SessionId,
+    IReadOnlyList<string> MessageTypes);
