@@ -76,7 +76,7 @@ public sealed class ProviderRegistryTests
     }
 
     [Fact]
-    public async Task AddHagiCodeLibs_registers_deepagents_aliases_in_provider_registry()
+    public async Task AddHagiCodeLibs_registers_deepagents_without_legacy_aliases()
     {
         var services = new ServiceCollection();
         services.AddHagiCodeLibs();
@@ -85,8 +85,8 @@ public sealed class ProviderRegistryTests
         var registry = serviceProvider.GetRequiredService<ProviderRegistry>();
 
         registry.GetProvider("deepagents").ShouldBeOfType<DeepAgentsProvider>();
-        registry.GetProvider("deepagents-acp").ShouldBeOfType<DeepAgentsProvider>();
-        registry.GetProvider<DeepAgentsOptions>("deepagents-acp").ShouldBeOfType<DeepAgentsProvider>();
+        registry.GetProvider("deepagents-acp").ShouldBeNull();
+        registry.GetProvider<DeepAgentsOptions>("deepagents-acp").ShouldBeNull();
     }
 
     [Fact]

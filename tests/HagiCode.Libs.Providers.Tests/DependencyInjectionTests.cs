@@ -59,7 +59,7 @@ public sealed class DependencyInjectionTests
         registry.GetProvider("githubcopilot").ShouldNotBeNull();
         registry.GetProvider("codex").ShouldNotBeNull();
         registry.GetProvider("deepagents").ShouldNotBeNull();
-        registry.GetProvider("deepagents-acp").ShouldNotBeNull();
+        registry.GetProvider("deepagents-acp").ShouldBeNull();
         registry.GetProvider("gemini").ShouldNotBeNull();
         registry.GetProvider("gemini-cli").ShouldNotBeNull();
         registry.GetProvider("hermes").ShouldNotBeNull();
@@ -96,7 +96,7 @@ public sealed class DependencyInjectionTests
         registry.GetProvider<ClaudeCodeOptions>("claudecode").ShouldBeOfType<ClaudeCodeProvider>();
         registry.GetProvider<CodebuddyOptions>("codebuddy-cli").ShouldBeOfType<CodebuddyProvider>();
         registry.GetProvider<DeepAgentsOptions>("deepagents").ShouldBeOfType<DeepAgentsProvider>();
-        registry.GetProvider<DeepAgentsOptions>("deepagents-acp").ShouldBeOfType<DeepAgentsProvider>();
+        registry.GetProvider<DeepAgentsOptions>("deepagents-acp").ShouldBeNull();
         registry.GetProvider<GeminiOptions>("gemini").ShouldBeOfType<GeminiProvider>();
         registry.GetProvider<GeminiOptions>("gemini-cli").ShouldBeOfType<GeminiProvider>();
         registry.GetProvider<HermesOptions>("hermes").ShouldBeOfType<HermesProvider>();

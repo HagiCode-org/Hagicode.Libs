@@ -1,8 +1,8 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
-using HagiCode.Libs.DeepAgents.Console;
 using HagiCode.Libs.ConsoleTesting;
 using HagiCode.Libs.Core.Transport;
+using HagiCode.Libs.DeepAgents.Console;
 using HagiCode.Libs.Providers;
 using HagiCode.Libs.Providers.DeepAgents;
 using Shouldly;
@@ -45,17 +45,14 @@ public sealed class DeepAgentsConsoleIntegrationTests
         rendered.ShouldContain("--test-provider");
         rendered.ShouldContain("--test-provider-full");
         rendered.ShouldContain("--test-all");
-        rendered.ShouldContain("--model <model>");
         rendered.ShouldContain("--workspace <path>");
-        rendered.ShouldContain("--name <name>");
-        rendered.ShouldContain("--description <text>");
-        rendered.ShouldContain("--skill <path>");
-        rendered.ShouldContain("--executable <path>");
-        rendered.ShouldContain("--arg <value>");
+        rendered.ShouldContain("--toolcall");
+        rendered.ShouldContain("--toolcall-case <name>");
+        rendered.ShouldContain("deepagents-acp");
     }
 
     [Fact]
-    public async Task DispatchAsync_accepts_the_deepagents_acp_alias()
+    public async Task DispatchAsync_normalizes_the_deepagents_acp_alias()
     {
         var provider = new FakeDeepAgentsProvider();
         using var output = new StringWriter();
@@ -83,7 +80,7 @@ public sealed class DeepAgentsConsoleIntegrationTests
     }
 
     [Fact]
-    public async Task DispatchAsync_reports_configuration_failures_for_invalid_deepagents_options()
+    public async Task DispatchAsync_reports_configuration_failures_for_unknown_deepagents_options()
     {
         var provider = new FakeDeepAgentsProvider();
         using var output = new StringWriter();
@@ -91,13 +88,13 @@ public sealed class DeepAgentsConsoleIntegrationTests
         var runner = new DeepAgentsConsoleRunner(DeepAgentsConsoleDefinition.Instance, provider, formatter);
 
         var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(
-            ["--test-provider-full", "--workspace"],
+            ["--test-provider-full", "--unknown-option"],
             DeepAgentsConsoleDefinition.Instance,
             runner,
             output);
 
         exitCode.ShouldBe(1);
-        output.ToString().ShouldContain("--workspace requires a value");
+        output.ToString().ShouldContain("Unknown option: --unknown-option");
     }
 
     [Fact]
@@ -107,24 +104,24 @@ public sealed class DeepAgentsConsoleIntegrationTests
         using var output = new StringWriter();
         var formatter = new ProviderConsoleOutputFormatter(output);
         var runner = new DeepAgentsConsoleRunner(DeepAgentsConsoleDefinition.Instance, provider, formatter);
-        var repositoryPath = Path.Combine(Path.GetTempPath(), $"deepagents-console-repo-{Guid.NewGuid():N}");
         var workspacePath = Path.Combine(Path.GetTempPath(), $"deepagents-console-workspace-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(repositoryPath);
+        var repositoryPath = Path.Combine(Path.GetTempPath(), $"deepagents-console-repo-{Guid.NewGuid():N}");
         Directory.CreateDirectory(workspacePath);
+        Directory.CreateDirectory(repositoryPath);
 
         try
         {
             var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(
                 [
                     "--test-provider-full",
+                    "--workspace", workspacePath,
                     "--repo", repositoryPath,
                     "--model", "glm-5.1",
-                    "--workspace", workspacePath,
                     "--name", "deepagents-bot",
                     "--description", "DeepAgents test bot",
                     "--skill", "./skills",
                     "--memory", "./AGENTS.md",
-                    "--executable", "/tmp/deepagents-acp",
+                    "--executable", "/tmp/deepagents",
                     "--arg", "--debug"
                 ],
                 DeepAgentsConsoleDefinition.Instance,
@@ -134,12 +131,13 @@ public sealed class DeepAgentsConsoleIntegrationTests
             exitCode.ShouldBe(0);
             provider.ReceivedOptions.Count.ShouldBe(5);
             provider.ReceivedOptions[0].Model.ShouldBe("glm-5.1");
+            provider.ReceivedOptions[0].WorkingDirectory.ShouldBe(workspacePath);
             provider.ReceivedOptions[0].WorkspaceRoot.ShouldBe(workspacePath);
             provider.ReceivedOptions[0].AgentName.ShouldBe("deepagents-bot");
             provider.ReceivedOptions[0].AgentDescription.ShouldBe("DeepAgents test bot");
             provider.ReceivedOptions[0].SkillsDirectories.ShouldBe(["./skills"]);
             provider.ReceivedOptions[0].MemoryFiles.ShouldBe(["./AGENTS.md"]);
-            provider.ReceivedOptions[0].ExecutablePath.ShouldBe("/tmp/deepagents-acp");
+            provider.ReceivedOptions[0].ExecutablePath.ShouldBe("/tmp/deepagents");
             provider.ReceivedOptions[0].ExtraArguments.ShouldBe(["--debug"]);
             provider.ReceivedOptions[3].SessionId.ShouldNotBeNullOrWhiteSpace();
             provider.ReceivedOptions[4].WorkspaceRoot.ShouldBe(repositoryPath);
@@ -147,9 +145,142 @@ public sealed class DeepAgentsConsoleIntegrationTests
         }
         finally
         {
-            Directory.Delete(repositoryPath, recursive: true);
             Directory.Delete(workspacePath, recursive: true);
+            Directory.Delete(repositoryPath, recursive: true);
         }
+    }
+
+    [Fact]
+    public async Task DispatchAsync_includes_bypass_network_scenario_when_mode_id_requests_bypass()
+    {
+        var provider = new FakeDeepAgentsProvider();
+        using var output = new StringWriter();
+        var formatter = new ProviderConsoleOutputFormatter(output);
+        var runner = new DeepAgentsConsoleRunner(DeepAgentsConsoleDefinition.Instance, provider, formatter);
+
+        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(
+            [
+                "--test-provider-full",
+                "--mode-id", "bypass"
+            ],
+            DeepAgentsConsoleDefinition.Instance,
+            runner,
+            output);
+
+        exitCode.ShouldBe(0);
+        provider.ReceivedOptions.Count.ShouldBe(5);
+        provider.ReceivedOptions.Select(static options => options.ModeId).ShouldBe(
+        [
+            "bypassPermissions",
+            "bypassPermissions",
+            "bypassPermissions",
+            "bypassPermissions",
+            "bypassPermissions"
+        ]);
+        output.ToString().ShouldContain("[PASS] deepagents / Bypass Bash Ping");
+        output.ToString().ShouldContain("Summary: 5/5 passed");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_appends_toolcall_scenarios_when_enabled()
+    {
+        var provider = new FakeDeepAgentsProvider();
+        using var output = new StringWriter();
+        var formatter = new ProviderConsoleOutputFormatter(output);
+        var runner = new DeepAgentsConsoleRunner(DeepAgentsConsoleDefinition.Instance, provider, formatter);
+
+        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(
+            [
+                "--test-provider-full",
+                "--toolcall"
+            ],
+            DeepAgentsConsoleDefinition.Instance,
+            runner,
+            output);
+
+        exitCode.ShouldBe(0);
+        provider.ReceivedOptions.Count.ShouldBe(7);
+        var rendered = output.ToString();
+        rendered.ShouldContain("[PASS] deepagents / Toolcall Parsing");
+        rendered.ShouldContain("[PASS] deepagents / Toolcall Failure");
+        rendered.ShouldContain("[PASS] deepagents / Toolcall Mixed Transcript");
+        rendered.ShouldContain("Summary: 7/7 passed");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_toolcall_case_filters_to_the_named_scenario()
+    {
+        var provider = new FakeDeepAgentsProvider();
+        using var output = new StringWriter();
+        var formatter = new ProviderConsoleOutputFormatter(output);
+        var runner = new DeepAgentsConsoleRunner(DeepAgentsConsoleDefinition.Instance, provider, formatter);
+
+        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(
+            [
+                "--test-provider-full",
+                "--toolcall-case", "mixed"
+            ],
+            DeepAgentsConsoleDefinition.Instance,
+            runner,
+            output);
+
+        exitCode.ShouldBe(0);
+        provider.ReceivedOptions.Count.ShouldBe(5);
+        var rendered = output.ToString();
+        rendered.ShouldContain("[PASS] deepagents / Toolcall Mixed Transcript");
+        rendered.ShouldNotContain("Toolcall Parsing");
+        rendered.ShouldNotContain("Toolcall Failure");
+        rendered.ShouldContain("Summary: 5/5 passed");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_reports_available_toolcall_cases_when_selection_is_unknown()
+    {
+        var provider = new FakeDeepAgentsProvider();
+        using var output = new StringWriter();
+        var formatter = new ProviderConsoleOutputFormatter(output);
+        var runner = new DeepAgentsConsoleRunner(DeepAgentsConsoleDefinition.Instance, provider, formatter);
+
+        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(
+            [
+                "--test-provider-full",
+                "--toolcall-case", "missing"
+            ],
+            DeepAgentsConsoleDefinition.Instance,
+            runner,
+            output);
+
+        exitCode.ShouldBe(1);
+        var rendered = output.ToString();
+        rendered.ShouldContain("Unknown DeepAgents toolcall case 'missing'");
+        rendered.ShouldContain("parsing, failure, mixed");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_renders_verbose_toolcall_trace_details()
+    {
+        var provider = new FakeDeepAgentsProvider();
+        using var output = new StringWriter();
+        var formatter = new ProviderConsoleOutputFormatter(output);
+        var runner = new DeepAgentsConsoleRunner(DeepAgentsConsoleDefinition.Instance, provider, formatter);
+
+        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(
+            [
+                "--test-provider-full",
+                "--toolcall-case", "parsing",
+                "--verbose"
+            ],
+            DeepAgentsConsoleDefinition.Instance,
+            runner,
+            output);
+
+        exitCode.ShouldBe(0);
+        var rendered = output.ToString();
+        rendered.ShouldContain("LifecycleTrace: session.started -> assistant -> tool.call -> tool.permission -> tool.update -> tool.completed -> assistant -> terminal.completed");
+        rendered.ShouldContain("RawMessageTypes: session.started -> assistant -> tool.call -> tool.permission -> tool.update -> tool.completed -> assistant -> terminal.completed");
+        rendered.ShouldContain("Tool[1]: stage=tool.call, name=bash, id=tool-parse-1");
+        rendered.ShouldContain("Tool[2]: stage=tool.permission, name=bash, id=tool-parse-1");
+        rendered.ShouldContain("Tool[4]: stage=tool.completed, name=bash, id=tool-parse-1");
     }
 
     private sealed class FakeDeepAgentsProvider : ICliProvider<DeepAgentsOptions>
@@ -181,38 +312,271 @@ public sealed class DeepAgentsConsoleIntegrationTests
         {
             ReceivedOptions.Add(options);
             var sessionId = options.SessionId ?? $"session-{ReceivedOptions.Count}";
-            var response = BuildResponse(prompt, options, sessionId);
+            var lifecycleType = options.SessionId is null ? "session.started" : "session.resumed";
 
-            yield return new CliMessage(
-                options.SessionId is null ? "session.started" : "session.resumed",
-                JsonSerializer.SerializeToElement(new
+            yield return CreateMessage(
+                lifecycleType,
+                new
                 {
-                    type = options.SessionId is null ? "session.started" : "session.resumed",
+                    type = lifecycleType,
                     session_id = sessionId
-                }));
+                });
 
+            if (TryGetToolcallTranscript(prompt, sessionId, out var toolcallMessages))
+            {
+                foreach (var message in toolcallMessages)
+                {
+                    yield return message;
+                }
+
+                await Task.Yield();
+                yield break;
+            }
+
+            var response = BuildResponse(prompt, options, sessionId);
             foreach (var chunk in SplitResponse(response))
             {
-                yield return new CliMessage(
+                yield return CreateMessage(
                     "assistant",
-                    JsonSerializer.SerializeToElement(new
+                    new
                     {
                         type = "assistant",
                         session_id = sessionId,
                         text = chunk
-                    }));
+                    });
             }
 
-            yield return new CliMessage(
+            yield return CreateMessage(
                 "terminal.completed",
-                JsonSerializer.SerializeToElement(new
+                new
                 {
                     type = "terminal.completed",
                     session_id = sessionId,
                     stop_reason = "end_turn"
-                }));
+                });
 
             await Task.Yield();
+        }
+
+        private static bool TryGetToolcallTranscript(
+            string prompt,
+            string sessionId,
+            out IReadOnlyList<CliMessage> messages)
+        {
+            if (prompt.Contains("successful lifecycle validation", StringComparison.OrdinalIgnoreCase) ||
+                prompt.Contains("dotnet --version", StringComparison.OrdinalIgnoreCase))
+            {
+                messages =
+                [
+                    CreateMessage("assistant", new
+                    {
+                        type = "assistant",
+                        session_id = sessionId,
+                        text = "Preparing tool call."
+                    }),
+                    CreateMessage("tool.call", new
+                    {
+                        type = "tool.call",
+                        session_id = sessionId,
+                        tool_name = "bash",
+                        tool_call_id = "tool-parse-1",
+                        update = new
+                        {
+                            kind = "tool_call",
+                            toolName = "bash",
+                            toolCallId = "tool-parse-1",
+                            summary = "ping -c 1 1.1.1.1"
+                        }
+                    }),
+                    CreateMessage("tool.permission", new
+                    {
+                        type = "tool.permission",
+                        session_id = sessionId,
+                        tool_call_id = "tool-parse-1",
+                        title = "Approve bash command"
+                    }),
+                    CreateMessage("tool.update", new
+                    {
+                        type = "tool.update",
+                        session_id = sessionId,
+                        tool_name = "bash",
+                        tool_call_id = "tool-parse-1",
+                        update = new
+                        {
+                            kind = "tool_call_update",
+                            toolName = "bash",
+                            toolCallId = "tool-parse-1",
+                            status = "running",
+                            summary = "tool is executing"
+                        }
+                    }),
+                    CreateMessage("tool.completed", new
+                    {
+                        type = "tool.completed",
+                        session_id = sessionId,
+                        tool_name = "bash",
+                        tool_call_id = "tool-parse-1",
+                        status = "completed",
+                        update = new
+                        {
+                            kind = "tool_call_update",
+                            toolName = "bash",
+                            toolCallId = "tool-parse-1",
+                            status = "completed",
+                            summary = "ping finished"
+                        }
+                    }),
+                    CreateMessage("assistant", new
+                    {
+                        type = "assistant",
+                        session_id = sessionId,
+                        text = "Tool completed successfully."
+                    }),
+                    CreateMessage("terminal.completed", new
+                    {
+                        type = "terminal.completed",
+                        session_id = sessionId,
+                        stop_reason = "end_turn"
+                    })
+                ];
+                return true;
+            }
+
+            if (prompt.Contains("failure lifecycle fixture", StringComparison.OrdinalIgnoreCase))
+            {
+                messages =
+                [
+                    CreateMessage("assistant", new
+                    {
+                        type = "assistant",
+                        session_id = sessionId,
+                        text = "Attempting privileged tool call."
+                    }),
+                    CreateMessage("tool.call", new
+                    {
+                        type = "tool.call",
+                        session_id = sessionId,
+                        tool_name = "bash",
+                        tool_call_id = "tool-fail-1",
+                        update = new
+                        {
+                            kind = "tool_call",
+                            toolName = "bash",
+                            toolCallId = "tool-fail-1",
+                            summary = "cat /root/secret"
+                        }
+                    }),
+                    CreateMessage("tool.failed", new
+                    {
+                        type = "tool.failed",
+                        session_id = sessionId,
+                        tool_name = "bash",
+                        tool_call_id = "tool-fail-1",
+                        status = "failed",
+                        update = new
+                        {
+                            kind = "tool_call_update",
+                            toolName = "bash",
+                            toolCallId = "tool-fail-1",
+                            status = "failed",
+                            message = "permission denied"
+                        }
+                    }),
+                    CreateMessage("terminal.failed", new
+                    {
+                        type = "terminal.failed",
+                        session_id = sessionId,
+                        message = "permission denied"
+                    })
+                ];
+                return true;
+            }
+
+            if (prompt.Contains("mixed transcript fixture", StringComparison.OrdinalIgnoreCase))
+            {
+                messages =
+                [
+                    CreateMessage("assistant", new
+                    {
+                        type = "assistant",
+                        session_id = sessionId,
+                        text = "Preparing tool call. "
+                    }),
+                    CreateMessage("tool.call", new
+                    {
+                        type = "tool.call",
+                        session_id = sessionId,
+                        tool_name = "grep",
+                        tool_call_id = "tool-mixed-1",
+                        update = new
+                        {
+                            kind = "tool_call",
+                            toolName = "grep",
+                            toolCallId = "tool-mixed-1",
+                            summary = "grep -n TODO src"
+                        }
+                    }),
+                    CreateMessage("assistant", new
+                    {
+                        type = "assistant",
+                        session_id = sessionId,
+                        text = "tool is still running. "
+                    }),
+                    CreateMessage("tool.update", new
+                    {
+                        type = "tool.update",
+                        session_id = sessionId,
+                        tool_name = "grep",
+                        tool_call_id = "tool-mixed-1",
+                        update = new
+                        {
+                            kind = "tool_call_update",
+                            toolName = "grep",
+                            toolCallId = "tool-mixed-1",
+                            status = "running",
+                            summary = "scanned 12 files"
+                        }
+                    }),
+                    CreateMessage("assistant", new
+                    {
+                        type = "assistant",
+                        session_id = sessionId,
+                        text = "tool output received. "
+                    }),
+                    CreateMessage("tool.completed", new
+                    {
+                        type = "tool.completed",
+                        session_id = sessionId,
+                        tool_name = "grep",
+                        tool_call_id = "tool-mixed-1",
+                        status = "completed",
+                        update = new
+                        {
+                            kind = "tool_call_update",
+                            toolName = "grep",
+                            toolCallId = "tool-mixed-1",
+                            status = "completed",
+                            summary = "found 3 TODO entries"
+                        }
+                    }),
+                    CreateMessage("assistant", new
+                    {
+                        type = "assistant",
+                        session_id = sessionId,
+                        text = "assistant wrap-up after tool completed."
+                    }),
+                    CreateMessage("terminal.completed", new
+                    {
+                        type = "terminal.completed",
+                        session_id = sessionId,
+                        stop_reason = "end_turn"
+                    })
+                ];
+                return true;
+            }
+
+            messages = [];
+            return false;
         }
 
         private string BuildResponse(string prompt, DeepAgentsOptions options, string sessionId)
@@ -242,6 +606,13 @@ public sealed class DeepAgentsConsoleIntegrationTests
                 return _sessionSecrets.TryGetValue(sessionId, out var secret) ? secret : "UNKNOWN";
             }
 
+            if (prompt.Contains("ping -c 1 1.1.1.1", StringComparison.OrdinalIgnoreCase))
+            {
+                return string.Equals(options.ModeId, "bypassPermissions", StringComparison.Ordinal)
+                    ? "PING_OK"
+                    : "PING_FAIL";
+            }
+
             if (prompt.Contains("repository summary", StringComparison.OrdinalIgnoreCase) ||
                 prompt.Contains("Provide a brief repository summary", StringComparison.OrdinalIgnoreCase))
             {
@@ -252,6 +623,9 @@ public sealed class DeepAgentsConsoleIntegrationTests
 
             return $"Workspace={(options.WorkspaceRoot ?? options.WorkingDirectory ?? "(none)")}; Agent={options.AgentName ?? "deepagents"}";
         }
+
+        private static CliMessage CreateMessage(string type, object payload)
+            => new(type, JsonSerializer.SerializeToElement(payload));
 
         private static IReadOnlyList<string> SplitResponse(string response)
         {
