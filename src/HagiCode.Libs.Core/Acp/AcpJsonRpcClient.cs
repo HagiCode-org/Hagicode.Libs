@@ -281,7 +281,7 @@ public sealed class AcpJsonRpcClient : IAsyncDisposable
             $"ACP response for method '{pendingRequest.Method}' did not contain a result or error payload."));
     }
 
-    private static Exception CreateRpcException(string method, JsonElement errorElement)
+    private Exception CreateRpcException(string method, JsonElement errorElement)
     {
         var message = errorElement.TryGetProperty("message", out var messageElement) &&
                       messageElement.ValueKind == JsonValueKind.String
@@ -292,8 +292,15 @@ public sealed class AcpJsonRpcClient : IAsyncDisposable
             ? codeElement.ToString()
             : null;
 
-        return new InvalidOperationException(
-            $"ACP method '{method}' failed{(string.IsNullOrWhiteSpace(code) ? string.Empty : $" with code {code}")}: {message ?? "Unknown error."}");
+        var errorMessage =
+            $"ACP method '{method}' failed{(string.IsNullOrWhiteSpace(code) ? string.Empty : $" with code {code}")}: {message ?? "Unknown error."}";
+        var diagnostics = (_transport as IAcpTransportDiagnosticsSource)?.GetDiagnosticSummary();
+        if (!string.IsNullOrWhiteSpace(diagnostics))
+        {
+            errorMessage = $"{errorMessage}{System.Environment.NewLine}ACP transport diagnostics: {diagnostics}";
+        }
+
+        return new InvalidOperationException(errorMessage);
     }
 
     private async Task HandleInboundRequestAsync(
@@ -304,10 +311,16 @@ public sealed class AcpJsonRpcClient : IAsyncDisposable
     {
         try
         {
+            if (string.Equals(method, "session/request_permission", StringComparison.OrdinalIgnoreCase))
+            {
+                _notifications.Writer.TryWrite(new AcpNotification(method, parameters.Clone()));
+            }
+
             var result = method switch
             {
                 "fs/read_text_file" => CreateReadTextFileResponse(parameters),
                 "fs/write_text_file" => await CreateWriteTextFileResponseAsync(parameters, cancellationToken).ConfigureAwait(false),
+                "session/request_permission" => CreateRequestPermissionResponse(parameters),
                 _ => throw new InvalidOperationException($"ACP inbound method '{method}' is not supported.")
             };
 
@@ -353,6 +366,69 @@ public sealed class AcpJsonRpcClient : IAsyncDisposable
 
         await File.WriteAllTextAsync(path, content, cancellationToken).ConfigureAwait(false);
         return JsonSerializer.SerializeToElement(new { });
+    }
+
+    private static JsonElement CreateRequestPermissionResponse(JsonElement parameters)
+    {
+        var selectedOptionId = ResolvePermissionOptionId(parameters);
+        return JsonSerializer.SerializeToElement(new
+        {
+            outcome = new
+            {
+                outcome = "selected",
+                optionId = selectedOptionId
+            }
+        });
+    }
+
+    private static string ResolvePermissionOptionId(JsonElement parameters)
+    {
+        if (parameters.ValueKind != JsonValueKind.Object ||
+            !parameters.TryGetProperty("options", out var optionsElement) ||
+            optionsElement.ValueKind != JsonValueKind.Array)
+        {
+            return "allow";
+        }
+
+        string? allowOnceOptionId = null;
+        string? firstOptionId = null;
+        foreach (var option in optionsElement.EnumerateArray())
+        {
+            if (option.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var optionId = TryGetOptionalString(option, "optionId");
+            if (string.IsNullOrWhiteSpace(optionId))
+            {
+                continue;
+            }
+
+            firstOptionId ??= optionId;
+            var kind = TryGetOptionalString(option, "kind");
+            if (string.Equals(kind, "allow_always", StringComparison.OrdinalIgnoreCase))
+            {
+                return optionId;
+            }
+
+            if (allowOnceOptionId is null &&
+                string.Equals(kind, "allow_once", StringComparison.OrdinalIgnoreCase))
+            {
+                allowOnceOptionId = optionId;
+            }
+        }
+
+        return allowOnceOptionId ?? firstOptionId ?? "allow";
+    }
+
+    private static string? TryGetOptionalString(JsonElement element, string propertyName)
+    {
+        return element.ValueKind == JsonValueKind.Object &&
+               element.TryGetProperty(propertyName, out var propertyElement) &&
+               propertyElement.ValueKind == JsonValueKind.String
+            ? propertyElement.GetString()
+            : null;
     }
 
     private static string GetRequiredString(JsonElement parameters, string propertyName)

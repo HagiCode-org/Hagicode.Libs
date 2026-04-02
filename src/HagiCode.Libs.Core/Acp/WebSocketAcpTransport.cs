@@ -8,7 +8,7 @@ namespace HagiCode.Libs.Core.Acp;
 /// <summary>
 /// Implements a raw ACP transport over WebSocket.
 /// </summary>
-public sealed class WebSocketAcpTransport : IAcpTransport
+public sealed class WebSocketAcpTransport : IAcpTransport, IAcpTransportDiagnosticsSource
 {
     private readonly ClientWebSocket _webSocket = new();
     private readonly Uri _serverUri;
@@ -28,6 +28,9 @@ public sealed class WebSocketAcpTransport : IAcpTransport
 
     /// <inheritdoc />
     public bool IsConnected => _webSocket.State == WebSocketState.Open && _disposed == 0;
+
+    /// <inheritdoc />
+    public string? GetDiagnosticSummary() => null;
 
     /// <inheritdoc />
     public async Task ConnectAsync(CancellationToken cancellationToken = default)

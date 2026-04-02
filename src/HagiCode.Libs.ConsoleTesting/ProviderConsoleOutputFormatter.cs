@@ -55,6 +55,19 @@ public sealed class ProviderConsoleOutputFormatter
         {
             _output.WriteLine($"  Error: {result.ErrorMessage}");
         }
+
+        if (result.DetailLines is { Count: > 0 })
+        {
+            foreach (var detailLine in result.DetailLines)
+            {
+                if (string.IsNullOrWhiteSpace(detailLine))
+                {
+                    continue;
+                }
+
+                _output.WriteLine($"  {detailLine}");
+            }
+        }
     }
 
     private void WriteResultLine(bool success, string providerName, string scenarioName, long elapsedMs)

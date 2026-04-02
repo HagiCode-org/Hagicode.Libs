@@ -203,6 +203,28 @@ public sealed class AcpSessionClientTests
     }
 
     [Fact]
+    public async Task SendPromptAsync_appends_transport_diagnostics_to_rpc_errors()
+    {
+        var transport = new ScriptedAcpTransport(
+            request => request.Method switch
+            {
+                "session/prompt" => ["""{"jsonrpc":"2.0","id":"1","error":{"code":-32603,"message":"Internal error"}}"""],
+                _ => throw new InvalidOperationException($"Unexpected ACP method: {request.Method}")
+            },
+            diagnosticSummary: "stderr: trace one\ntrace two");
+
+        await using var client = new AcpSessionClient(transport);
+        await client.ConnectAsync();
+
+        var exception = await Should.ThrowAsync<InvalidOperationException>(
+            async () => await client.SendPromptAsync("session-123", "hello"));
+
+        exception.Message.ShouldContain("ACP method 'session/prompt' failed with code -32603: Internal error");
+        exception.Message.ShouldContain("ACP transport diagnostics: stderr: trace one");
+        exception.Message.ShouldContain("trace two");
+    }
+
+    [Fact]
     public async Task SetModeAsync_invokes_session_set_mode()
     {
         var transport = new ScriptedAcpTransport(request => request.Method switch
@@ -223,6 +245,74 @@ public sealed class AcpSessionClientTests
     }
 
     [Fact]
+    public async Task SendPromptAsync_auto_approves_request_permission_with_allow_always_when_available()
+    {
+        var transport = new ScriptedAcpTransport(request => request.Method switch
+        {
+            "session/prompt" =>
+            [
+                CreateJsonRpcRequest(
+                    "perm-1",
+                    "session/request_permission",
+                    """
+                    {"sessionId":"session-123","toolCall":{"toolCallId":"tool-1","title":"Execute: `ping -c 1 1.1.1.1`"},"options":[{"optionId":"approve","name":"Approve","kind":"allow_once"},{"optionId":"approve_always","name":"Always allow","kind":"allow_always"},{"optionId":"reject","name":"Reject","kind":"reject_once"}]}
+                    """),
+                CreateJsonRpcResult(request.Id, """{"stopReason":"end_turn","outputText":"PING_OK"}""")
+            ],
+            _ => throw new InvalidOperationException($"Unexpected ACP method: {request.Method}")
+        });
+
+        await using var client = new AcpSessionClient(transport);
+        await client.ConnectAsync();
+
+        var result = await client.SendPromptAsync("session-123", "run ping");
+
+        result.GetProperty("outputText").GetString().ShouldBe("PING_OK");
+        transport.SentMethods.ShouldBe(["session/prompt"]);
+        transport.OutboundResponses.ShouldContainKey("perm-1");
+        transport.OutboundResponses["perm-1"].GetProperty("outcome").GetProperty("outcome").GetString().ShouldBe("selected");
+        transport.OutboundResponses["perm-1"].GetProperty("outcome").GetProperty("optionId").GetString().ShouldBe("approve_always");
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        await using var enumerator = client.ReceiveNotificationsAsync(cts.Token).GetAsyncEnumerator(cts.Token);
+        (await enumerator.MoveNextAsync()).ShouldBeTrue();
+        enumerator.Current.Method.ShouldBe("session/request_permission");
+        enumerator.Current.Parameters.GetProperty("sessionId").GetString().ShouldBe("session-123");
+        enumerator.Current.Parameters.GetProperty("toolCall").GetProperty("toolCallId").GetString().ShouldBe("tool-1");
+        (await enumerator.MoveNextAsync()).ShouldBeTrue();
+        enumerator.Current.Method.ShouldBe("session/update");
+        enumerator.Current.Parameters.GetProperty("update").GetProperty("sessionUpdate").GetString().ShouldBe("prompt_completed");
+    }
+
+    [Fact]
+    public async Task SendPromptAsync_auto_approves_request_permission_with_allow_once_when_allow_always_is_absent()
+    {
+        var transport = new ScriptedAcpTransport(request => request.Method switch
+        {
+            "session/prompt" =>
+            [
+                CreateJsonRpcRequest(
+                    "perm-2",
+                    "session/request_permission",
+                    """
+                    {"sessionId":"session-123","toolCall":{"toolCallId":"tool-2","title":"Write file"},"options":[{"optionId":"approve","name":"Approve","kind":"allow_once"},{"optionId":"reject","name":"Reject","kind":"reject_once"}]}
+                    """),
+                CreateJsonRpcResult(request.Id, """{"stopReason":"end_turn","outputText":"ok"}""")
+            ],
+            _ => throw new InvalidOperationException($"Unexpected ACP method: {request.Method}")
+        });
+
+        await using var client = new AcpSessionClient(transport);
+        await client.ConnectAsync();
+
+        var result = await client.SendPromptAsync("session-123", "write file");
+
+        result.GetProperty("outputText").GetString().ShouldBe("ok");
+        transport.OutboundResponses.ShouldContainKey("perm-2");
+        transport.OutboundResponses["perm-2"].GetProperty("outcome").GetProperty("optionId").GetString().ShouldBe("approve");
+    }
+
+    [Fact]
     public void SanitizeIncomingMessage_strips_comment_preamble()
     {
         var payload = "// ready\n{\"jsonrpc\":\"2.0\",\"id\":\"1\",\"result\":{}}";
@@ -238,9 +328,16 @@ public sealed class AcpSessionClientTests
         return "{\"jsonrpc\":\"2.0\",\"id\":\"" + id + "\",\"result\":" + rawResultJson + "}";
     }
 
+    private static string CreateJsonRpcRequest(string id, string method, string rawParamsJson)
+    {
+        return "{\"jsonrpc\":\"2.0\",\"id\":\"" + id + "\",\"method\":\"" + method + "\",\"params\":" + rawParamsJson + "}";
+    }
+
     private sealed record RpcRequest(string Id, string Method, JsonElement Params);
 
-    private sealed class ScriptedAcpTransport(Func<RpcRequest, IReadOnlyList<string>> responseFactory) : IAcpTransport
+    private sealed class ScriptedAcpTransport(
+        Func<RpcRequest, IReadOnlyList<string>> responseFactory,
+        string? diagnosticSummary = null) : IAcpTransport, IAcpTransportDiagnosticsSource
     {
         private readonly Channel<string> _messages = Channel.CreateUnbounded<string>();
         private bool _completed;
@@ -250,6 +347,10 @@ public sealed class AcpSessionClientTests
         public List<RpcRequest> Requests { get; } = [];
 
         public List<string> SentMethods { get; } = [];
+
+        public Dictionary<string, JsonElement> OutboundResponses { get; } = new(StringComparer.Ordinal);
+
+        public string? GetDiagnosticSummary() => diagnosticSummary;
 
         public Task ConnectAsync(CancellationToken cancellationToken = default)
         {
@@ -261,6 +362,13 @@ public sealed class AcpSessionClientTests
         {
             using var document = JsonDocument.Parse(message);
             var root = document.RootElement;
+            if (root.TryGetProperty("result", out var resultElement) &&
+                !root.TryGetProperty("method", out _))
+            {
+                OutboundResponses[root.GetProperty("id").GetString()!] = resultElement.Clone();
+                return Task.CompletedTask;
+            }
+
             var request = new RpcRequest(
                 root.GetProperty("id").GetString()!,
                 root.GetProperty("method").GetString()!,

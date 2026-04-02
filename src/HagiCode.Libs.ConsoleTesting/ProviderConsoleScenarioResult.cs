@@ -6,4 +6,5 @@ public sealed record ProviderConsoleScenarioResult(
     bool Success,
     long ElapsedMs,
     bool Required = true,
-    string? ErrorMessage = null);
+    string? ErrorMessage = null,
+    IReadOnlyList<string>? DetailLines = null);
