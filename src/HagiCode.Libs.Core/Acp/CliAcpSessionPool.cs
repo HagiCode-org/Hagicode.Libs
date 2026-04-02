@@ -273,8 +273,7 @@ public sealed class CliAcpSessionPool : ICliAcpSessionPool
     {
         return string.Equals(entry.ProviderName, request.ProviderName, StringComparison.Ordinal)
                && !entry.IsFaulted
-               && (!string.IsNullOrWhiteSpace(request.LogicalSessionKey)
-                   || string.Equals(entry.CompatibilityFingerprint, request.CompatibilityFingerprint, StringComparison.Ordinal));
+               && string.Equals(entry.CompatibilityFingerprint, request.CompatibilityFingerprint, StringComparison.Ordinal);
     }
 
     private async Task EnforceCapacityUnsafeAsync(string providerName, CliPoolSettings settings)
@@ -419,7 +418,7 @@ public sealed class CliAcpSessionPool : ICliAcpSessionPool
             providerDiagnostics.LastFault = recentEvent;
             FaultCounter.Add(1, CreateProviderAndReasonTags(entry.ProviderName, reason));
             _logger?.LogWarning(
-                "CLI ACP pool faulted entry for provider {ProviderName} session {SessionId}. Reason={Reason} FaultCount={FaultCount} ActiveEntries={ActiveEntryCount} IndexedKeys={IndexedKeyCount}",
+                "CLI ACP pool faulted entry for provider {ProviderName} session {SessionId}. Reason={Reason} FaultCount={FaultCount} ActiveEntries={ActiveEntryCount} IndexedKeys={IndexedKeyCount} Later acquires may still cold-start a fresh entry for the same logical key.",
                 entry.ProviderName,
                 entry.SessionId,
                 reason,

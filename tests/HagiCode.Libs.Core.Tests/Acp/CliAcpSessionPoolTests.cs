@@ -43,7 +43,7 @@ public sealed class CliAcpSessionPoolTests
     }
 
     [Fact]
-    public async Task AcquireAsync_reuses_named_entry_even_when_compatibility_fingerprint_changes()
+    public async Task AcquireAsync_replaces_named_entry_when_compatibility_fingerprint_changes()
     {
         var timeProvider = new ManualTimeProvider();
         await using var pool = new CliAcpSessionPool(timeProvider);
@@ -67,16 +67,17 @@ public sealed class CliAcpSessionPoolTests
             CreateRequest("session-key", "fp-2"),
             _ => Task.FromResult(CreateEntry("session-2", "fp-2", timeProvider, ref createdEntries)));
 
-        secondLease.IsWarmLease.ShouldBeTrue();
-        secondLease.Entry.SessionId.ShouldBe("session-1");
-        firstClient.DisposeCalls.ShouldBe(0);
-        createdEntries.ShouldBe(0);
+        secondLease.IsWarmLease.ShouldBeFalse();
+        secondLease.Entry.SessionId.ShouldBe("session-2");
+        firstClient.DisposeCalls.ShouldBe(1);
+        createdEntries.ShouldBe(1);
         var diagnostics = pool.GetDiagnosticsSnapshot();
-        diagnostics.HitCount.ShouldBe(1);
-        diagnostics.MissCount.ShouldBe(1);
-        diagnostics.EvictionCount.ShouldBe(0);
+        diagnostics.HitCount.ShouldBe(0);
+        diagnostics.MissCount.ShouldBe(2);
+        diagnostics.EvictionCount.ShouldBe(1);
         diagnostics.FaultCount.ShouldBe(0);
-        diagnostics.LastEviction.ShouldBeNull();
+        diagnostics.LastEviction.ShouldNotBeNull();
+        diagnostics.LastEviction.Reason.ShouldBe(CliAcpSessionPoolEventReason.CompatibilityMismatch);
     }
 
     [Fact]
@@ -165,6 +166,46 @@ public sealed class CliAcpSessionPoolTests
         diagnostics.LastEviction.Reason.ShouldBe(CliAcpSessionPoolEventReason.Fault);
         diagnostics.LastFault.Reason.ShouldBe(CliAcpSessionPoolEventReason.Fault);
         diagnostics.ProviderDiagnostics.Single().FaultCount.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task AcquireAsync_creates_fresh_entry_after_fault_for_same_logical_key()
+    {
+        var timeProvider = new ManualTimeProvider();
+        await using var pool = new CliAcpSessionPool(timeProvider);
+        var firstClient = new StubAcpSessionClient();
+
+        await using (var firstLease = await pool.AcquireAsync(
+                         CreateRequest("deepagents", "deepagents-key", "fp-1"),
+                         _ => Task.FromResult(new PooledAcpSessionEntry(
+                             "deepagents",
+                             "session-1",
+                             firstClient,
+                             "fp-1",
+                             new AcpSessionHandle("session-1", false, default),
+                             new CliPoolSettings(),
+                             timeProvider))))
+        {
+            firstLease.IsFaulted = true;
+        }
+
+        await using var secondLease = await pool.AcquireAsync(
+            CreateRequest("deepagents", "deepagents-key", "fp-1"),
+            _ => Task.FromResult(CreateEntry("deepagents", "session-2", "fp-1", timeProvider)));
+
+        secondLease.IsWarmLease.ShouldBeFalse();
+        secondLease.Entry.SessionId.ShouldBe("session-2");
+        firstClient.DisposeCalls.ShouldBe(1);
+
+        var diagnostics = pool.GetDiagnosticsSnapshot();
+        diagnostics.MissCount.ShouldBe(2);
+        diagnostics.FaultCount.ShouldBe(1);
+        diagnostics.ActiveEntryCount.ShouldBe(1);
+        diagnostics.IndexedKeyCount.ShouldBe(2);
+        diagnostics.ProviderDiagnostics.Single().ProviderName.ShouldBe("deepagents");
+        diagnostics.ProviderDiagnostics.Single().MissCount.ShouldBe(2);
+        diagnostics.ProviderDiagnostics.Single().FaultCount.ShouldBe(1);
+        diagnostics.ProviderDiagnostics.Single().ActiveEntryCount.ShouldBe(1);
     }
 
     [Fact]
