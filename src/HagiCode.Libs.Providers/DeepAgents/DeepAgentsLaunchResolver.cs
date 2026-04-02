@@ -5,9 +5,12 @@ namespace HagiCode.Libs.Providers.DeepAgents;
 
 internal sealed class DeepAgentsLaunchResolver
 {
-    private static readonly string[] DirectExecutableCandidates = ["deepagents-acp"];
-    private static readonly string[] NpxExecutableCandidates = ["npx", "npx.cmd", "npx.exe", "npx.bat"];
-    private const string NpmPackageName = "deepagents-acp";
+    private static readonly string[] DirectExecutableCandidates = ["deepagents"];
+    private static readonly string[] UvxExecutableCandidates = ["uvx", "uvx.cmd", "uvx.exe", "uvx.bat"];
+    private const string BootstrapArgument = "--acp";
+    private const string UvxFromArgument = "--from";
+    private const string UvxPackageName = "deepagents-cli";
+    private const string DeepAgentsCommandName = "deepagents";
 
     private readonly CliExecutableResolver _executableResolver;
 
@@ -31,24 +34,46 @@ internal sealed class DeepAgentsLaunchResolver
             var resolvedExplicitPath = _executableResolver.ResolveExecutablePath(explicitExecutable, runtimeEnvironment);
             return resolvedExplicitPath is null
                 ? null
-                : new DeepAgentsManagedLauncher(resolvedExplicitPath, managedArguments, resolvedExplicitPath, UsesNpxFallback: false);
+                : CreateManagedLauncher(
+                    resolvedExplicitPath,
+                    managedArguments,
+                    resolvedExplicitPath,
+                    UsesFallbackLauncher: false);
         }
 
         var directExecutable = _executableResolver.ResolveFirstAvailablePath(DirectExecutableCandidates, runtimeEnvironment);
         if (directExecutable is not null)
         {
-            return new DeepAgentsManagedLauncher(directExecutable, managedArguments, "deepagents-acp", UsesNpxFallback: false);
+            return CreateManagedLauncher(directExecutable, managedArguments, "deepagents --acp", UsesFallbackLauncher: false);
         }
 
-        var npxExecutable = _executableResolver.ResolveFirstAvailablePath(NpxExecutableCandidates, runtimeEnvironment);
-        if (npxExecutable is null)
+        var uvxExecutable = _executableResolver.ResolveFirstAvailablePath(UvxExecutableCandidates, runtimeEnvironment);
+        if (uvxExecutable is null)
         {
             return null;
         }
 
-        var launchArguments = new List<string>(managedArguments.Count + 1) { NpmPackageName };
+        var launchArguments = new List<string>(managedArguments.Count + 4)
+        {
+            UvxFromArgument,
+            UvxPackageName,
+            DeepAgentsCommandName,
+            BootstrapArgument
+        };
         launchArguments.AddRange(managedArguments);
-        return new DeepAgentsManagedLauncher(npxExecutable, launchArguments, "npx deepagents-acp", UsesNpxFallback: true);
+        return new DeepAgentsManagedLauncher(uvxExecutable, launchArguments, "uvx --from deepagents-cli deepagents --acp", UsesFallbackLauncher: true);
+    }
+
+    private static DeepAgentsManagedLauncher CreateManagedLauncher(
+        string executablePath,
+        IReadOnlyList<string> managedArguments,
+        string displayName,
+        bool UsesFallbackLauncher)
+    {
+        var launchArguments = new List<string>(managedArguments.Count + 1) { BootstrapArgument };
+        launchArguments.AddRange(managedArguments);
+
+        return new DeepAgentsManagedLauncher(executablePath, launchArguments, displayName, UsesFallbackLauncher);
     }
 }
 
@@ -56,4 +81,4 @@ internal sealed record DeepAgentsManagedLauncher(
     string ExecutablePath,
     IReadOnlyList<string> Arguments,
     string DisplayName,
-    bool UsesNpxFallback);
+    bool UsesFallbackLauncher);
