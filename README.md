@@ -110,12 +110,14 @@ dotnet run --project src/HagiCode.Libs.Codex.Console -- --test-provider codex-cl
 dotnet run --project src/HagiCode.Libs.Codex.Console -- --test-provider-full --sandbox workspace-write --repo .
 dotnet run --project src/HagiCode.Libs.Codex.Console -- --test-all codex
 
-npm install --global deepagents-acp@0.1.7
+uv tool install deepagents-cli
 dotnet run --project src/HagiCode.Libs.DeepAgents.Console -- --help
 dotnet run --project src/HagiCode.Libs.DeepAgents.Console
 dotnet run --project src/HagiCode.Libs.DeepAgents.Console -- --test-provider deepagents-acp
 dotnet run --project src/HagiCode.Libs.DeepAgents.Console -- --test-provider-full --model glm-5.1 --workspace . --skill ./skills --arg --debug
 dotnet run --project src/HagiCode.Libs.DeepAgents.Console -- --test-provider-full --repo .
+dotnet run --project src/HagiCode.Libs.DeepAgents.Console -- --test-provider-full --toolcall --verbose
+dotnet run --project src/HagiCode.Libs.DeepAgents.Console -- --test-provider-full --toolcall-case mixed
 dotnet run --project src/HagiCode.Libs.DeepAgents.Console -- --test-all deepagents
 
 dotnet run --project src/HagiCode.Libs.Codebuddy.Console -- --help
@@ -183,9 +185,12 @@ dotnet run --project src/HagiCode.Libs.QoderCli.Console -- --test-all qodercli
 - Codex repository analysis remains opt-in via `--repo <path>` and reuses the same shared report formatter.
 - No arguments also run the default DeepAgents suite.
 - DeepAgents 默认套件当前包含 `Ping`、`Simple Prompt`、`Complex Prompt` 和 `Session Resume`。
-- DeepAgents accepts `--model <model>`, `--workspace <path>`, `--name <name>`, `--description <text>`, repeated `--skill <path>`, repeated `--memory <path>`, `--executable <path>`, and repeated `--arg <value>` overrides.
-- DeepAgents repository summary remains opt-in via `--repo <path>`, `deepagents-acp` normalizes to the canonical `deepagents` provider name, and the runtime prefers an explicit executable, then `deepagents-acp`, then `npx deepagents-acp`.
-- DeepAgents is publicly installable in CI via `npm install --global deepagents-acp@0.1.7`; local validation can be reproduced with `dotnet run --project src/HagiCode.Libs.CiSetup.Console -- --install --verify` plus the dedicated console commands above.
+- DeepAgents accepts the provider aliases `deepagents` and `deepagents-acp`.
+- DeepAgents accepts `--model <model>`, `--workspace <path>`, `--name <name>`, `--description <text>`, repeated `--skill <path>`, repeated `--memory <path>`, `--executable <path>`, repeated `--arg <value>`, `--toolcall`, and `--toolcall-case <parsing|failure|mixed>` overrides.
+- DeepAgents repository summary remains opt-in via `--repo <path>`, and the runtime now prefers an explicit executable, then `deepagents --acp`, then `uvx --from deepagents-cli deepagents --acp`.
+- `--toolcall` appends the dedicated DeepAgents toolcall diagnostics on top of the baseline suite, while `--toolcall-case <name>` narrows execution to one toolcall scenario without dropping `Ping`, `Simple Prompt`, `Complex Prompt`, or `Session Resume`.
+- Toolcall verbose runs print `RawMessageTypes`, `LifecycleTrace`, and per-tool metadata such as `Tool[1]: stage=tool.call, name=bash, id=tool-parse-1`, which makes the first parser divergence easy to spot in CI logs.
+- DeepAgents is now treated as local-only validation metadata in `CliInstallRegistry`; install the `deepagents` CLI separately before running the dedicated console commands above.
 - No arguments also run the default CodeBuddy suite.
 - CodeBuddy 默认套件当前包含 `Ping`、`Simple Prompt`、`Complex Prompt` 和 `Session Resume`。
 - CodeBuddy accepts `--model <model>` and defaults to `glm-4.7` when no explicit model override is supplied.
@@ -272,7 +277,6 @@ await foreach (var message in opencode.ExecuteAsync(
 
 - `claude-code` -> `claude`, `claudecode`, `anthropic-claude`
 - `codebuddy` -> `codebuddy-cli`
-- `deepagents` -> `deepagents-acp`
 - `hermes` -> `hermes-cli`
 - `opencode` -> `open-code`, `opencode-cli`
 

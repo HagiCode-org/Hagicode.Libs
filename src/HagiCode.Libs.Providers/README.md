@@ -68,7 +68,6 @@ var poolDefaults = serviceProvider.GetRequiredService<CliProviderPoolConfigurati
 
 - `claude-code` -> `claude`, `claudecode`, `anthropic-claude`
 - `codebuddy` -> `codebuddy-cli`
-- `deepagents` -> `deepagents-acp`
 - `hermes` -> `hermes-cli`
 
 ## Provider usage
@@ -153,6 +152,7 @@ var deepAgentsOptions = new DeepAgentsOptions
 {
     Model = "glm-5.1",
     WorkspaceRoot = "/path/to/repo",
+    ModeId = "bypassPermissions",
     AgentName = "coding-assistant",
     AgentDescription = "Repo-aware DeepAgents ACP runner",
     SkillsDirectories = ["/path/to/skills"],
@@ -163,6 +163,11 @@ await foreach (var message in deepAgents.ExecuteAsync(deepAgentsOptions, "Reply 
 {
     Console.WriteLine($"{message.Type}: {message.Content}");
 }
+
+// ModeId is the authoritative ACP session-mode contract for DeepAgents.
+// Compatibility flags such as --auto-approve may still be forwarded, but pooled
+// sessions re-apply ModeId before every prompt and a faulted entry is evicted so
+// later requests can cold-start a fresh session.
 
 // Reuse the same logical Codex session key to keep thread continuity on later calls.
 // If LogicalSessionKey and ThreadId are both absent, the request remains anonymous
@@ -219,7 +224,7 @@ var qoderOptions = new QoderCliOptions
 Practical boundaries:
 
 - `CodeBuddy`, `Gemini`, `Hermes`, `Kimi`, `Kiro`, and `QoderCLI` pool live ACP sessions.
-- `DeepAgents` pools live ACP sessions and fingerprints workspace plus managed launcher arguments before warm reuse.
+- `DeepAgents` pools live ACP sessions, treats `DeepAgentsOptions.ModeId` as the authoritative typed session-mode signal, re-applies it before prompt execution, and evicts faulted entries so later acquires can cold-start a fresh session.
 - `Claude Code` pools warm stdio transports keyed by session or resume identity plus its effective startup shape.
 - `Codex` pools workspace/thread bindings so follow-up requests can reuse the last known thread id.
 - `Copilot` pools SDK runtimes per compatible workspace/configuration pair.
@@ -233,7 +238,7 @@ Practical boundaries:
 - The new execution facade is intended for provider-facing adapters, diagnostics, and one-shot probes such as version checks.
 - Provider callers should continue passing structured option models; the new facade is additive and does not replace provider-specific option records.
 - `gemini` is the canonical built-in provider name; `ProviderRegistry` and the dedicated console also accept `gemini-cli` as an alias.
-- `deepagents` is the canonical built-in provider name; `ProviderRegistry` and the dedicated console also accept `deepagents-acp` as an alias.
+- `deepagents` is the canonical built-in provider name, and the managed runtime boots ACP through `deepagents --acp`.
 - `kimi` is the canonical built-in provider name; `ProviderRegistry` and the dedicated console also accept `kimi-cli` as an alias.
 - `kiro` is the canonical built-in provider name; `ProviderRegistry` and the dedicated console also accept `kiro-cli` as an alias.
-- `CliInstallRegistry` marks DeepAgents as publicly installable via `deepagents-acp@0.1.7`, while Gemini, Kimi, and Kiro remain local-only validation metadata (`IsPubliclyInstallable = false`).
+- `CliInstallRegistry` now treats DeepAgents as local-only validation metadata because the managed runtime expects a `deepagents` executable (or `uvx --from deepagents-cli deepagents --acp`) rather than the legacy `deepagents-acp` npm package.
