@@ -43,6 +43,12 @@ public sealed record CodexOptions
     public string? ApprovalPolicy { get; init; }
 
     /// <summary>
+    /// Gets or sets the optional Codex configuration profile.
+    /// <see langword="null" />, empty, or whitespace-only values are treated as unspecified and do not emit <c>-p</c>.
+    /// </summary>
+    public string? Profile { get; init; }
+
+    /// <summary>
     /// Gets or sets the thread id to resume.
     /// </summary>
     public string? ThreadId { get; init; }

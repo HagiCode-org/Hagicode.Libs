@@ -315,6 +315,12 @@ public class CodexProvider : ICliProvider<CodexOptions>
             arguments.AddRange(["--config", $"approval_policy=\"{approvalPolicy}\""]);
         }
 
+        var profile = ArgumentValueNormalizer.NormalizeOptionalValue(options.Profile);
+        if (profile is not null)
+        {
+            arguments.AddRange(["-p", profile]);
+        }
+
         var threadId = ArgumentValueNormalizer.NormalizeOptionalValue(options.ThreadId);
         if (threadId is not null)
         {

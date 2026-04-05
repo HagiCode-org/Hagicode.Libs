@@ -26,6 +26,7 @@ public sealed class CodexProviderTests
             SandboxMode = "workspace-write",
             WorkingDirectory = "/tmp/project",
             ApprovalPolicy = "never",
+            Profile = "team-alpha",
             ThreadId = "thread-123",
             SkipGitRepositoryCheck = true,
             AddDirectories = ["/tmp/project", "/tmp/shared"],
@@ -53,6 +54,8 @@ public sealed class CodexProviderTests
             "--skip-git-repo-check",
             "--config",
             "approval_policy=\"never\"",
+            "-p",
+            "team-alpha",
             "resume",
             "thread-123",
             "--config",
@@ -71,6 +74,7 @@ public sealed class CodexProviderTests
             Model = "  gpt-5 codex  ",
             WorkingDirectory = "  /tmp/my repo  ",
             ApprovalPolicy = "  on-request  ",
+            Profile = "  team alpha  ",
             ThreadId = "  thread-456  ",
             AddDirectories = ["  /tmp/shared repo  ", "   "],
             ExtraArgs = new Dictionary<string, string?>
@@ -93,6 +97,8 @@ public sealed class CodexProviderTests
             "/tmp/shared repo",
             "--config",
             "approval_policy=\"on-request\"",
+            "-p",
+            "team alpha",
             "resume",
             "thread-456",
             "--config",
@@ -100,6 +106,24 @@ public sealed class CodexProviderTests
             "--notes",
             "keep internal  spaces"
         ]);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void BuildCommandArguments_omits_profile_switch_for_null_or_blank_profile(string? profile)
+    {
+        var provider = CreateProvider();
+
+        var arguments = provider.BuildCommandArguments(new CodexOptions
+        {
+            Profile = profile
+        });
+
+        arguments.ShouldBe(["exec", "--experimental-json"]);
+        arguments.ShouldNotContain("-p");
+        arguments.ShouldNotContain("--profile");
     }
 
     [Fact]
