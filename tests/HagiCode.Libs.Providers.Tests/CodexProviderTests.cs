@@ -14,6 +14,11 @@ namespace HagiCode.Libs.Providers.Tests;
 public sealed class CodexProviderTests
 {
     private const string RealCliTestsEnvironmentVariable = "HAGICODE_REAL_CLI_TESTS";
+    private const string RetryableTransportDisconnectMessage =
+        "Reconnecting... 1/5 (stream disconnected before completion: error sending request for url https://api.example.com/v1)";
+    private const string RetryableContentFilterDisconnectMessage =
+        "Reconnecting... 1/5 (stream disconnected before completion: Incomplete response returned, reason: content_filter)";
+    private const string RetryableGenericRefusalMessage = "I'm sorry, but I cannot assist with that request.";
     private static readonly string[] CodexExecutableCandidates = ["codex", "codex-cli"];
 
     [Fact]
@@ -195,6 +200,96 @@ public sealed class CodexProviderTests
         provider.StartContexts.Count.ShouldBe(2);
         provider.StartContexts[1].Arguments.ShouldContain("resume");
         provider.StartContexts[1].Arguments.ShouldContain("thread-xyz");
+    }
+
+    [Fact]
+    public void TryExtractTerminalMessage_recognizes_retryable_samples()
+    {
+        CodexProvider.TryExtractTerminalMessage(
+                JsonSerializer.SerializeToElement(new { type = "turn.failed", error = new { message = RetryableTransportDisconnectMessage } }),
+                out var transportMessage)
+            .ShouldBeTrue();
+        transportMessage.ShouldBe(RetryableTransportDisconnectMessage);
+
+        CodexProvider.TryExtractTerminalMessage(
+                JsonSerializer.SerializeToElement(new { type = "turn.failed", error = new { message = RetryableContentFilterDisconnectMessage } }),
+                out var contentFilterMessage)
+            .ShouldBeTrue();
+        contentFilterMessage.ShouldBe(RetryableContentFilterDisconnectMessage);
+
+        CodexProvider.TryExtractTerminalMessage(
+                JsonSerializer.SerializeToElement(new { type = "turn.completed", result = RetryableGenericRefusalMessage }),
+                out var refusalMessage)
+            .ShouldBeTrue();
+        refusalMessage.ShouldBe(RetryableGenericRefusalMessage);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_reuses_pooled_thread_id_after_retryable_failure_replay()
+    {
+        var provider = CreateProvider(messageBatches:
+        [
+            [
+                new CliMessage("thread.started", JsonSerializer.SerializeToElement(new { type = "thread.started", thread_id = "thread-retry" })),
+                new CliMessage("turn.failed", JsonSerializer.SerializeToElement(new { type = "turn.failed", error = new { message = RetryableTransportDisconnectMessage } }))
+            ],
+            [
+                new CliMessage("turn.completed", JsonSerializer.SerializeToElement(new { type = "turn.completed" }))
+            ]
+        ]);
+
+        await DrainCliMessagesAsync(provider.ExecuteAsync(
+            new CodexOptions
+            {
+                WorkingDirectory = "/tmp/project",
+                LogicalSessionKey = "session-retry"
+            },
+            "first"));
+
+        await DrainCliMessagesAsync(provider.ExecuteAsync(
+            new CodexOptions
+            {
+                WorkingDirectory = "/tmp/project",
+                LogicalSessionKey = "session-retry",
+                ThreadId = "thread-retry"
+            },
+            "replay"));
+
+        provider.StartContexts.Count.ShouldBe(2);
+        provider.StartContexts[1].Arguments.ShouldContain("resume");
+        provider.StartContexts[1].Arguments.ShouldContain("thread-retry");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_keeps_anonymous_retry_replays_unbound()
+    {
+        var provider = CreateProvider(messageBatches:
+        [
+            [
+                new CliMessage("thread.started", JsonSerializer.SerializeToElement(new { type = "thread.started", thread_id = "thread-anon-retry" })),
+                new CliMessage("turn.failed", JsonSerializer.SerializeToElement(new { type = "turn.failed", error = new { message = RetryableTransportDisconnectMessage } }))
+            ],
+            [
+                new CliMessage("turn.completed", JsonSerializer.SerializeToElement(new { type = "turn.completed" }))
+            ]
+        ]);
+
+        await DrainCliMessagesAsync(provider.ExecuteAsync(
+            new CodexOptions
+            {
+                WorkingDirectory = "/tmp/project"
+            },
+            "first"));
+
+        await DrainCliMessagesAsync(provider.ExecuteAsync(
+            new CodexOptions
+            {
+                WorkingDirectory = "/tmp/project"
+            },
+            "replay"));
+
+        provider.StartContexts.Count.ShouldBe(2);
+        provider.StartContexts[1].Arguments.ShouldNotContain("resume");
     }
 
     [Fact]

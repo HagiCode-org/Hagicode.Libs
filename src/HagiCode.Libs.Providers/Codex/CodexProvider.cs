@@ -195,7 +195,7 @@ public class CodexProvider : ICliProvider<CodexOptions>
                 }
 
                 yield return message;
-                if (IsTerminalMessage(message.Type))
+                if (IsTerminalMessageType(message.Type))
                 {
                     break;
                 }
@@ -267,6 +267,48 @@ public class CodexProvider : ICliProvider<CodexOptions>
     public async ValueTask DisposeAsync()
     {
         await _poolCoordinator.DisposeCodexProviderAsync(Name).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Determines whether the specified Codex event type terminates the current execution stream.
+    /// </summary>
+    public static bool IsTerminalMessageType(string? messageType)
+    {
+        return string.Equals(messageType, "turn.completed", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(messageType, "turn.failed", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(messageType, "error", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Extracts the terminal text associated with a Codex terminal event.
+    /// </summary>
+    public static bool TryExtractTerminalMessage(JsonElement content, out string? terminalMessage)
+    {
+        terminalMessage = null;
+        if (content.ValueKind != JsonValueKind.Object ||
+            !content.TryGetProperty("type", out var typeElement) ||
+            typeElement.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        var messageType = typeElement.GetString();
+        if (string.Equals(messageType, "turn.completed", StringComparison.OrdinalIgnoreCase))
+        {
+            return TryGetCompletionText(content, out terminalMessage);
+        }
+
+        if (string.Equals(messageType, "turn.failed", StringComparison.OrdinalIgnoreCase))
+        {
+            return TryGetTurnFailedMessage(content, out terminalMessage);
+        }
+
+        if (string.Equals(messageType, "error", StringComparison.OrdinalIgnoreCase))
+        {
+            return TryGetErrorMessage(content, out terminalMessage);
+        }
+
+        return false;
     }
 
     internal virtual IReadOnlyList<string> BuildCommandArguments(CodexOptions options)
@@ -445,7 +487,7 @@ public class CodexProvider : ICliProvider<CodexOptions>
         await foreach (var message in transport.ReceiveAsync(cancellationToken).ConfigureAwait(false))
         {
             yield return message;
-            if (IsTerminalMessage(message.Type))
+            if (IsTerminalMessageType(message.Type))
             {
                 yield break;
             }
@@ -487,13 +529,6 @@ public class CodexProvider : ICliProvider<CodexOptions>
             }));
     }
 
-    private static bool IsTerminalMessage(string messageType)
-    {
-        return string.Equals(messageType, "turn.completed", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(messageType, "turn.failed", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(messageType, "error", StringComparison.OrdinalIgnoreCase);
-    }
-
     private static bool TryGetThreadId(JsonElement content, out string? threadId)
     {
         threadId = null;
@@ -517,5 +552,59 @@ public class CodexProvider : ICliProvider<CodexOptions>
 
         threadId = threadIdElement.GetString();
         return !string.IsNullOrWhiteSpace(threadId);
+    }
+
+    private static bool TryGetCompletionText(JsonElement content, out string? completionText)
+    {
+        completionText = null;
+        if (TryGetString(content, "result", out completionText) ||
+            TryGetString(content, "final_response", out completionText))
+        {
+            completionText = ArgumentValueNormalizer.NormalizeOptionalValue(completionText);
+            return completionText is not null;
+        }
+
+        return false;
+    }
+
+    private static bool TryGetTurnFailedMessage(JsonElement content, out string? failureMessage)
+    {
+        failureMessage = null;
+        if (content.TryGetProperty("error", out var errorElement))
+        {
+            switch (errorElement.ValueKind)
+            {
+                case JsonValueKind.Object when TryGetString(errorElement, "message", out failureMessage):
+                    failureMessage = ArgumentValueNormalizer.NormalizeOptionalValue(failureMessage);
+                    return failureMessage is not null;
+                case JsonValueKind.String:
+                    failureMessage = ArgumentValueNormalizer.NormalizeOptionalValue(errorElement.GetString());
+                    return failureMessage is not null;
+            }
+        }
+
+        failureMessage = "unknown codex turn error";
+        return true;
+    }
+
+    private static bool TryGetErrorMessage(JsonElement content, out string? errorMessage)
+    {
+        errorMessage = TryGetString(content, "message", out var message)
+            ? ArgumentValueNormalizer.NormalizeOptionalValue(message)
+            : "unknown codex error";
+        return errorMessage is not null;
+    }
+
+    private static bool TryGetString(JsonElement element, string propertyName, out string? value)
+    {
+        value = null;
+        if (!element.TryGetProperty(propertyName, out var property) ||
+            property.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        value = property.GetString();
+        return value is not null;
     }
 }
