@@ -11,7 +11,8 @@ internal enum CopilotSdkStreamEventType
     ReasoningDelta = 6,
     ToolExecutionStart = 7,
     ToolExecutionEnd = 8,
-    RawEvent = 9
+    RawEvent = 9,
+    AssistantSnapshot = 10
 }
 
 internal sealed record CopilotSdkStreamEvent(

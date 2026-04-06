@@ -136,6 +136,7 @@ public sealed class CopilotProviderTests
         messages[0].Content.GetProperty("message").GetString()!.ShouldContain("--headless");
         messages[1].Content.GetProperty("session_id").GetString().ShouldBe("copilot-session-1");
         messages[2].Content.GetProperty("text").GetString().ShouldBe("pong");
+        messages[2].Content.GetProperty("is_authoritative_snapshot").GetBoolean().ShouldBeFalse();
         messages[2].Content.GetProperty("session_id").GetString().ShouldBe("copilot-session-1");
         messages[3].Content.GetProperty("text").GetString().ShouldBe("thinking");
         messages[4].Content.GetProperty("tool_name").GetString().ShouldBe("grep");
@@ -164,8 +165,54 @@ public sealed class CopilotProviderTests
 
         messages.Select(static message => message.Type).ShouldBe(["session.started", "assistant", "reasoning", "assistant", "result"]);
         messages[1].Content.GetProperty("text").GetString().ShouldBe(" ");
+        messages[1].Content.GetProperty("is_authoritative_snapshot").GetBoolean().ShouldBeFalse();
         messages[2].Content.GetProperty("text").GetString().ShouldBe("\n\n");
         messages[3].Content.GetProperty("text").GetString().ShouldBe("tail");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_preserves_authoritative_snapshots_after_deltas()
+    {
+        var provider = CreateProvider(gateway: new StubCopilotSdkGateway(
+        [
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.TextDelta, Content: "Overview"),
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.AssistantSnapshot, Content: "## Impacted Repos\n\n- repos/hagicode-core"),
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.Completed)
+        ]));
+        var messages = new List<CliMessage>();
+
+        await foreach (var message in provider.ExecuteAsync(new CopilotOptions(), "hello"))
+        {
+            messages.Add(message);
+        }
+
+        messages.Select(static message => message.Type).ShouldBe(["session.started", "assistant", "assistant", "result"]);
+        messages[1].Content.GetProperty("text").GetString().ShouldBe("Overview");
+        messages[1].Content.GetProperty("is_authoritative_snapshot").GetBoolean().ShouldBeFalse();
+        messages[2].Content.GetProperty("text").GetString().ShouldBe("## Impacted Repos\n\n- repos/hagicode-core");
+        messages[2].Content.GetProperty("is_authoritative_snapshot").GetBoolean().ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_preserves_blank_lines_and_markdown_leading_snapshots()
+    {
+        var provider = CreateProvider(gateway: new StubCopilotSdkGateway(
+        [
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.TextDelta, Content: " "),
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.AssistantSnapshot, Content: "\n\n## Title\n\n```diff\n+ keep spacing\n```"),
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.Completed)
+        ]));
+        var messages = new List<CliMessage>();
+
+        await foreach (var message in provider.ExecuteAsync(new CopilotOptions(), "hello"))
+        {
+            messages.Add(message);
+        }
+
+        messages.Select(static message => message.Type).ShouldBe(["session.started", "assistant", "assistant", "result"]);
+        messages[1].Content.GetProperty("text").GetString().ShouldBe(" ");
+        messages[2].Content.GetProperty("text").GetString().ShouldBe("\n\n## Title\n\n```diff\n+ keep spacing\n```");
+        messages[2].Content.GetProperty("is_authoritative_snapshot").GetBoolean().ShouldBeTrue();
     }
 
     [Fact]
@@ -334,7 +381,35 @@ public sealed class CopilotProviderTests
         var result = await provider.PingAsync();
 
         result.Success.ShouldBeFalse();
-        result.ErrorMessage!.ShouldContain("not found", Case.Insensitive);
+        result.ErrorMessage!.ShouldContain("copilot executable", Case.Insensitive);
+    }
+
+    [Fact]
+    public void ResolveExecutablePath_prefers_real_cli_over_vscode_server_shim()
+    {
+        var provider = CreateProvider(executableResolver: new CopilotPathResolver(
+        [
+            "/home/test/.vscode-server/data/User/globalStorage/github.copilot-chat/copilotCli/copilot",
+            "/home/test/.nvm/versions/node/v24.14.0/bin/copilot"
+        ]));
+
+        var resolved = provider.ResolveExecutablePath(new CopilotOptions { ExecutablePath = "copilot" }, new Dictionary<string, string?>());
+
+        resolved.ShouldBe("/home/test/.nvm/versions/node/v24.14.0/bin/copilot");
+    }
+
+    [Fact]
+    public async Task PingAsync_uses_vscode_server_shim_when_no_real_cli_is_found()
+    {
+        var provider = CreateProvider(executableResolver: new CopilotPathResolver(
+        [
+            "/home/test/.vscode-server/data/User/globalStorage/github.copilot-chat/copilotCli/copilot"
+        ]));
+
+        var result = await provider.PingAsync();
+
+        result.Success.ShouldBeTrue();
+        result.Version.ShouldBe("copilot 1.0.10");
     }
 
     [Fact]
@@ -549,6 +624,9 @@ public sealed class CopilotProviderTests
 
     private sealed class StubExecutableResolver : CliExecutableResolver
     {
+        public override IReadOnlyList<string> ResolveExecutablePaths(string? executableName, IReadOnlyDictionary<string, string?>? environmentVariables = null)
+            => string.IsNullOrWhiteSpace(executableName) ? [] : [executableName];
+
         public override string? ResolveExecutablePath(string? executableName, IReadOnlyDictionary<string, string?>? environmentVariables = null)
             => executableName;
 
@@ -558,11 +636,26 @@ public sealed class CopilotProviderTests
 
     private sealed class MissingExecutableResolver : CliExecutableResolver
     {
+        public override IReadOnlyList<string> ResolveExecutablePaths(string? executableName, IReadOnlyDictionary<string, string?>? environmentVariables = null)
+            => [];
+
         public override string? ResolveExecutablePath(string? executableName, IReadOnlyDictionary<string, string?>? environmentVariables = null)
             => null;
 
         public override string? ResolveFirstAvailablePath(IEnumerable<string> executableNames, IReadOnlyDictionary<string, string?>? environmentVariables = null)
             => null;
+    }
+
+    private sealed class CopilotPathResolver(IReadOnlyList<string> resolvedPaths) : CliExecutableResolver
+    {
+        public override IReadOnlyList<string> ResolveExecutablePaths(string? executableName, IReadOnlyDictionary<string, string?>? environmentVariables = null)
+            => string.IsNullOrWhiteSpace(executableName) ? [] : resolvedPaths;
+
+        public override string? ResolveExecutablePath(string? executableName, IReadOnlyDictionary<string, string?>? environmentVariables = null)
+            => ResolveExecutablePaths(executableName, environmentVariables).FirstOrDefault();
+
+        public override string? ResolveFirstAvailablePath(IEnumerable<string> executableNames, IReadOnlyDictionary<string, string?>? environmentVariables = null)
+            => resolvedPaths.FirstOrDefault();
     }
 
     private sealed class StubRuntimeEnvironmentResolver : IRuntimeEnvironmentResolver

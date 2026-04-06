@@ -59,7 +59,7 @@ public class CopilotProvider : ICliProvider<CopilotOptions>
     public string Name => "copilot";
 
     /// <inheritdoc />
-    public bool IsAvailable => _executableResolver.ResolveFirstAvailablePath(DefaultExecutableCandidates) is not null;
+    public bool IsAvailable => ResolvePreferredDiscoveredExecutablePath(environmentVariables: null) is not null;
 
     /// <inheritdoc />
     public async IAsyncEnumerable<CliMessage> ExecuteAsync(
@@ -72,7 +72,7 @@ public class CopilotProvider : ICliProvider<CopilotOptions>
 
         var runtimeEnvironment = await ResolveRuntimeEnvironmentAsync(cancellationToken);
         var executablePath = ResolveExecutablePath(options, runtimeEnvironment)
-            ?? throw new FileNotFoundException("Unable to locate the Copilot executable. Set CopilotOptions.ExecutablePath or ensure 'copilot' is on PATH.");
+            ?? throw new FileNotFoundException("Unable to locate a Copilot executable. Install @github/copilot and ensure the CLI or a VS Code Copilot Chat shim is on PATH.");
         var sdkRequest = BuildSdkRequest(options, prompt, executablePath, runtimeEnvironment);
         var poolSettings = ResolvePoolSettings(options);
 
@@ -178,14 +178,14 @@ public class CopilotProvider : ICliProvider<CopilotOptions>
         try
         {
             var runtimeEnvironment = await ResolveRuntimeEnvironmentAsync(cancellationToken);
-            var executablePath = _executableResolver.ResolveFirstAvailablePath(DefaultExecutableCandidates, runtimeEnvironment);
+            var executablePath = ResolvePreferredDiscoveredExecutablePath(runtimeEnvironment);
             if (executablePath is null)
             {
                 return new CliProviderTestResult
                 {
                     ProviderName = Name,
                     Success = false,
-                    ErrorMessage = "Copilot executable was not found. Install @github/copilot or set CopilotOptions.ExecutablePath."
+                    ErrorMessage = "No Copilot executable was found. Install @github/copilot or set CopilotOptions.ExecutablePath to a resolvable CLI path."
                 };
             }
 
@@ -276,10 +276,23 @@ public class CopilotProvider : ICliProvider<CopilotOptions>
     {
         if (!string.IsNullOrWhiteSpace(options.ExecutablePath))
         {
-            return _executableResolver.ResolveExecutablePath(options.ExecutablePath, runtimeEnvironment);
+            return CopilotExecutablePathPolicy.SelectPreferredPath(
+                _executableResolver.ResolveExecutablePaths(options.ExecutablePath, runtimeEnvironment));
         }
 
-        return _executableResolver.ResolveFirstAvailablePath(DefaultExecutableCandidates, runtimeEnvironment);
+        return ResolvePreferredDiscoveredExecutablePath(runtimeEnvironment);
+    }
+
+    private string? ResolvePreferredDiscoveredExecutablePath(
+        IReadOnlyDictionary<string, string?>? environmentVariables)
+    {
+        var resolvedPaths = new List<string>();
+        foreach (var executableCandidate in DefaultExecutableCandidates)
+        {
+            resolvedPaths.AddRange(_executableResolver.ResolveExecutablePaths(executableCandidate, environmentVariables));
+        }
+
+        return CopilotExecutablePathPolicy.SelectPreferredPath(resolvedPaths);
     }
 
     private static void ValidateOptions(CopilotOptions options)
@@ -375,13 +388,9 @@ public class CopilotProvider : ICliProvider<CopilotOptions>
                     ["reuse_key"] = requestedSessionId ?? sessionId
                 }),
             CopilotSdkStreamEventType.TextDelta when !string.IsNullOrEmpty(eventData.Content) =>
-                CreateMessage("assistant", new Dictionary<string, object?>
-                {
-                    ["type"] = "assistant",
-                    ["role"] = "assistant",
-                    ["session_id"] = sessionId,
-                    ["text"] = eventData.Content
-                }),
+                CreateAssistantMessage(eventData.Content, sessionId, isAuthoritativeSnapshot: false),
+            CopilotSdkStreamEventType.AssistantSnapshot when !string.IsNullOrEmpty(eventData.Content) =>
+                CreateAssistantMessage(eventData.Content, sessionId, isAuthoritativeSnapshot: true),
             CopilotSdkStreamEventType.ReasoningDelta when !string.IsNullOrEmpty(eventData.Content) =>
                 CreateMessage("reasoning", new Dictionary<string, object?>
                 {
@@ -449,6 +458,21 @@ public class CopilotProvider : ICliProvider<CopilotOptions>
     private static bool IsTerminalMessage(string type)
         => string.Equals(type, "result", StringComparison.OrdinalIgnoreCase)
            || string.Equals(type, "error", StringComparison.OrdinalIgnoreCase);
+
+    private static CliMessage CreateAssistantMessage(
+        string content,
+        string? sessionId,
+        bool isAuthoritativeSnapshot)
+    {
+        return CreateMessage("assistant", new Dictionary<string, object?>
+        {
+            ["type"] = "assistant",
+            ["role"] = "assistant",
+            ["session_id"] = sessionId,
+            ["text"] = content,
+            ["is_authoritative_snapshot"] = isAuthoritativeSnapshot
+        });
+    }
 
     private CliPoolSettings ResolvePoolSettings(CopilotOptions options)
     {

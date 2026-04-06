@@ -136,9 +136,9 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
             case AssistantMessageDeltaEvent:
                 break;
 
-            case AssistantMessageEvent messageEvent when !sawDelta && !string.IsNullOrEmpty(messageEvent.Data.Content):
+            case AssistantMessageEvent messageEvent when !string.IsNullOrEmpty(messageEvent.Data.Content):
                 events.Add(new CopilotSdkStreamEvent(
-                    CopilotSdkStreamEventType.TextDelta,
+                    CopilotSdkStreamEventType.AssistantSnapshot,
                     SessionId: sessionId,
                     Content: messageEvent.Data.Content));
                 break;
