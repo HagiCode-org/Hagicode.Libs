@@ -31,6 +31,21 @@ public sealed class CliExecutableResolverTests
     }
 
     [Fact]
+    public void ResolveExecutablePaths_returns_all_distinct_matches_in_probe_order()
+    {
+        using var sandbox = new DirectorySandbox();
+        var resolver = new CliExecutableResolver();
+        var duplicatePath = string.Join(Path.PathSeparator, [sandbox.RootPath, sandbox.RootPath]);
+        var executable = sandbox.CreateFile("alpha");
+
+        var resolved = resolver.ResolveExecutablePaths(
+            "alpha",
+            new Dictionary<string, string?> { ["PATH"] = duplicatePath });
+
+        resolved.ShouldBe([executable]);
+    }
+
+    [Fact]
     public void IsExecutableAvailable_returns_false_when_missing()
     {
         using var sandbox = new DirectorySandbox();

@@ -33,25 +33,49 @@ public class CliExecutableResolver
         string? executableName,
         IReadOnlyDictionary<string, string?>? environmentVariables = null)
     {
+        return ResolveExecutablePaths(executableName, environmentVariables).FirstOrDefault();
+    }
+
+    /// <summary>
+    /// Resolves all matching executable paths in probe order.
+    /// </summary>
+    /// <param name="executableName">The executable name or path.</param>
+    /// <param name="environmentVariables">Optional environment variables to search.</param>
+    /// <returns>The ordered resolved absolute paths.</returns>
+    public virtual IReadOnlyList<string> ResolveExecutablePaths(
+        string? executableName,
+        IReadOnlyDictionary<string, string?>? environmentVariables = null)
+    {
         if (string.IsNullOrWhiteSpace(executableName))
         {
-            return null;
+            return [];
         }
 
         if (ShouldResolveDirectly(executableName))
         {
-            return ResolveDirectPath(executableName);
+            var directPath = ResolveDirectPath(executableName);
+            return directPath is null ? [] : [directPath];
         }
+
+        var resolvedPaths = new List<string>();
+        var comparer = _isWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var seen = new HashSet<string>(comparer);
 
         foreach (var candidate in EnumerateProbeCandidates(executableName, environmentVariables))
         {
-            if (File.Exists(candidate))
+            if (!File.Exists(candidate))
             {
-                return Path.GetFullPath(candidate);
+                continue;
+            }
+
+            var fullPath = Path.GetFullPath(candidate);
+            if (seen.Add(fullPath))
+            {
+                resolvedPaths.Add(fullPath);
             }
         }
 
-        return null;
+        return resolvedPaths;
     }
 
     /// <summary>
