@@ -48,6 +48,7 @@ internal sealed class CodexExecTransport : ICliTransport
             throw new InvalidDataException("The Codex prompt payload is missing an 'input' string value.");
         }
 
+        // The shared process contract owns stdin encoding so Windows prompt delivery stays UTF-8-safe.
         await handle.StandardInput.WriteAsync(prompt.AsMemory(), cancellationToken);
         await handle.StandardInput.FlushAsync(cancellationToken);
         handle.StandardInput.Close();

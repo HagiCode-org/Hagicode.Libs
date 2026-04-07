@@ -18,6 +18,7 @@ namespace HagiCode.Libs.Providers.ClaudeCode;
 public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
 {
     private static readonly string[] DefaultExecutableCandidates = ["claude", "claude-code"];
+    private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
     private readonly CliExecutableResolver _executableResolver;
     private readonly CliProcessManager _processManager;
     private readonly IRuntimeEnvironmentResolver? _runtimeEnvironmentResolver;
@@ -68,7 +69,9 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
             ExecutablePath = executablePath,
             Arguments = BuildCommandArguments(options),
             WorkingDirectory = options.WorkingDirectory,
-            EnvironmentVariables = BuildEnvironmentVariables(options, runtimeEnvironment)
+            EnvironmentVariables = BuildEnvironmentVariables(options, runtimeEnvironment),
+            InputEncoding = Utf8NoBom,
+            OutputEncoding = Utf8NoBom
         };
 
         var poolSettings = ResolvePoolSettings(options);
