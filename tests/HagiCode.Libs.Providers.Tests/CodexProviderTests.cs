@@ -20,6 +20,8 @@ public sealed class CodexProviderTests
         "Reconnecting... 1/5 (stream disconnected before completion: error sending request for url https://api.example.com/v1)";
     private const string RetryableContentFilterDisconnectMessage =
         "Reconnecting... 1/5 (stream disconnected before completion: Incomplete response returned, reason: content_filter)";
+    private const string RetryableServerErrorDisconnectMessage =
+        "Reconnecting... 1/5 (stream disconnected before completion: The server had an error processing your request. Sorry about that! Please try again.)";
     private const string RetryableGenericRefusalMessage = "I'm sorry, but I cannot assist with that request.";
     private static readonly string[] CodexExecutableCandidates = ["codex", "codex-cli"];
 
@@ -320,10 +322,25 @@ public sealed class CodexProviderTests
         contentFilterMessage.ShouldBe(RetryableContentFilterDisconnectMessage);
 
         CodexProvider.TryExtractTerminalMessage(
+                JsonSerializer.SerializeToElement(new { type = "turn.failed", error = new { message = RetryableServerErrorDisconnectMessage } }),
+                out var serverErrorMessage)
+            .ShouldBeTrue();
+        serverErrorMessage.ShouldBe(RetryableServerErrorDisconnectMessage);
+
+        CodexProvider.TryExtractTerminalMessage(
                 JsonSerializer.SerializeToElement(new { type = "turn.completed", result = RetryableGenericRefusalMessage }),
                 out var refusalMessage)
             .ShouldBeTrue();
         refusalMessage.ShouldBe(RetryableGenericRefusalMessage);
+    }
+
+    [Fact]
+    public void TryExtractRetryableTerminalSummary_recognizes_new_server_error_reconnect_prefix()
+    {
+        CodexProvider.TryExtractRetryableTerminalSummary(RetryableServerErrorDisconnectMessage, out var retrySummary)
+            .ShouldBeTrue();
+
+        retrySummary.ShouldBe(RetryableServerErrorDisconnectMessage);
     }
 
     [Fact]
@@ -333,7 +350,7 @@ public sealed class CodexProviderTests
         [
             [
                 new CliMessage("thread.started", JsonSerializer.SerializeToElement(new { type = "thread.started", thread_id = "thread-retry" })),
-                new CliMessage("turn.failed", JsonSerializer.SerializeToElement(new { type = "turn.failed", error = new { message = RetryableTransportDisconnectMessage } }))
+                new CliMessage("turn.failed", JsonSerializer.SerializeToElement(new { type = "turn.failed", error = new { message = RetryableServerErrorDisconnectMessage } }))
             ],
             [
                 new CliMessage("turn.completed", JsonSerializer.SerializeToElement(new { type = "turn.completed" }))

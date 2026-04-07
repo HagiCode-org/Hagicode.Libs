@@ -20,7 +20,14 @@ public class CodexProvider : ICliProvider<CodexOptions>
 {
     private const string InternalOriginatorEnvironmentVariable = "CODEX_INTERNAL_ORIGINATOR_OVERRIDE";
     private const string InternalOriginatorValue = "codex_sdk_csharp";
+    private const string RetryableGenericRefusalMessage = "I'm sorry, but I cannot assist with that request.";
     private static readonly string[] DefaultExecutableCandidates = ["codex", "codex-cli"];
+    private static readonly string[] RetryableReconnectMarkers =
+    [
+        "stream disconnected before completion: error sending request for url",
+        "stream disconnected before completion: Incomplete response returned, reason: content_filter",
+        "stream disconnected before completion: The server had an error processing your request. Sorry about that!"
+    ];
 
     private readonly CliExecutableResolver _executableResolver;
     private readonly CliProcessManager _processManager;
@@ -307,6 +314,29 @@ public class CodexProvider : ICliProvider<CodexOptions>
         if (string.Equals(messageType, "error", StringComparison.OrdinalIgnoreCase))
         {
             return TryGetErrorMessage(content, out terminalMessage);
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Matches terminal messages that should enter the existing bounded retry flow.
+    /// </summary>
+    public static bool TryExtractRetryableTerminalSummary(string? terminalMessage, out string retrySummary)
+    {
+        retrySummary = string.Empty;
+        var normalized = ArgumentValueNormalizer.NormalizeOptionalValue(terminalMessage);
+        if (normalized is null)
+        {
+            return false;
+        }
+
+        if (string.Equals(normalized, RetryableGenericRefusalMessage, StringComparison.Ordinal) ||
+            (normalized.Contains("Reconnecting...", StringComparison.Ordinal) &&
+             RetryableReconnectMarkers.Any(marker => normalized.Contains(marker, StringComparison.Ordinal))))
+        {
+            retrySummary = normalized;
+            return true;
         }
 
         return false;
