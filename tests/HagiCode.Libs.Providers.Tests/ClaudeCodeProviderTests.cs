@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Text.Json;
 using Shouldly;
 using HagiCode.Libs.Core.Discovery;
@@ -127,6 +128,22 @@ public sealed class ClaudeCodeProviderTests
         messages.Select(static message => message.Type).ShouldBe(["assistant", "result"]);
         provider.SentMessages.ShouldHaveSingleItem();
         provider.SentMessages[0].Content.GetProperty("message").GetProperty("content").GetString().ShouldBe("hello");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_uses_utf8_without_bom_for_stream_json_transport()
+    {
+        var provider = CreateProvider();
+
+        await foreach (var _ in provider.ExecuteAsync(new ClaudeCodeOptions(), "hello"))
+        {
+        }
+
+        provider.LastStartContext.ShouldNotBeNull();
+        provider.LastStartContext.InputEncoding.WebName.ShouldBe(Encoding.UTF8.WebName);
+        provider.LastStartContext.InputEncoding.GetPreamble().ShouldBeEmpty();
+        provider.LastStartContext.OutputEncoding.WebName.ShouldBe(Encoding.UTF8.WebName);
+        provider.LastStartContext.OutputEncoding.GetPreamble().ShouldBeEmpty();
     }
 
     [Fact]

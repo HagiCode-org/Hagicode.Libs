@@ -1,3 +1,4 @@
+using System.Text;
 using HagiCode.Libs.Core.Process;
 using Shouldly;
 
@@ -61,7 +62,12 @@ public sealed class CliProcessManagerTests
         startInfo.RedirectStandardInput.ShouldBeTrue();
         startInfo.RedirectStandardOutput.ShouldBeTrue();
         startInfo.RedirectStandardError.ShouldBeTrue();
+        startInfo.StandardInputEncoding.ShouldNotBeNull();
+        startInfo.StandardInputEncoding.WebName.ShouldBe(Encoding.UTF8.WebName);
         startInfo.StandardOutputEncoding.ShouldNotBeNull();
+        startInfo.StandardOutputEncoding.WebName.ShouldBe(Encoding.UTF8.WebName);
+        startInfo.StandardErrorEncoding.ShouldNotBeNull();
+        startInfo.StandardErrorEncoding.WebName.ShouldBe(Encoding.UTF8.WebName);
     }
 
     [Fact]
@@ -76,6 +82,8 @@ public sealed class CliProcessManagerTests
 
         startInfo.FileName.ShouldBe("cmd.exe");
         startInfo.ArgumentList.ShouldBe(["/c", @"C:\tools\npm.cmd", "install", "--global", "@openai/codex"]);
+        startInfo.StandardInputEncoding.ShouldNotBeNull();
+        startInfo.StandardInputEncoding.WebName.ShouldBe(Encoding.UTF8.WebName);
     }
 
     private static ProcessStartContext CreateShellContext(string command)

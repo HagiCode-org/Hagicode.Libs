@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Text.Json;
 using Shouldly;
 using HagiCode.Libs.Core.Discovery;
@@ -35,9 +37,14 @@ public sealed class CodexProviderTests
             ThreadId = "thread-123",
             SkipGitRepositoryCheck = true,
             AddDirectories = ["/tmp/project", "/tmp/shared"],
+            ConfigOverrides =
+            [
+                "model_reasoning_effort=\"high\"",
+                "sandbox_workspace_write.network_access=true",
+                "web_search=\"live\""
+            ],
             ExtraArgs = new Dictionary<string, string?>
             {
-                ["config"] = "web_search=\"disabled\"",
                 ["full-auto"] = null
             }
         });
@@ -64,7 +71,11 @@ public sealed class CodexProviderTests
             "resume",
             "thread-123",
             "--config",
-            "web_search=\"disabled\"",
+            "model_reasoning_effort=\"high\"",
+            "--config",
+            "sandbox_workspace_write.network_access=true",
+            "--config",
+            "web_search=\"live\"",
             "--full-auto"
         ]);
     }
@@ -82,9 +93,13 @@ public sealed class CodexProviderTests
             Profile = "  team alpha  ",
             ThreadId = "  thread-456  ",
             AddDirectories = ["  /tmp/shared repo  ", "   "],
+            ConfigOverrides =
+            [
+                "  model_reasoning_effort=\"high\"  ",
+                "  web_search=\"disabled\"  "
+            ],
             ExtraArgs = new Dictionary<string, string?>
             {
-                ["config"] = "  web_search=\"disabled\"  ",
                 ["notes"] = "  keep internal  spaces  ",
                 ["ignored"] = "   "
             }
@@ -107,10 +122,55 @@ public sealed class CodexProviderTests
             "resume",
             "thread-456",
             "--config",
+            "model_reasoning_effort=\"high\"",
+            "--config",
             "web_search=\"disabled\"",
             "--notes",
             "keep internal  spaces"
         ]);
+    }
+
+    [Fact]
+    public void BuildCommandArguments_splits_legacy_multiline_config_into_discrete_entries()
+    {
+        var provider = CreateProvider();
+
+        var arguments = provider.BuildCommandArguments(new CodexOptions
+        {
+            ExtraArgs = new Dictionary<string, string?>
+            {
+                ["config"] = "model_reasoning_effort=\"high\"\r\nsandbox_workspace_write.network_access=true\nweb_search=\"live\""
+            }
+        });
+
+        arguments.ShouldBe(
+        [
+            "exec",
+            "--experimental-json",
+            "--config",
+            "model_reasoning_effort=\"high\"",
+            "--config",
+            "sandbox_workspace_write.network_access=true",
+            "--config",
+            "web_search=\"live\""
+        ]);
+    }
+
+    [Fact]
+    public void BuildCommandArguments_rejects_legacy_config_without_value()
+    {
+        var provider = CreateProvider();
+
+        var exception = Should.Throw<InvalidOperationException>(() => provider.BuildCommandArguments(new CodexOptions
+        {
+            ExtraArgs = new Dictionary<string, string?>
+            {
+                ["config"] = null
+            }
+        }));
+
+        exception.Message.ShouldContain("ConfigOverrides");
+        exception.Message.ShouldContain("config");
     }
 
     [Theory]
@@ -161,6 +221,48 @@ public sealed class CodexProviderTests
         messages.Select(static message => message.Type).ShouldBe(["item.completed", "turn.completed"]);
         provider.SentMessages.ShouldHaveSingleItem();
         provider.SentMessages[0].Content.GetProperty("input").GetString().ShouldBe("hello");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_delivers_chinese_prompt_with_default_utf8_input_encoding()
+    {
+        const string chinesePrompt = "请用中文解释 UTF-8 输入。";
+        var provider = CreateProvider();
+
+        await DrainCliMessagesAsync(provider.ExecuteAsync(
+            new CodexOptions
+            {
+                WorkingDirectory = "/tmp/project"
+            },
+            chinesePrompt));
+
+        provider.LastStartContext.ShouldNotBeNull();
+        provider.LastStartContext.InputEncoding.WebName.ShouldBe(Encoding.UTF8.WebName);
+        provider.SentMessages.ShouldHaveSingleItem();
+        provider.SentMessages[0].Content.GetProperty("input").GetString().ShouldBe(chinesePrompt);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_windows_cmd_shim_path_keeps_utf8_input_encoding_for_chinese_prompt()
+    {
+        const string chinesePrompt = "继续用中文回复。";
+        var processManager = new WindowsBatchCliProcessManager(@"C:\tools\codex.cmd");
+        var provider = CreateWindowsFocusedProvider(processManager);
+
+        await DrainCliMessagesAsync(provider.ExecuteAsync(
+            new CodexOptions
+            {
+                ExecutablePath = "codex",
+                WorkingDirectory = @"C:\workspace\project"
+            },
+            chinesePrompt));
+
+        provider.LastProcessStartInfo.ShouldNotBeNull();
+        provider.LastProcessStartInfo.FileName.ShouldBe("cmd.exe");
+        provider.LastProcessStartInfo.StandardInputEncoding.ShouldNotBeNull();
+        provider.LastProcessStartInfo.StandardInputEncoding.WebName.ShouldBe(Encoding.UTF8.WebName);
+        provider.SentMessages.ShouldHaveSingleItem();
+        provider.SentMessages[0].Content.GetProperty("input").GetString().ShouldBe(chinesePrompt);
     }
 
     [Fact]
@@ -584,6 +686,18 @@ public sealed class CodexProviderTests
             scripts);
     }
 
+    private static WindowsFocusedCodexProvider CreateWindowsFocusedProvider(
+        CliProcessManager processManager,
+        IReadOnlyList<IReadOnlyList<CliMessage>>? messageBatches = null)
+    {
+        return new WindowsFocusedCodexProvider(
+            new StubExecutableResolver(),
+            processManager,
+            new StubRuntimeEnvironmentResolver(),
+            null,
+            messageBatches);
+    }
+
     private static async Task DrainCliMessagesAsync(IAsyncEnumerable<CliMessage> stream)
     {
         await foreach (var _ in stream)
@@ -604,7 +718,7 @@ public sealed class CodexProviderTests
         public List<CliMessage> SentMessages { get; } = [];
         private readonly Queue<IReadOnlyList<CliMessage>> _messageBatches = new(messageBatches ?? [DefaultBatch]);
 
-        private static IReadOnlyList<CliMessage> DefaultBatch =>
+        internal static IReadOnlyList<CliMessage> DefaultBatch =>
         [
             new CliMessage(
                 "item.completed",
@@ -692,6 +806,29 @@ public sealed class CodexProviderTests
         {
             StartContexts.Add(startContext);
             return new CoordinatedTransport(_scripts.Dequeue());
+        }
+    }
+
+    private sealed class WindowsFocusedCodexProvider(
+        CliExecutableResolver executableResolver,
+        CliProcessManager processManager,
+        IRuntimeEnvironmentResolver runtimeEnvironmentResolver,
+        ICliExecutionFacade? executionFacade,
+        IReadOnlyList<IReadOnlyList<CliMessage>>? messageBatches)
+        : CodexProvider(executableResolver, processManager, runtimeEnvironmentResolver, executionFacade)
+    {
+        private readonly CliProcessManager _processManager = processManager;
+        private readonly Queue<IReadOnlyList<CliMessage>> _messageBatches = new(messageBatches ?? [TestCodexProvider.DefaultBatch]);
+
+        public ProcessStartInfo? LastProcessStartInfo { get; private set; }
+
+        public List<CliMessage> SentMessages { get; } = [];
+
+        protected override ICliTransport CreateTransport(ProcessStartContext startContext)
+        {
+            LastProcessStartInfo = _processManager.CreateStartInfo(startContext);
+            var batch = _messageBatches.Count > 0 ? _messageBatches.Dequeue() : TestCodexProvider.DefaultBatch;
+            return new StubTransport(SentMessages, batch);
         }
     }
 
@@ -854,6 +991,14 @@ public sealed class CodexProviderTests
         {
             return Task.FromResult(ExecuteResult);
         }
+    }
+
+    private sealed class WindowsBatchCliProcessManager(string resolvedExecutablePath) : CliProcessManager
+    {
+        protected override bool IsWindows() => true;
+
+        protected override string ResolveExecutablePath(string executablePath, IReadOnlyDictionary<string, string?>? environmentVariables)
+            => resolvedExecutablePath;
     }
 
     private static bool IsRealCliTestsEnabled()

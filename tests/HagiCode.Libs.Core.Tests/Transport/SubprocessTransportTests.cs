@@ -35,6 +35,32 @@ public sealed class SubprocessTransportTests
     }
 
     [Fact]
+    public async Task SubprocessTransport_tolerates_utf8_bom_prefix_on_first_output_line()
+    {
+        var manager = new CliProcessManager();
+        await using var transport = new SubprocessTransport(manager, new ProcessStartContext
+        {
+            ExecutablePath = "/bin/sh",
+            Arguments =
+            [
+                "-lc",
+                "printf '\\357\\273\\277{\"type\":\"assistant\",\"text\":\"hello\"}\\n'; printf '{\"type\":\"result\",\"done\":true}\\n'"
+            ]
+        });
+
+        await transport.ConnectAsync();
+
+        var messages = new List<CliMessage>();
+        await foreach (var message in transport.ReceiveAsync())
+        {
+            messages.Add(message);
+        }
+
+        messages.Select(static message => message.Type).ShouldBe(["assistant", "result"]);
+        messages[0].Content.GetProperty("text").GetString().ShouldBe("hello");
+    }
+
+    [Fact]
     public async Task SubprocessTransport_rejects_send_before_connect()
     {
         var manager = new CliProcessManager();
