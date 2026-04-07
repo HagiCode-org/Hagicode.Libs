@@ -58,6 +58,8 @@ Console.WriteLine(result.StandardOutput);
 
 For long-running or interactive commands, call `ExecuteStreamingAsync()` to receive stdout and stderr events followed by a terminal `CliExecutionResult` envelope.
 
+Redirected stdin, stdout, and stderr default to UTF-8 unless the caller explicitly overrides `CliExecutionRequest.InputEncoding` or `OutputEncoding`. This is the shared contract used by providers such as Codex so Windows prompt delivery keeps non-ASCII input valid without provider-local code-page workarounds.
+
 ## Adoption boundaries
 
 - Use `CliExecutionFacade` when you want typed requests, policy evaluation, normalized diagnostics, and structured success/failure/timeout handling.

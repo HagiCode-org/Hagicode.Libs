@@ -32,6 +32,11 @@ public sealed record CliExecutionContext
     public required IReadOnlyDictionary<string, string?> EnvironmentVariables { get; init; }
 
     /// <summary>
+    /// Gets the input encoding.
+    /// </summary>
+    public required System.Text.Encoding InputEncoding { get; init; }
+
+    /// <summary>
     /// Gets the output encoding.
     /// </summary>
     public required System.Text.Encoding OutputEncoding { get; init; }
@@ -87,6 +92,7 @@ public sealed record CliExecutionContext
             Arguments = arguments,
             WorkingDirectory = request.WorkingDirectory,
             EnvironmentVariables = mergedEnvironment,
+            InputEncoding = request.InputEncoding,
             OutputEncoding = request.OutputEncoding,
             Timeout = request.Timeout,
             Mode = request.Options.Mode,
@@ -107,6 +113,7 @@ public sealed record CliExecutionContext
             Arguments = Arguments,
             WorkingDirectory = WorkingDirectory,
             EnvironmentVariables = EnvironmentVariables,
+            InputEncoding = InputEncoding,
             OutputEncoding = OutputEncoding,
             Timeout = Timeout
         };

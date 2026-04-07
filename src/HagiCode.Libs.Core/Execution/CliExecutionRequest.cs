@@ -28,6 +28,11 @@ public sealed record CliExecutionRequest
     public IReadOnlyDictionary<string, string?>? EnvironmentVariables { get; init; }
 
     /// <summary>
+    /// Gets or sets the input encoding for redirected streams.
+    /// </summary>
+    public Encoding InputEncoding { get; init; } = Encoding.UTF8;
+
+    /// <summary>
     /// Gets or sets the output encoding for redirected streams.
     /// </summary>
     public Encoding OutputEncoding { get; init; } = Encoding.UTF8;

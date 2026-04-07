@@ -29,6 +29,11 @@ public sealed record ProcessStartContext
     public IReadOnlyDictionary<string, string?>? EnvironmentVariables { get; init; }
 
     /// <summary>
+    /// Gets or sets the encoding used for redirected input streams.
+    /// </summary>
+    public Encoding InputEncoding { get; init; } = Encoding.UTF8;
+
+    /// <summary>
     /// Gets or sets the encoding used for redirected output streams.
     /// </summary>
     public Encoding OutputEncoding { get; init; } = Encoding.UTF8;

@@ -46,6 +46,7 @@ public class CliProcessManager
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            StandardInputEncoding = context.InputEncoding,
             StandardOutputEncoding = context.OutputEncoding,
             StandardErrorEncoding = context.OutputEncoding,
             UseShellExecute = false,

@@ -77,6 +77,7 @@ public sealed class SubprocessTransport : ICliTransport
                 continue;
             }
 
+            line = TrimUtf8Bom(line);
             using var document = JsonDocument.Parse(line);
             var root = document.RootElement.Clone();
             if (!root.TryGetProperty("type", out var typeElement) || typeElement.ValueKind != JsonValueKind.String)
@@ -168,5 +169,12 @@ public sealed class SubprocessTransport : ICliTransport
         }
 
         return System.Text.Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    private static string TrimUtf8Bom(string line)
+    {
+        return line.Length > 0 && line[0] == '\uFEFF'
+            ? line[1..]
+            : line;
     }
 }
