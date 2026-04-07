@@ -75,6 +75,12 @@ public sealed record CodexOptions
     public IReadOnlyDictionary<string, string?> EnvironmentVariables { get; init; } = new Dictionary<string, string?>();
 
     /// <summary>
+    /// Gets or sets discrete Codex config override entries.
+    /// Each item should represent exactly one TOML assignment and will be emitted as its own <c>--config</c>.
+    /// </summary>
+    public IReadOnlyList<string> ConfigOverrides { get; init; } = [];
+
+    /// <summary>
     /// Gets or sets extra CLI arguments expressed as flag/value pairs.
     /// A <see langword="null" /> value adds a switch without a value, while non-null values are boundary-trimmed and ignored when empty after trimming.
     /// </summary>

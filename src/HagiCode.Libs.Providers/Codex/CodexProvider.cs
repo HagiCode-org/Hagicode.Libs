@@ -98,6 +98,7 @@ public class CodexProvider : ICliProvider<CodexOptions>
                 options.ApprovalPolicy,
                 options.SkipGitRepositoryCheck,
                 options.AddDirectories,
+                options.ConfigOverrides,
                 options.EnvironmentVariables,
                 options.ExtraArgs,
                 runtimeEnvironment),
@@ -369,8 +370,23 @@ public class CodexProvider : ICliProvider<CodexOptions>
             arguments.AddRange(["resume", threadId]);
         }
 
+        foreach (var configOverride in NormalizeConfigOverrides(options.ConfigOverrides, "CodexOptions.ConfigOverrides"))
+        {
+            arguments.AddRange(["--config", configOverride]);
+        }
+
         foreach (var extraArgument in options.ExtraArgs)
         {
+            if (IsConfigArgument(extraArgument.Key))
+            {
+                foreach (var configOverride in NormalizeLegacyConfigOverrides(extraArgument.Value))
+                {
+                    arguments.AddRange(["--config", configOverride]);
+                }
+
+                continue;
+            }
+
             var normalizedValue = ArgumentValueNormalizer.NormalizeOptionalValue(extraArgument.Value);
             if (extraArgument.Value is not null && normalizedValue is null)
             {
@@ -388,6 +404,61 @@ public class CodexProvider : ICliProvider<CodexOptions>
         }
 
         return arguments;
+    }
+
+    private static IEnumerable<string> NormalizeConfigOverrides(
+        IReadOnlyList<string> configOverrides,
+        string source)
+    {
+        foreach (var configOverride in configOverrides)
+        {
+            var normalizedValue = ArgumentValueNormalizer.NormalizeOptionalValue(configOverride);
+            if (normalizedValue is null)
+            {
+                continue;
+            }
+
+            ValidateConfigOverrideEntry(normalizedValue, source);
+            yield return normalizedValue;
+        }
+    }
+
+    private static IEnumerable<string> NormalizeLegacyConfigOverrides(string? rawValue)
+    {
+        if (rawValue is null)
+        {
+            throw new InvalidOperationException(
+                "CodexOptions.ExtraArgs[\"config\"] must contain a TOML assignment. Use CodexOptions.ConfigOverrides for repeated entries.");
+        }
+
+        foreach (var entry in rawValue.Split(["\r\n", "\n", "\r"], StringSplitOptions.None))
+        {
+            var normalizedEntry = ArgumentValueNormalizer.NormalizeOptionalValue(entry);
+            if (normalizedEntry is null)
+            {
+                continue;
+            }
+
+            ValidateConfigOverrideEntry(
+                normalizedEntry,
+                "CodexOptions.ExtraArgs[\"config\"]");
+            yield return normalizedEntry;
+        }
+    }
+
+    private static bool IsConfigArgument(string argumentKey)
+    {
+        return string.Equals(argumentKey, "config", StringComparison.Ordinal)
+               || string.Equals(argumentKey, "--config", StringComparison.Ordinal);
+    }
+
+    private static void ValidateConfigOverrideEntry(string entry, string source)
+    {
+        if (entry.IndexOf('\uFEFF') >= 0 || entry.Any(char.IsControl))
+        {
+            throw new InvalidOperationException(
+                $"{source} contains an invalid config override. Each --config entry must be a single TOML assignment without BOM or control characters.");
+        }
     }
 
     internal virtual IReadOnlyDictionary<string, string?> BuildEnvironmentVariables(
