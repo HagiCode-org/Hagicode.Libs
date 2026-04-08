@@ -23,6 +23,9 @@ internal sealed class CliRuntimePool<TResource> : IAsyncDisposable
         try
         {
             await ReapIdleEntriesUnsafeAsync(request.ProviderName).ConfigureAwait(false);
+            var leaseKind = CliRuntimePoolLeaseKind.ColdStart;
+            // Logical session identity keeps keyed callers serialized, but the
+            // compatibility fingerprint still decides whether warm reuse is safe.
             if (!string.IsNullOrWhiteSpace(request.LogicalSessionKey) &&
                 _keyIndex.TryGetValue(request.LogicalSessionKey, out var existingEntry))
             {
@@ -31,7 +34,12 @@ internal sealed class CliRuntimePool<TResource> : IAsyncDisposable
                     existingEntry.RefreshFingerprint(request.CompatibilityFingerprint);
                     existingEntry.IsLeased = true;
                     existingEntry.Touch();
-                    return new CliRuntimePoolLease<TResource>(this, existingEntry, true);
+                    return new CliRuntimePoolLease<TResource>(this, existingEntry, CliRuntimePoolLeaseKind.WarmReuse);
+                }
+
+                if (HasCompatibilityMismatch(existingEntry, request))
+                {
+                    leaseKind = CliRuntimePoolLeaseKind.CompatibilityReplacement;
                 }
 
                 await RemoveEntryUnsafeAsync(existingEntry).ConfigureAwait(false);
@@ -44,7 +52,7 @@ internal sealed class CliRuntimePool<TResource> : IAsyncDisposable
             createdEntry.IsLeased = true;
             _entries.Add(createdEntry);
             IndexEntry(createdEntry);
-            return new CliRuntimePoolLease<TResource>(this, createdEntry, false);
+            return new CliRuntimePoolLease<TResource>(this, createdEntry, leaseKind);
         }
         finally
         {
@@ -193,8 +201,14 @@ internal sealed class CliRuntimePool<TResource> : IAsyncDisposable
     {
         return string.Equals(entry.ProviderName, request.ProviderName, StringComparison.Ordinal)
                && !entry.IsFaulted
-               && (!string.IsNullOrWhiteSpace(request.LogicalSessionKey)
-                   || string.Equals(entry.CompatibilityFingerprint, request.CompatibilityFingerprint, StringComparison.Ordinal));
+               && string.Equals(entry.CompatibilityFingerprint, request.CompatibilityFingerprint, StringComparison.Ordinal);
+    }
+
+    private static bool HasCompatibilityMismatch(CliRuntimePoolEntry<TResource> entry, CliRuntimePoolRequest request)
+    {
+        return string.Equals(entry.ProviderName, request.ProviderName, StringComparison.Ordinal)
+               && !entry.IsFaulted
+               && !string.Equals(entry.CompatibilityFingerprint, request.CompatibilityFingerprint, StringComparison.Ordinal);
     }
 
     private async Task EnforceCapacityUnsafeAsync(string providerName, CliPoolSettings settings)

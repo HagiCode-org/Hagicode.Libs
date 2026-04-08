@@ -6,16 +6,18 @@ internal sealed class CliRuntimePoolLease<TResource> : IAsyncDisposable
     private readonly CliRuntimePool<TResource> _pool;
     private bool _disposed;
 
-    internal CliRuntimePoolLease(CliRuntimePool<TResource> pool, CliRuntimePoolEntry<TResource> entry, bool isWarmLease)
+    internal CliRuntimePoolLease(CliRuntimePool<TResource> pool, CliRuntimePoolEntry<TResource> entry, CliRuntimePoolLeaseKind kind)
     {
         _pool = pool;
         Entry = entry;
-        IsWarmLease = isWarmLease;
+        Kind = kind;
     }
 
     public CliRuntimePoolEntry<TResource> Entry { get; }
 
-    public bool IsWarmLease { get; }
+    public CliRuntimePoolLeaseKind Kind { get; }
+
+    public bool IsWarmLease => Kind == CliRuntimePoolLeaseKind.WarmReuse;
 
     public bool IsFaulted { get; set; }
 
