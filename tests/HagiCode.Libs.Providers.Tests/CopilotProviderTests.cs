@@ -277,6 +277,47 @@ public sealed class CopilotProviderTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_restarts_runtime_when_same_session_id_changes_permissions()
+    {
+        var gateway = new StubCopilotSdkGateway(
+        [
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.TextDelta, Content: "pong"),
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.Completed)
+        ],
+        sessionId: "session-key");
+        var provider = CreateProvider(gateway: gateway);
+        var secondMessages = new List<CliMessage>();
+
+        await foreach (var _ in provider.ExecuteAsync(
+                           new CopilotOptions
+                           {
+                               SessionId = "session-key"
+                           },
+                           "first"))
+        {
+        }
+
+        await foreach (var message in provider.ExecuteAsync(
+                           new CopilotOptions
+                           {
+                               SessionId = "session-key",
+                               Permissions = new CopilotPermissionOptions
+                               {
+                                   AllowAllTools = true
+                               }
+                           },
+                           "second"))
+        {
+            secondMessages.Add(message);
+        }
+
+        gateway.CreatedRuntimeCount.ShouldBe(2);
+        gateway.SendPromptCallCount.ShouldBe(2);
+        secondMessages.First().Type.ShouldBe("session.started");
+        secondMessages.First().Content.GetProperty("session_id").GetString().ShouldBe("session-key");
+    }
+
+    [Fact]
     public async Task ExecuteAsync_does_not_reuse_warm_copilot_runtime_for_anonymous_requests_in_same_working_directory()
     {
         var gateway = new StubCopilotSdkGateway(

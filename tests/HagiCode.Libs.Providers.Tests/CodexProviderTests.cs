@@ -22,7 +22,12 @@ public sealed class CodexProviderTests
         "Reconnecting... 1/5 (stream disconnected before completion: Incomplete response returned, reason: content_filter)";
     private const string RetryableServerErrorDisconnectMessage =
         "Reconnecting... 1/5 (stream disconnected before completion: The server had an error processing your request. Sorry about that! Please try again.)";
+    private const string RetryableGenericReconnectMessage =
+        "Reconnecting... 1/5 (stream disconnected before completion: temporary upstream overload)";
     private const string RetryableGenericRefusalMessage = "I'm sorry, but I cannot assist with that request.";
+    private const string RetryableGenericRefusalWithSuffixMessage = "I'm sorry, but I cannot assist with that request. Please revise the prompt.";
+    private const string RetryableRateLimitExceededMessage = "exceeded retry limit, last status: 429 Too Many Requests";
+    private const string RetryableRateLimitExceededWithSuffixMessage = "exceeded retry limit, last status: 429 Too Many Requests. request id=req_123";
     private static readonly string[] CodexExecutableCandidates = ["codex", "codex-cli"];
 
     [Fact]
@@ -307,6 +312,44 @@ public sealed class CodexProviderTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_restarts_process_but_keeps_thread_id_when_same_logical_session_changes_runtime_fingerprint()
+    {
+        var provider = CreateProvider(messageBatches:
+        [
+            [
+                new CliMessage("thread.started", JsonSerializer.SerializeToElement(new { type = "thread.started", thread_id = "thread-old" })),
+                new CliMessage("turn.completed", JsonSerializer.SerializeToElement(new { type = "turn.completed" }))
+            ],
+            [
+                new CliMessage("thread.started", JsonSerializer.SerializeToElement(new { type = "thread.started", thread_id = "thread-old" })),
+                new CliMessage("turn.completed", JsonSerializer.SerializeToElement(new { type = "turn.completed" }))
+            ]
+        ]);
+
+        await DrainCliMessagesAsync(provider.ExecuteAsync(
+            new CodexOptions
+            {
+                WorkingDirectory = "/tmp/project",
+                LogicalSessionKey = "session-1",
+                ApprovalPolicy = "never"
+            },
+            "first"));
+
+        await DrainCliMessagesAsync(provider.ExecuteAsync(
+            new CodexOptions
+            {
+                WorkingDirectory = "/tmp/project",
+                LogicalSessionKey = "session-1",
+                ApprovalPolicy = "on-request"
+            },
+            "second"));
+
+        provider.StartContexts.Count.ShouldBe(2);
+        provider.StartContexts[1].Arguments.ShouldContain("resume");
+        provider.StartContexts[1].Arguments.ShouldContain("thread-old");
+    }
+
+    [Fact]
     public void TryExtractTerminalMessage_recognizes_retryable_samples()
     {
         CodexProvider.TryExtractTerminalMessage(
@@ -341,6 +384,42 @@ public sealed class CodexProviderTests
             .ShouldBeTrue();
 
         retrySummary.ShouldBe(RetryableServerErrorDisconnectMessage);
+    }
+
+    [Fact]
+    public void TryExtractRetryableTerminalSummary_recognizes_reconnect_prefix_without_known_suffix()
+    {
+        CodexProvider.TryExtractRetryableTerminalSummary(RetryableGenericReconnectMessage, out var retrySummary)
+            .ShouldBeTrue();
+
+        retrySummary.ShouldBe(RetryableGenericReconnectMessage);
+    }
+
+    [Fact]
+    public void TryExtractRetryableTerminalSummary_recognizes_rate_limit_retry_cap_message()
+    {
+        CodexProvider.TryExtractRetryableTerminalSummary(RetryableRateLimitExceededMessage, out var retrySummary)
+            .ShouldBeTrue();
+
+        retrySummary.ShouldBe(RetryableRateLimitExceededMessage);
+    }
+
+    [Fact]
+    public void TryExtractRetryableTerminalSummary_recognizes_generic_refusal_prefix_with_suffix()
+    {
+        CodexProvider.TryExtractRetryableTerminalSummary(RetryableGenericRefusalWithSuffixMessage, out var retrySummary)
+            .ShouldBeTrue();
+
+        retrySummary.ShouldBe(RetryableGenericRefusalWithSuffixMessage);
+    }
+
+    [Fact]
+    public void TryExtractRetryableTerminalSummary_recognizes_rate_limit_prefix_with_suffix()
+    {
+        CodexProvider.TryExtractRetryableTerminalSummary(RetryableRateLimitExceededWithSuffixMessage, out var retrySummary)
+            .ShouldBeTrue();
+
+        retrySummary.ShouldBe(RetryableRateLimitExceededWithSuffixMessage);
     }
 
     [Fact]

@@ -129,8 +129,8 @@ await foreach (var message in copilot.ExecuteAsync(copilotOptions, "Reply with e
 // Reuse a persisted provider-native Copilot conversation on the next call.
 var resumedOptions = copilotOptions with { SessionId = "copilot-session-123" };
 
-// Without SessionId, Copilot requests stay anonymous; WorkingDirectory only affects
-// compatibility checks and will not hit the shared pool by itself.
+// Without SessionId, Copilot requests stay anonymous; WorkingDirectory and permission
+// flags only shape the compatibility fingerprint and will not hit the shared pool alone.
 
 var options = new CodexOptions
 {
@@ -170,6 +170,8 @@ await foreach (var message in deepAgents.ExecuteAsync(deepAgentsOptions, "Reply 
 // later requests can cold-start a fresh session.
 
 // Reuse the same logical Codex session key to keep thread continuity on later calls.
+// The logical key stays stable, while the compatibility fingerprint decides whether
+// the existing warm runtime can be resumed or must be rebuilt under that same key.
 // If LogicalSessionKey and ThreadId are both absent, the request remains anonymous
 // even when WorkingDirectory matches a previous call.
 
@@ -225,9 +227,9 @@ Practical boundaries:
 
 - `CodeBuddy`, `Gemini`, `Hermes`, `Kimi`, `Kiro`, and `QoderCLI` pool live ACP sessions.
 - `DeepAgents` pools live ACP sessions, treats `DeepAgentsOptions.ModeId` as the authoritative typed session-mode signal, re-applies it before prompt execution, and evicts faulted entries so later acquires can cold-start a fresh session.
-- `Claude Code` pools warm stdio transports keyed by session or resume identity plus its effective startup shape.
-- `Codex` pools workspace/thread bindings so follow-up requests can reuse the last known thread id.
-- `Copilot` pools SDK runtimes per compatible workspace/configuration pair.
+- `Claude Code` pools warm stdio transports keyed by stable session identity plus a compatibility fingerprint built from the effective startup shape.
+- `Codex` keeps logical session identity stable, but rebuilds pooled entries when the compatibility fingerprint changes before reusing a previous thread binding.
+- `Copilot` only treats explicit `SessionId` as the logical reuse key; permissions and runtime flags stay in the compatibility fingerprint so config changes cold-start a replacement runtime under the same session identity.
 - `CodeBuddy` and `Hermes` now include `ModeId` in their reuse fingerprint and re-apply it after `session/new` or warm reuse.
 - Pooling can be disabled per provider call, which falls back to the original one-shot behavior without changing message semantics.
 - Idle eviction is lazy and deterministic; if a lease faults, the coordinator disposes that entry immediately rather than returning it to the warm set.

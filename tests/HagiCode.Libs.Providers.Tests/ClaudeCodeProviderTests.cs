@@ -176,9 +176,10 @@ public sealed class ClaudeCodeProviderTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_reuses_warm_transport_when_runtime_inputs_change_but_session_key_matches()
+    public async Task ExecuteAsync_restarts_transport_when_runtime_inputs_change_but_session_key_matches()
     {
         var provider = CreateProvider();
+        var restartedMessages = new List<CliMessage>();
 
         await foreach (var _ in provider.ExecuteAsync(
                            new ClaudeCodeOptions
@@ -191,7 +192,7 @@ public sealed class ClaudeCodeProviderTests
         {
         }
 
-        await foreach (var _ in provider.ExecuteAsync(
+        await foreach (var message in provider.ExecuteAsync(
                            new ClaudeCodeOptions
                            {
                                SessionId = "session-1",
@@ -200,10 +201,12 @@ public sealed class ClaudeCodeProviderTests
                            },
                            "follow up"))
         {
+            restartedMessages.Add(message);
         }
 
-        provider.CreatedTransportCount.ShouldBe(1);
+        provider.CreatedTransportCount.ShouldBe(2);
         provider.SentMessages.Count.ShouldBe(2);
+        restartedMessages[0].Content.GetProperty("resume_mode").GetString().ShouldBe("restarted");
     }
 
     [Fact]
