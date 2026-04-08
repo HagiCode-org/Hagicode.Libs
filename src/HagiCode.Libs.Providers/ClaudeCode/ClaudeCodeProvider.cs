@@ -144,6 +144,12 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
             },
             cancellationToken).ConfigureAwait(false);
 
+        var resumeMode = lease.Kind switch
+        {
+            CliRuntimePoolLeaseKind.WarmReuse => "resumed",
+            CliRuntimePoolLeaseKind.CompatibilityReplacement => "restarted",
+            _ => "started"
+        };
         var shouldEvictAnonymous = request.LogicalSessionKey is null && !poolSettings.KeepAnonymousSessions;
         var faulted = false;
         var lockAcquired = false;
@@ -162,7 +168,7 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
                         request.LogicalSessionKey,
                         runtimeFingerprint,
                         poolFingerprint,
-                        lease.IsWarmLease ? "resumed" : "started",
+                        resumeMode,
                         DateTime.UtcNow));
 
                 if (string.Equals(message.Type, "error", StringComparison.OrdinalIgnoreCase))

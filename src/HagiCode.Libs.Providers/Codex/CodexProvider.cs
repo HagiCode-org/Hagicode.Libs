@@ -20,14 +20,11 @@ public class CodexProvider : ICliProvider<CodexOptions>
 {
     private const string InternalOriginatorEnvironmentVariable = "CODEX_INTERNAL_ORIGINATOR_OVERRIDE";
     private const string InternalOriginatorValue = "codex_sdk_csharp";
-    private const string RetryableGenericRefusalMessage = "I'm sorry, but I cannot assist with that request.";
+    private const string RetryableGenericRefusalPrefix = "I'm sorry, but I cannot assist with that request.";
+    private const string RetryableRateLimitExceededPrefix = "exceeded retry limit, last status: 429 Too Many Requests";
+    private const string RetryableReconnectPrefix = "Reconnecting... 1/5 (stream disconnected before completion:";
+    private const string ThreadIdMetadataKey = "thread_id";
     private static readonly string[] DefaultExecutableCandidates = ["codex", "codex-cli"];
-    private static readonly string[] RetryableReconnectMarkers =
-    [
-        "stream disconnected before completion: error sending request for url",
-        "stream disconnected before completion: Incomplete response returned, reason: content_filter",
-        "stream disconnected before completion: The server had an error processing your request. Sorry about that!"
-    ];
 
     private readonly CliExecutableResolver _executableResolver;
     private readonly CliProcessManager _processManager;
@@ -36,6 +33,8 @@ public class CodexProvider : ICliProvider<CodexOptions>
     private readonly CliProviderPoolCoordinator _poolCoordinator;
     private readonly CliProviderPoolConfigurationRegistry _poolConfiguration;
     private readonly ILogger<CodexProvider> _logger;
+    private readonly Dictionary<string, string> _logicalSessionThreads = new(StringComparer.Ordinal);
+    private readonly Lock _logicalSessionThreadsLock = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="CodexProvider" /> class.
@@ -93,6 +92,7 @@ public class CodexProvider : ICliProvider<CodexOptions>
         }
 
         var logicalSessionKey = ResolveLogicalSessionKey(options);
+        var resolvedThreadId = ResolveThreadIdForExecution(options, logicalSessionKey);
         var poolLookupKey = ResolvePoolLookupKey(options);
         var request = new CliRuntimePoolRequest(
             Name,
@@ -116,7 +116,7 @@ public class CodexProvider : ICliProvider<CodexOptions>
             Name,
             logicalSessionKey ?? "(none)",
             poolLookupKey ?? "(none)",
-            ArgumentValueNormalizer.NormalizeOptionalValue(options.ThreadId) ?? "(none)",
+            resolvedThreadId ?? "(none)",
             ArgumentValueNormalizer.NormalizeOptionalValue(options.WorkingDirectory) ?? "(none)");
 
         await using var lease = await _poolCoordinator.AcquireCodexThreadAsync(
@@ -125,19 +125,30 @@ public class CodexProvider : ICliProvider<CodexOptions>
                 Name,
                 new CodexPooledThreadState
                 {
-                    ThreadId = ArgumentValueNormalizer.NormalizeOptionalValue(options.ThreadId)
+                    ThreadId = resolvedThreadId
                 },
                 request.CompatibilityFingerprint,
                 request.Settings)),
             cancellationToken).ConfigureAwait(false);
 
         _logger.LogInformation(
-            "Codex pool acquire complete: provider={ProviderName}, logicalSessionKey={LogicalSessionKey}, poolLookupKey={PoolLookupKey}, isWarmLease={IsWarmLease}, registeredKeyCount={RegisteredKeyCount}",
+            "Codex pool acquire complete: provider={ProviderName}, logicalSessionKey={LogicalSessionKey}, poolLookupKey={PoolLookupKey}, leaseKind={LeaseKind}, isWarmLease={IsWarmLease}, registeredKeyCount={RegisteredKeyCount}",
             Name,
             logicalSessionKey ?? "(none)",
             poolLookupKey ?? "(none)",
+            lease.Kind,
             lease.IsWarmLease,
             lease.Entry.RegisteredKeys.Count);
+
+        if (lease.Kind == CliRuntimePoolLeaseKind.CompatibilityReplacement)
+        {
+            _logger.LogInformation(
+                "Codex pool compatibility replacement triggered: provider={ProviderName}, logicalSessionKey={LogicalSessionKey}, poolLookupKey={PoolLookupKey}, resumedThreadId={ThreadId}",
+                Name,
+                logicalSessionKey ?? "(none)",
+                poolLookupKey ?? "(none)",
+                lease.Entry.Resource.ThreadId ?? resolvedThreadId ?? "(none)");
+        }
 
         var shouldEvictAnonymous = request.LogicalSessionKey is null && !poolSettings.KeepAnonymousSessions;
         var faulted = false;
@@ -155,7 +166,10 @@ public class CodexProvider : ICliProvider<CodexOptions>
         await lease.Entry.ExecutionLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         lockWaitStopwatch.Stop();
 
-        var effectiveOptions = options with { ThreadId = lease.Entry.Resource.ThreadId ?? options.ThreadId };
+        var effectiveOptions = options with
+        {
+            ThreadId = lease.Entry.Resource.ThreadId ?? resolvedThreadId
+        };
         var startContext = new ProcessStartContext
         {
             ExecutablePath = executablePath,
@@ -184,8 +198,10 @@ public class CodexProvider : ICliProvider<CodexOptions>
                 if (TryGetThreadId(message.Content, out var threadId))
                 {
                     lease.Entry.Resource.ThreadId = threadId;
+                    lease.Entry.Metadata[ThreadIdMetadataKey] = threadId;
                     if (!string.IsNullOrWhiteSpace(threadId))
                     {
+                        RememberThreadId(logicalSessionKey, threadId);
                         await lease.RegisterKeyAsync(BuildThreadLookupKey(threadId), cancellationToken).ConfigureAwait(false);
                         _logger.LogInformation(
                             "Codex pool reindexed after thread acquisition: provider={ProviderName}, logicalSessionKey={LogicalSessionKey}, newThreadId={ThreadId}, registeredKeyCount={RegisteredKeyCount}",
@@ -331,9 +347,9 @@ public class CodexProvider : ICliProvider<CodexOptions>
             return false;
         }
 
-        if (string.Equals(normalized, RetryableGenericRefusalMessage, StringComparison.Ordinal) ||
-            (normalized.Contains("Reconnecting...", StringComparison.Ordinal) &&
-             RetryableReconnectMarkers.Any(marker => normalized.Contains(marker, StringComparison.Ordinal))))
+        if (normalized.StartsWith(RetryableGenericRefusalPrefix, StringComparison.Ordinal) ||
+            normalized.StartsWith(RetryableRateLimitExceededPrefix, StringComparison.Ordinal) ||
+            normalized.StartsWith(RetryableReconnectPrefix, StringComparison.Ordinal))
         {
             retrySummary = normalized;
             return true;
@@ -536,6 +552,42 @@ public class CodexProvider : ICliProvider<CodexOptions>
     private static string? ResolveLogicalSessionKey(CodexOptions options)
     {
         return ArgumentValueNormalizer.NormalizeOptionalValue(options.LogicalSessionKey);
+    }
+
+    private string? ResolveThreadIdForExecution(CodexOptions options, string? logicalSessionKey)
+    {
+        var explicitThreadId = ArgumentValueNormalizer.NormalizeOptionalValue(options.ThreadId);
+        if (explicitThreadId is not null)
+        {
+            return explicitThreadId;
+        }
+
+        if (logicalSessionKey is null)
+        {
+            return null;
+        }
+
+        lock (_logicalSessionThreadsLock)
+        {
+            return _logicalSessionThreads.TryGetValue(logicalSessionKey, out var cachedThreadId)
+                ? cachedThreadId
+                : null;
+        }
+    }
+
+    private void RememberThreadId(string? logicalSessionKey, string? threadId)
+    {
+        var normalizedKey = ArgumentValueNormalizer.NormalizeOptionalValue(logicalSessionKey);
+        var normalizedThreadId = ArgumentValueNormalizer.NormalizeOptionalValue(threadId);
+        if (normalizedKey is null || normalizedThreadId is null)
+        {
+            return;
+        }
+
+        lock (_logicalSessionThreadsLock)
+        {
+            _logicalSessionThreads[normalizedKey] = normalizedThreadId;
+        }
     }
 
     private static string? ResolvePoolLookupKey(CodexOptions options)
