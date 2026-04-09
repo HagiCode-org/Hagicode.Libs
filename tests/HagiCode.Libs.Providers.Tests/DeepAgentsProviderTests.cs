@@ -667,7 +667,7 @@ public sealed class DeepAgentsProviderTests
         messages.Last().Content.GetProperty("message").GetString().ShouldContain("permission denied");
     }
 
-    [Fact]
+    [Fact(Skip = "DeepAgents real CLI validation is excluded by default because CI does not guarantee a deepagents binary on PATH.")]
     [Trait("Category", "RealCli")]
     public async Task PingAsync_can_validate_installed_deepagents_cli_when_opted_in()
     {
