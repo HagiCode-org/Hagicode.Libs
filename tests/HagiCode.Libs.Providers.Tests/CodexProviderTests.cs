@@ -26,6 +26,8 @@ public sealed class CodexProviderTests
         "Reconnecting... 1/5 (stream disconnected before completion: temporary upstream overload)";
     private const string RetryableGenericRefusalMessage = "I'm sorry, but I cannot assist with that request.";
     private const string RetryableGenericRefusalWithSuffixMessage = "I'm sorry, but I cannot assist with that request. Please revise the prompt.";
+    private const string RetryableModelCapacityMessage = "Selected model is at capacity. Please try a different model.";
+    private const string RetryableModelCapacityWithSuffixMessage = "Selected model is at capacity. Please try a different model. request id=req_capacity_123";
     private const string RetryableRateLimitExceededMessage = "exceeded retry limit, last status: 429 Too Many Requests";
     private const string RetryableRateLimitExceededWithSuffixMessage = "exceeded retry limit, last status: 429 Too Many Requests. request id=req_123";
     private static readonly string[] CodexExecutableCandidates = ["codex", "codex-cli"];
@@ -411,6 +413,24 @@ public sealed class CodexProviderTests
             .ShouldBeTrue();
 
         retrySummary.ShouldBe(RetryableGenericRefusalWithSuffixMessage);
+    }
+
+    [Fact]
+    public void TryExtractRetryableTerminalSummary_recognizes_model_capacity_prefix()
+    {
+        CodexProvider.TryExtractRetryableTerminalSummary(RetryableModelCapacityMessage, out var retrySummary)
+            .ShouldBeTrue();
+
+        retrySummary.ShouldBe(RetryableModelCapacityMessage);
+    }
+
+    [Fact]
+    public void TryExtractRetryableTerminalSummary_recognizes_model_capacity_prefix_with_suffix()
+    {
+        CodexProvider.TryExtractRetryableTerminalSummary(RetryableModelCapacityWithSuffixMessage, out var retrySummary)
+            .ShouldBeTrue();
+
+        retrySummary.ShouldBe(RetryableModelCapacityWithSuffixMessage);
     }
 
     [Fact]

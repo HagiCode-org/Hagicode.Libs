@@ -21,6 +21,7 @@ public class CodexProvider : ICliProvider<CodexOptions>
     private const string InternalOriginatorEnvironmentVariable = "CODEX_INTERNAL_ORIGINATOR_OVERRIDE";
     private const string InternalOriginatorValue = "codex_sdk_csharp";
     private const string RetryableGenericRefusalPrefix = "I'm sorry, but I cannot assist with that request.";
+    private const string RetryableModelCapacityPrefix = "Selected model is at capacity. Please try a different model.";
     private const string RetryableRateLimitExceededPrefix = "exceeded retry limit, last status: 429 Too Many Requests";
     private const string RetryableReconnectPrefix = "Reconnecting... 1/5 (stream disconnected before completion:";
     private const string ThreadIdMetadataKey = "thread_id";
@@ -348,6 +349,7 @@ public class CodexProvider : ICliProvider<CodexOptions>
         }
 
         if (normalized.StartsWith(RetryableGenericRefusalPrefix, StringComparison.Ordinal) ||
+            normalized.StartsWith(RetryableModelCapacityPrefix, StringComparison.Ordinal) ||
             normalized.StartsWith(RetryableRateLimitExceededPrefix, StringComparison.Ordinal) ||
             normalized.StartsWith(RetryableReconnectPrefix, StringComparison.Ordinal))
         {
