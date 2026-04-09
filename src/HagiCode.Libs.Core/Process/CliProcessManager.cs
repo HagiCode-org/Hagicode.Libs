@@ -206,18 +206,61 @@ public class CliProcessManager
         if (IsWindows() && IsBatchFile(resolvedExecutablePath))
         {
             startInfo.FileName = "cmd.exe";
+            startInfo.ArgumentList.Add("/s");
             startInfo.ArgumentList.Add("/c");
-            startInfo.ArgumentList.Add(resolvedExecutablePath);
+            startInfo.ArgumentList.Add(BuildWindowsBatchCommand(resolvedExecutablePath, context.Arguments));
+            return;
         }
-        else
-        {
-            startInfo.FileName = resolvedExecutablePath;
-        }
+
+        startInfo.FileName = resolvedExecutablePath;
 
         foreach (var argument in context.Arguments)
         {
             startInfo.ArgumentList.Add(argument);
         }
+    }
+
+    private static string BuildWindowsBatchCommand(string executablePath, IReadOnlyList<string> arguments)
+    {
+        var builder = new StringBuilder();
+        builder.Append(QuoteForCmdCommand(executablePath));
+
+        foreach (var argument in arguments)
+        {
+            builder.Append(' ');
+            builder.Append(QuoteForCmdCommand(argument));
+        }
+
+        return builder.ToString();
+    }
+
+    private static string QuoteForCmdCommand(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return "\"\"";
+        }
+
+        if (!RequiresCmdQuoting(value))
+        {
+            return value;
+        }
+
+        return "\"" + value.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
+    }
+
+    private static bool RequiresCmdQuoting(string value)
+    {
+        foreach (var character in value)
+        {
+            if (char.IsWhiteSpace(character)
+                || character is '"' or '&' or '|' or '<' or '>' or '(' or ')' or '^' or '!' or '%')
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static void ApplyEnvironmentVariables(ProcessStartInfo startInfo, IReadOnlyDictionary<string, string?>? environmentVariables)
