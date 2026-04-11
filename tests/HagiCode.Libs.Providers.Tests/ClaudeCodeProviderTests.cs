@@ -750,9 +750,7 @@ public sealed class ClaudeCodeProviderTests
                 "-ExecutionPolicy",
                 "Bypass",
                 "-Command",
-                "New-Item -ItemType Junction -Path $args[0] -Target $args[1] -Force | Out-Null",
-                linkPath,
-                targetPath);
+                BuildPowerShellJunctionCommand(linkPath, targetPath));
             if (powerShellAttempt.Success && Directory.Exists(linkPath))
             {
                 return;
@@ -805,6 +803,17 @@ public sealed class ClaudeCodeProviderTests
             }
 
             return "powershell.exe";
+        }
+
+        private static string BuildPowerShellJunctionCommand(string linkPath, string targetPath)
+        {
+            return FormattableString.Invariant(
+                $"New-Item -ItemType Junction -Path '{EscapePowerShellSingleQuotedString(linkPath)}' -Target '{EscapePowerShellSingleQuotedString(targetPath)}' -Force | Out-Null");
+        }
+
+        private static string EscapePowerShellSingleQuotedString(string value)
+        {
+            return value.Replace("'", "''", StringComparison.Ordinal);
         }
 
         private static string FormatDiagnosticText(string value)
