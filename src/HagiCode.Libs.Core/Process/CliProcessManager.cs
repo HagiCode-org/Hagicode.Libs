@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text;
 using HagiCode.Libs.Core.Discovery;
 
@@ -192,6 +193,15 @@ public class CliProcessManager
     protected virtual bool IsWindows() => OperatingSystem.IsWindows();
 
     /// <summary>
+    /// Resolves the command interpreter path used for Windows batch shims.
+    /// </summary>
+    protected virtual string ResolveWindowsCommandInterpreterPath()
+    {
+        var comspec = System.Environment.GetEnvironmentVariable("ComSpec");
+        return string.IsNullOrWhiteSpace(comspec) ? "cmd.exe" : comspec;
+    }
+
+    /// <summary>
     /// Resolves an executable path before launch.
     /// </summary>
     protected virtual string ResolveExecutablePath(
@@ -201,14 +211,26 @@ public class CliProcessManager
         return _executableResolver.ResolveExecutablePath(executablePath, environmentVariables) ?? executablePath;
     }
 
+    /// <summary>
+    /// Resolves the stderr encoding used when a Windows batch shim is launched through cmd.exe.
+    /// </summary>
+    protected virtual Encoding ResolveWindowsBatchStandardErrorEncoding(Encoding fallbackEncoding)
+    {
+        ArgumentNullException.ThrowIfNull(fallbackEncoding);
+
+        return TryResolveWindowsBatchStandardErrorEncoding() ?? fallbackEncoding;
+    }
+
     private void ConfigureExecutable(ProcessStartInfo startInfo, ProcessStartContext context, string resolvedExecutablePath)
     {
         if (IsWindows() && IsBatchFile(resolvedExecutablePath))
         {
-            startInfo.FileName = "cmd.exe";
+            startInfo.StandardErrorEncoding = ResolveWindowsBatchStandardErrorEncoding(context.OutputEncoding);
+            startInfo.FileName = ResolveWindowsCommandInterpreterPath();
+            startInfo.ArgumentList.Add("/d");
             startInfo.ArgumentList.Add("/s");
             startInfo.ArgumentList.Add("/c");
-            startInfo.ArgumentList.Add(BuildWindowsBatchCommand(resolvedExecutablePath, context.Arguments));
+            startInfo.ArgumentList.Add(BuildWindowsBatchCommandInvocation(resolvedExecutablePath, context.Arguments));
             return;
         }
 
@@ -218,6 +240,14 @@ public class CliProcessManager
         {
             startInfo.ArgumentList.Add(argument);
         }
+    }
+
+    private static string BuildWindowsBatchCommandInvocation(string executablePath, IReadOnlyList<string> arguments)
+    {
+        var command = BuildWindowsBatchCommand(executablePath, arguments);
+        return RequiresCmdQuoting(executablePath)
+            ? $"\"{command}\""
+            : command;
     }
 
     private static string BuildWindowsBatchCommand(string executablePath, IReadOnlyList<string> arguments)
@@ -455,4 +485,35 @@ public class CliProcessManager
         return extension.Equals(".cmd", StringComparison.OrdinalIgnoreCase)
                || extension.Equals(".bat", StringComparison.OrdinalIgnoreCase);
     }
+
+    private static Encoding? TryResolveWindowsBatchStandardErrorEncoding()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return null;
+        }
+
+        try
+        {
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+
+            var codePage = GetConsoleOutputCP();
+            if (codePage == 0)
+            {
+                codePage = GetOEMCP();
+            }
+
+            return codePage == 0 ? null : Encoding.GetEncoding((int)codePage);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetConsoleOutputCP();
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetOEMCP();
 }
