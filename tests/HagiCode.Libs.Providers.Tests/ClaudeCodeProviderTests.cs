@@ -730,35 +730,94 @@ public sealed class ClaudeCodeProviderTests
             ArgumentException.ThrowIfNullOrWhiteSpace(linkPath);
             ArgumentException.ThrowIfNullOrWhiteSpace(targetPath);
 
+            Directory.CreateDirectory(Path.GetDirectoryName(linkPath) ?? throw new InvalidOperationException("The junction path must include a parent directory."));
+
+            var cmdAttempt = TryRunDirectoryJunctionCommand(
+                Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe",
+                "/d",
+                "/c",
+                $"mklink /J \"{linkPath}\" \"{targetPath}\"");
+            if (cmdAttempt.Success && Directory.Exists(linkPath))
+            {
+                return;
+            }
+
+            var powerShellAttempt = TryRunDirectoryJunctionCommand(
+                ResolvePowerShellExecutablePath(),
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                "New-Item -ItemType Junction -Path $args[0] -Target $args[1] -Force | Out-Null",
+                linkPath,
+                targetPath);
+            if (powerShellAttempt.Success && Directory.Exists(linkPath))
+            {
+                return;
+            }
+
+            throw new InvalidOperationException(
+                $$"""
+                Failed to create the whitespace-path junction for the Claude wrapper sandbox.
+                cmd: {{cmdAttempt.Diagnostic}}
+                powershell: {{powerShellAttempt.Diagnostic}}
+                """);
+        }
+
+        private static DirectoryJunctionAttemptResult TryRunDirectoryJunctionCommand(string fileName, params string[] arguments)
+        {
             var startInfo = new ProcessStartInfo
             {
-                FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe",
+                FileName = fileName,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
-            startInfo.ArgumentList.Add("/d");
-            startInfo.ArgumentList.Add("/s");
-            startInfo.ArgumentList.Add("/c");
-            startInfo.ArgumentList.Add($"mklink /J \"{linkPath}\" \"{targetPath}\"");
+            foreach (var argument in arguments)
+            {
+                startInfo.ArgumentList.Add(argument);
+            }
 
             using var process = Process.Start(startInfo)
-                ?? throw new InvalidOperationException("Failed to start cmd.exe while creating the whitespace-path junction.");
+                ?? throw new InvalidOperationException($"Failed to start '{fileName}' while creating the whitespace-path junction.");
             process.WaitForExit();
+            var standardOutput = process.StandardOutput.ReadToEnd().Trim();
+            var standardError = process.StandardError.ReadToEnd().Trim();
 
-            if (process.ExitCode != 0 || !Directory.Exists(linkPath))
+            return new DirectoryJunctionAttemptResult(
+                process.ExitCode == 0,
+                $"exit={process.ExitCode}, stdout={FormatDiagnosticText(standardOutput)}, stderr={FormatDiagnosticText(standardError)}");
+        }
+
+        private static string ResolvePowerShellExecutablePath()
+        {
+            var programFiles = Environment.GetEnvironmentVariable("ProgramFiles");
+            if (!string.IsNullOrWhiteSpace(programFiles))
             {
-                var standardError = process.StandardError.ReadToEnd();
-                throw new InvalidOperationException(
-                    $"Failed to create the whitespace-path junction for the Claude wrapper sandbox. {standardError}".Trim());
+                var powerShellCorePath = Path.Combine(programFiles, "PowerShell", "7", "pwsh.exe");
+                if (File.Exists(powerShellCorePath))
+                {
+                    return powerShellCorePath;
+                }
             }
+
+            return "powershell.exe";
+        }
+
+        private static string FormatDiagnosticText(string value)
+        {
+            return string.IsNullOrWhiteSpace(value) ? "<empty>" : value;
         }
 
         public Task<IReadOnlyDictionary<string, string?>> ResolveAsync(CancellationToken cancellationToken = default)
         {
             return Task.FromResult(_environment);
         }
+
+        private readonly record struct DirectoryJunctionAttemptResult(bool Success, string Diagnostic);
 
         public void Dispose()
         {
