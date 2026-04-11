@@ -328,6 +328,11 @@ internal sealed class RealCliInvocationSandbox : IRuntimeEnvironmentResolver, ID
         {
             try
             {
+                if (!Directory.Exists(rootDirectory))
+                {
+                    return;
+                }
+
                 NormalizeAttributesRecursively(rootDirectory);
                 deleteDirectory(rootDirectory);
 
@@ -335,6 +340,10 @@ internal sealed class RealCliInvocationSandbox : IRuntimeEnvironmentResolver, ID
                 {
                     return;
                 }
+            }
+            catch (DirectoryNotFoundException)
+            {
+                return;
             }
             catch (Exception ex) when (IsRetryableDeleteException(ex) && attempt < maxAttempts)
             {

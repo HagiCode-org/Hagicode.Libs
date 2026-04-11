@@ -86,6 +86,30 @@ public sealed class RealCliInvocationSandboxTests
         Directory.Exists(tempDirectory.Path).ShouldBeTrue();
     }
 
+    [Fact]
+    public void DeleteDirectoryWithRetries_treats_directory_not_found_during_delete_as_success()
+    {
+        using var tempDirectory = new TemporaryDirectory();
+        var attempts = 0;
+        var sleepCalls = 0;
+
+        RealCliInvocationSandbox.DeleteDirectoryWithRetries(
+            tempDirectory.Path,
+            maxAttempts: 3,
+            retryDelay: TimeSpan.Zero,
+            deleteDirectory: path =>
+            {
+                attempts++;
+                Directory.Delete(path, recursive: true);
+                throw new DirectoryNotFoundException("Directory was already removed by a concurrent cleanup.");
+            },
+            sleep: _ => sleepCalls++);
+
+        attempts.ShouldBe(1);
+        sleepCalls.ShouldBe(0);
+        Directory.Exists(tempDirectory.Path).ShouldBeFalse();
+    }
+
     private sealed class TemporaryDirectory : IDisposable
     {
         public TemporaryDirectory()
