@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using Shouldly;
 using HagiCode.Libs.Core.Process;
@@ -103,10 +104,15 @@ public sealed class SubprocessTransportTests
         manager.LastStartInfo.FileName.ShouldBe("cmd.exe");
         manager.LastStartInfo.ArgumentList.ShouldBe(
         [
+            "/d",
             "/s",
             "/c",
-            @"""C:\Program Files\Anthropic\claude.cmd"" --output-format stream-json --append-system-prompt ""reply in Chinese"""
+            """
+            ""C:\Program Files\Anthropic\claude.cmd" --output-format stream-json --append-system-prompt "reply in Chinese""
+            """
         ]);
+        manager.LastStartInfo.StandardErrorEncoding.ShouldNotBeNull();
+        manager.LastStartInfo.StandardErrorEncoding.WebName.ShouldBe(Encoding.Unicode.WebName);
     }
 
     [Fact]
@@ -138,8 +144,13 @@ public sealed class SubprocessTransportTests
 
         protected override bool IsWindows() => true;
 
+        protected override string ResolveWindowsCommandInterpreterPath() => "cmd.exe";
+
         protected override string ResolveExecutablePath(string executablePath, IReadOnlyDictionary<string, string?>? environmentVariables)
             => resolvedExecutablePath;
+
+        protected override Encoding ResolveWindowsBatchStandardErrorEncoding(Encoding fallbackEncoding)
+            => Encoding.Unicode;
 
         public override ValueTask<CliProcessHandle> StartAsync(ProcessStartContext context, CancellationToken cancellationToken = default)
         {

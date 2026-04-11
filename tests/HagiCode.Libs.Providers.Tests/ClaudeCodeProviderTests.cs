@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using System.Collections.ObjectModel;
 using Shouldly;
 using HagiCode.Libs.Core.Acp;
 using HagiCode.Libs.Core.Discovery;
@@ -14,6 +15,7 @@ namespace HagiCode.Libs.Providers.Tests;
 public sealed class ClaudeCodeProviderTests
 {
     private const string RealCliTestsEnvironmentVariable = "HAGICODE_REAL_CLI_TESTS";
+    private const string WindowsTestLocaleEnvironmentVariable = "HAGICODE_WINDOWS_TEST_LOCALE";
     private static readonly string[] ClaudeExecutableCandidates = ["claude", "claude-code"];
 
     [Fact]
@@ -367,6 +369,43 @@ public sealed class ClaudeCodeProviderTests
     }
 
     [Fact]
+    [Trait("Category", "WindowsOnly")]
+    public async Task ExecuteAsync_real_windows_cmd_shim_under_whitespace_path_round_trips_utf8_prompt()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        await using var fixture = await WindowsBatchClaudeEchoFixture.CreateAsync();
+        await using var provider = new ClaudeCodeProvider(
+            new CliExecutableResolver(),
+            new CliProcessManager(),
+            new StaticRuntimeEnvironmentResolver(fixture.RuntimeEnvironment));
+
+        const string prompt = "继续用中文回复，确认 Windows cmd shim 收到了这个 prompt。";
+        var messages = new List<CliMessage>();
+
+        await foreach (var message in provider.ExecuteAsync(
+                           new ClaudeCodeOptions
+                           {
+                               WorkingDirectory = fixture.WorkingDirectory,
+                               SessionId = "windows-session",
+                               PoolSettings = new CliPoolSettings
+                               {
+                                   Enabled = false
+                               }
+                           },
+                           prompt))
+        {
+            messages.Add(message);
+        }
+
+        messages.Select(static message => message.Type).ShouldBe(["user", "result"]);
+        messages[0].Content.GetProperty("message").GetProperty("content").GetString().ShouldBe(prompt);
+    }
+
+    [Fact]
     [Trait("Category", "RealCli")]
     [Trait("Category", "RealCliInvocationContract")]
     public async Task ExecuteAsync_real_cli_returns_actionable_authentication_failure_when_credentials_are_absent()
@@ -395,6 +434,49 @@ public sealed class ClaudeCodeProviderTests
             TimeSpan.FromSeconds(45));
 
         RealCliInvocationTestHarness.AssertActionableFailure("claude-code", failureMessage);
+    }
+
+    [Fact]
+    [Trait("Category", "RealCli")]
+    [Trait("Category", "RealCliInvocationContract")]
+    [Trait("Category", "RealCliWindowsZhCnWhitespaceShim")]
+    public async Task ExecuteAsync_real_cli_windows_zh_cn_whitespace_cmd_shim_surfaces_actionable_failure_without_mojibake()
+    {
+        if (!IsRealCliTestsEnabled()
+            || !OperatingSystem.IsWindows()
+            || !string.Equals(Environment.GetEnvironmentVariable(WindowsTestLocaleEnvironmentVariable), "zh-CN", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var executableResolver = new CliExecutableResolver();
+        var realClaudePath = executableResolver.ResolveFirstAvailablePath(ClaudeExecutableCandidates);
+        realClaudePath.ShouldNotBeNullOrWhiteSpace("The Windows zh-CN real CLI lane must install Claude Code before running this test.");
+
+        using var sandbox = new RealCliInvocationSandbox();
+        using var shimSandbox = new RealCliWhitespaceWrapperSandbox(realClaudePath!, sandbox);
+        await using var provider = new ClaudeCodeProvider(
+            executableResolver,
+            new CliProcessManager(),
+            shimSandbox);
+
+        var failureMessage = await RealCliInvocationTestHarness.CaptureFailureMessageAsync(
+            provider,
+            new ClaudeCodeOptions
+            {
+                ExecutablePath = shimSandbox.WrapperPath,
+                WorkingDirectory = sandbox.WorkingDirectory,
+                AddDirectories = [sandbox.WorkingDirectory],
+                PermissionMode = "plan",
+                PoolSettings = new CliPoolSettings
+                {
+                    Enabled = false
+                }
+            },
+            "请只回复 pong。",
+            TimeSpan.FromSeconds(45));
+
+        RealCliInvocationTestHarness.AssertActionableFailure("claude-code/windows-zh-cn-whitespace-shim", failureMessage);
     }
 
     private static TestClaudeCodeProvider CreateProvider(
@@ -510,6 +592,14 @@ public sealed class ClaudeCodeProviderTests
         }
     }
 
+    private sealed class StaticRuntimeEnvironmentResolver(IReadOnlyDictionary<string, string?> environment) : IRuntimeEnvironmentResolver
+    {
+        public Task<IReadOnlyDictionary<string, string?>> ResolveAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(environment);
+        }
+    }
+
     private sealed class StubCliProcessManager : CliProcessManager
     {
         public ProcessResult ExecuteResult { get; init; } = new(0, "1.0.0", string.Empty);
@@ -517,6 +607,151 @@ public sealed class ClaudeCodeProviderTests
         public override Task<ProcessResult> ExecuteAsync(ProcessStartContext context, CancellationToken cancellationToken = default)
         {
             return Task.FromResult(ExecuteResult);
+        }
+    }
+
+    private sealed class RealCliWhitespaceWrapperSandbox : IRuntimeEnvironmentResolver, IDisposable
+    {
+        private readonly string _rootDirectory;
+        private readonly IReadOnlyDictionary<string, string?> _environment;
+        private bool _disposed;
+
+        public RealCliWhitespaceWrapperSandbox(string realExecutablePath, RealCliInvocationSandbox innerSandbox)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(realExecutablePath);
+            ArgumentNullException.ThrowIfNull(innerSandbox);
+
+            _rootDirectory = Path.Combine(innerSandbox.TempDirectory, "Claude Wrapper With Spaces");
+            Directory.CreateDirectory(_rootDirectory);
+
+            WrapperPath = Path.Combine(_rootDirectory, "claude.cmd");
+            File.WriteAllText(
+                WrapperPath,
+                $$"""
+                @echo off
+                setlocal
+                call "{{realExecutablePath}}" %*
+                exit /b %ERRORLEVEL%
+                """,
+                new UTF8Encoding(false));
+
+            var mergedEnvironment = innerSandbox.ResolveAsync().GetAwaiter().GetResult()
+                .ToDictionary(static pair => pair.Key, static pair => pair.Value, StringComparer.Ordinal);
+            var wrapperPathValue = string.Join(
+                Path.PathSeparator,
+                new[]
+                {
+                    _rootDirectory,
+                    mergedEnvironment.TryGetValue("PATH", out var existingPath) ? existingPath : null
+                }.Where(static value => !string.IsNullOrWhiteSpace(value)));
+
+            mergedEnvironment["PATH"] = wrapperPathValue;
+            mergedEnvironment["HAGICODE_REAL_CLI_WHITESPACE_WRAPPER"] = WrapperPath;
+            _environment = new ReadOnlyDictionary<string, string?>(mergedEnvironment);
+        }
+
+        public string WrapperPath { get; }
+
+        public Task<IReadOnlyDictionary<string, string?>> ResolveAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(_environment);
+        }
+
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            RealCliInvocationSandbox.DeleteDirectoryWithRetries(_rootDirectory);
+        }
+    }
+
+    private sealed class WindowsBatchClaudeEchoFixture(string rootDirectory, string workingDirectory, IReadOnlyDictionary<string, string?> runtimeEnvironment) : IAsyncDisposable
+    {
+        public string WorkingDirectory { get; } = workingDirectory;
+
+        public IReadOnlyDictionary<string, string?> RuntimeEnvironment { get; } = runtimeEnvironment;
+
+        public static async Task<WindowsBatchClaudeEchoFixture> CreateAsync()
+        {
+            var rootDirectory = Path.Combine(
+                Path.GetTempPath(),
+                $"HagiCode Claude Shim Fixture {Guid.NewGuid():N}");
+            var shimDirectory = Path.Combine(rootDirectory, "Node Global Tools");
+            var workingDirectory = Path.Combine(rootDirectory, "workspace");
+
+            Directory.CreateDirectory(shimDirectory);
+            Directory.CreateDirectory(workingDirectory);
+
+            var shimScriptPath = Path.Combine(shimDirectory, "claude.cmd");
+            var echoScriptPath = Path.Combine(shimDirectory, "claude-echo.ps1");
+
+            await File.WriteAllTextAsync(
+                echoScriptPath,
+                """
+                [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
+                [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+
+                $line = [Console]::In.ReadLine()
+                if ($null -eq $line) {
+                    exit 0
+                }
+
+                [Console]::Out.WriteLine($line)
+
+                $result = @{
+                    type = "result"
+                    subtype = "success"
+                    is_error = $false
+                    result = "ok"
+                }
+
+                [Console]::Out.WriteLine(($result | ConvertTo-Json -Compress -Depth 4))
+                """,
+                new UTF8Encoding(false));
+
+            await File.WriteAllTextAsync(
+                shimScriptPath,
+                """
+                @echo off
+                setlocal
+                powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0claude-echo.ps1" %*
+                exit /b %ERRORLEVEL%
+                """,
+                new UTF8Encoding(false));
+
+            var runtimeEnvironment = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["PATH"] = string.Join(
+                    Path.PathSeparator,
+                    new[]
+                    {
+                        shimDirectory,
+                        Environment.GetEnvironmentVariable("PATH")
+                    }.Where(static value => !string.IsNullOrWhiteSpace(value))),
+                ["PATHEXT"] = Environment.GetEnvironmentVariable("PATHEXT") ?? ".COM;.EXE;.BAT;.CMD"
+            };
+
+            return new WindowsBatchClaudeEchoFixture(rootDirectory, workingDirectory, runtimeEnvironment);
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            try
+            {
+                if (Directory.Exists(rootDirectory))
+                {
+                    Directory.Delete(rootDirectory, recursive: true);
+                }
+            }
+            catch
+            {
+            }
+
+            return ValueTask.CompletedTask;
         }
     }
 

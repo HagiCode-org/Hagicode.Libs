@@ -81,9 +81,11 @@ public sealed class CliProcessManagerTests
         });
 
         startInfo.FileName.ShouldBe("cmd.exe");
-        startInfo.ArgumentList.ShouldBe(["/s", "/c", @"C:\tools\npm.cmd install --global @openai/codex"]);
+        startInfo.ArgumentList.ShouldBe(["/d", "/s", "/c", @"C:\tools\npm.cmd install --global @openai/codex"]);
         startInfo.StandardInputEncoding.ShouldNotBeNull();
         startInfo.StandardInputEncoding.WebName.ShouldBe(Encoding.UTF8.WebName);
+        startInfo.StandardErrorEncoding.ShouldNotBeNull();
+        startInfo.StandardErrorEncoding.WebName.ShouldBe(Encoding.Unicode.WebName);
     }
 
     [Fact]
@@ -99,10 +101,15 @@ public sealed class CliProcessManagerTests
         startInfo.FileName.ShouldBe("cmd.exe");
         startInfo.ArgumentList.ShouldBe(
         [
+            "/d",
             "/s",
             "/c",
-            @"""C:\Program Files\Anthropic\claude.cmd"" --output-format stream-json --append-system-prompt ""reply in Chinese"""
+            """
+            ""C:\Program Files\Anthropic\claude.cmd" --output-format stream-json --append-system-prompt "reply in Chinese""
+            """
         ]);
+        startInfo.StandardErrorEncoding.ShouldNotBeNull();
+        startInfo.StandardErrorEncoding.WebName.ShouldBe(Encoding.Unicode.WebName);
     }
 
     [Fact]
@@ -146,7 +153,12 @@ public sealed class CliProcessManagerTests
     {
         protected override bool IsWindows() => isWindows;
 
+        protected override string ResolveWindowsCommandInterpreterPath() => "cmd.exe";
+
         protected override string ResolveExecutablePath(string executablePath, IReadOnlyDictionary<string, string?>? environmentVariables)
             => resolvedExecutablePath;
+
+        protected override Encoding ResolveWindowsBatchStandardErrorEncoding(Encoding fallbackEncoding)
+            => Encoding.Unicode;
     }
 }
