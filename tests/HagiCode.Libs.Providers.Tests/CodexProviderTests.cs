@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using Shouldly;
+using HagiCode.Libs.Core.Acp;
 using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Environment;
 using HagiCode.Libs.Core.Execution;
@@ -747,34 +748,35 @@ public sealed class CodexProviderTests
 
     [Fact]
     [Trait("Category", "RealCli")]
-    public async Task PingAsync_can_validate_installed_codex_cli_when_opted_in()
+    [Trait("Category", "RealCliInvocationContract")]
+    public async Task ExecuteAsync_real_cli_returns_actionable_authentication_failure_when_credentials_are_absent()
     {
         if (!IsRealCliTestsEnabled())
         {
             return;
         }
 
-        var resolver = new CliExecutableResolver();
-        var executablePath = resolver.ResolveFirstAvailablePath(CodexExecutableCandidates);
-        if (executablePath is null)
-        {
-            throw new InvalidOperationException("Codex CLI was not found on PATH even though the real CLI validation path was enabled.");
-        }
+        using var sandbox = new RealCliInvocationSandbox();
+        await using var provider = new CodexProvider(new CliExecutableResolver(), new CliProcessManager(), sandbox);
 
-        var executableName = Path.GetFileNameWithoutExtension(executablePath);
-        executableName.ShouldNotBeNullOrWhiteSpace();
-        executableName.ShouldBeOneOf("codex", "codex-cli");
+        var failureMessage = await RealCliInvocationTestHarness.CaptureFailureMessageAsync(
+            provider,
+            new CodexOptions
+            {
+                WorkingDirectory = sandbox.WorkingDirectory,
+                AddDirectories = [sandbox.WorkingDirectory],
+                SandboxMode = "workspace-write",
+                ApprovalPolicy = "never",
+                SkipGitRepositoryCheck = true,
+                PoolSettings = new CliPoolSettings
+                {
+                    Enabled = false
+                }
+            },
+            "Reply with exactly the word 'pong'.",
+            TimeSpan.FromSeconds(45));
 
-        var provider = new CodexProvider(resolver, new CliProcessManager(), null);
-
-        provider.IsAvailable.ShouldBeTrue();
-
-        var result = await provider.PingAsync();
-
-        result.ProviderName.ShouldBe("codex");
-        result.Success.ShouldBeTrue();
-        result.Version.ShouldNotBeNullOrWhiteSpace();
-        result.ErrorMessage.ShouldBeNullOrWhiteSpace();
+        RealCliInvocationTestHarness.AssertActionableFailure("codex", failureMessage);
     }
 
     private static TestCodexProvider CreateProvider(
