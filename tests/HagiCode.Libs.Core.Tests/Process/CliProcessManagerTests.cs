@@ -71,7 +71,7 @@ public sealed class CliProcessManagerTests
     }
 
     [Fact]
-    public void CreateStartInfo_on_windows_wraps_resolved_batch_files_with_cmd()
+    public void CreateStartInfo_on_windows_uses_resolved_batch_files_directly_after_resolution()
     {
         var manager = new TestCliProcessManager(@"C:\tools\npm.cmd");
         var startInfo = manager.CreateStartInfo(new ProcessStartContext
@@ -80,8 +80,8 @@ public sealed class CliProcessManagerTests
             Arguments = ["install", "--global", "@openai/codex"]
         });
 
-        startInfo.FileName.ShouldBe("cmd.exe");
-        startInfo.ArgumentList.ShouldBe(["/d", "/s", "/c", @"C:\tools\npm.cmd install --global @openai/codex"]);
+        startInfo.FileName.ShouldBe(@"C:\tools\npm.cmd");
+        startInfo.ArgumentList.ShouldBe(["install", "--global", "@openai/codex"]);
         startInfo.StandardInputEncoding.ShouldNotBeNull();
         startInfo.StandardInputEncoding.WebName.ShouldBe(Encoding.UTF8.WebName);
         startInfo.StandardErrorEncoding.ShouldNotBeNull();
@@ -89,7 +89,7 @@ public sealed class CliProcessManagerTests
     }
 
     [Fact]
-    public void CreateStartInfo_on_windows_quotes_batch_paths_with_spaces_and_preserves_argument_order()
+    public void CreateStartInfo_on_windows_preserves_batch_paths_with_spaces_and_argument_order()
     {
         var manager = new TestCliProcessManager(@"C:\Program Files\Anthropic\claude.cmd");
         var startInfo = manager.CreateStartInfo(new ProcessStartContext
@@ -98,16 +98,8 @@ public sealed class CliProcessManagerTests
             Arguments = ["--output-format", "stream-json", "--append-system-prompt", "reply in Chinese"]
         });
 
-        startInfo.FileName.ShouldBe("cmd.exe");
-        startInfo.ArgumentList.ShouldBe(
-        [
-            "/d",
-            "/s",
-            "/c",
-            """
-            ""C:\Program Files\Anthropic\claude.cmd" --output-format stream-json --append-system-prompt "reply in Chinese""
-            """
-        ]);
+        startInfo.FileName.ShouldBe(@"C:\Program Files\Anthropic\claude.cmd");
+        startInfo.ArgumentList.ShouldBe(["--output-format", "stream-json", "--append-system-prompt", "reply in Chinese"]);
         startInfo.StandardErrorEncoding.ShouldNotBeNull();
         startInfo.StandardErrorEncoding.WebName.ShouldBe(Encoding.Unicode.WebName);
     }
@@ -152,8 +144,6 @@ public sealed class CliProcessManagerTests
     private sealed class TestCliProcessManager(string resolvedExecutablePath, bool isWindows = true) : CliProcessManager
     {
         protected override bool IsWindows() => isWindows;
-
-        protected override string ResolveWindowsCommandInterpreterPath() => "cmd.exe";
 
         protected override string ResolveExecutablePath(string executablePath, IReadOnlyDictionary<string, string?>? environmentVariables)
             => resolvedExecutablePath;

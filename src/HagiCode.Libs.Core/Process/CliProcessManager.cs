@@ -193,15 +193,6 @@ public class CliProcessManager
     protected virtual bool IsWindows() => OperatingSystem.IsWindows();
 
     /// <summary>
-    /// Resolves the command interpreter path used for Windows batch shims.
-    /// </summary>
-    protected virtual string ResolveWindowsCommandInterpreterPath()
-    {
-        var comspec = System.Environment.GetEnvironmentVariable("ComSpec");
-        return string.IsNullOrWhiteSpace(comspec) ? "cmd.exe" : comspec;
-    }
-
-    /// <summary>
     /// Resolves an executable path before launch.
     /// </summary>
     protected virtual string ResolveExecutablePath(
@@ -212,7 +203,7 @@ public class CliProcessManager
     }
 
     /// <summary>
-    /// Resolves the stderr encoding used when a Windows batch shim is launched through cmd.exe.
+    /// Resolves the stderr encoding used when a Windows batch shim is launched.
     /// </summary>
     protected virtual Encoding ResolveWindowsBatchStandardErrorEncoding(Encoding fallbackEncoding)
     {
@@ -226,12 +217,6 @@ public class CliProcessManager
         if (IsWindows() && IsBatchFile(resolvedExecutablePath))
         {
             startInfo.StandardErrorEncoding = ResolveWindowsBatchStandardErrorEncoding(context.OutputEncoding);
-            startInfo.FileName = ResolveWindowsCommandInterpreterPath();
-            startInfo.ArgumentList.Add("/d");
-            startInfo.ArgumentList.Add("/s");
-            startInfo.ArgumentList.Add("/c");
-            startInfo.ArgumentList.Add(BuildWindowsBatchCommandInvocation(resolvedExecutablePath, context.Arguments));
-            return;
         }
 
         startInfo.FileName = resolvedExecutablePath;
@@ -240,57 +225,6 @@ public class CliProcessManager
         {
             startInfo.ArgumentList.Add(argument);
         }
-    }
-
-    private static string BuildWindowsBatchCommandInvocation(string executablePath, IReadOnlyList<string> arguments)
-    {
-        var command = BuildWindowsBatchCommand(executablePath, arguments);
-        return RequiresCmdQuoting(executablePath)
-            ? $"\"{command}\""
-            : command;
-    }
-
-    private static string BuildWindowsBatchCommand(string executablePath, IReadOnlyList<string> arguments)
-    {
-        var builder = new StringBuilder();
-        builder.Append(QuoteForCmdCommand(executablePath));
-
-        foreach (var argument in arguments)
-        {
-            builder.Append(' ');
-            builder.Append(QuoteForCmdCommand(argument));
-        }
-
-        return builder.ToString();
-    }
-
-    private static string QuoteForCmdCommand(string value)
-    {
-        if (string.IsNullOrEmpty(value))
-        {
-            return "\"\"";
-        }
-
-        if (!RequiresCmdQuoting(value))
-        {
-            return value;
-        }
-
-        return "\"" + value.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
-    }
-
-    private static bool RequiresCmdQuoting(string value)
-    {
-        foreach (var character in value)
-        {
-            if (char.IsWhiteSpace(character)
-                || character is '"' or '&' or '|' or '<' or '>' or '(' or ')' or '^' or '!' or '%')
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private static void ApplyEnvironmentVariables(ProcessStartInfo startInfo, IReadOnlyDictionary<string, string?>? environmentVariables)

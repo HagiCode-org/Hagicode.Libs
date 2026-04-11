@@ -101,16 +101,8 @@ public sealed class SubprocessTransportTests
 
         messages.Select(static message => message.Type).ShouldBe(["assistant", "result"]);
         manager.LastStartInfo.ShouldNotBeNull();
-        manager.LastStartInfo.FileName.ShouldBe("cmd.exe");
-        manager.LastStartInfo.ArgumentList.ShouldBe(
-        [
-            "/d",
-            "/s",
-            "/c",
-            """
-            ""C:\Program Files\Anthropic\claude.cmd" --output-format stream-json --append-system-prompt "reply in Chinese""
-            """
-        ]);
+        manager.LastStartInfo.FileName.ShouldBe(@"C:\Program Files\Anthropic\claude.cmd");
+        manager.LastStartInfo.ArgumentList.ShouldBe(["--output-format", "stream-json", "--append-system-prompt", "reply in Chinese"]);
         manager.LastStartInfo.StandardErrorEncoding.ShouldNotBeNull();
         manager.LastStartInfo.StandardErrorEncoding.WebName.ShouldBe(Encoding.Unicode.WebName);
     }
@@ -163,8 +155,6 @@ public sealed class SubprocessTransportTests
         public ProcessStartInfo? LastStartInfo { get; private set; }
 
         protected override bool IsWindows() => true;
-
-        protected override string ResolveWindowsCommandInterpreterPath() => "cmd.exe";
 
         protected override string ResolveExecutablePath(string executablePath, IReadOnlyDictionary<string, string?>? environmentVariables)
             => resolvedExecutablePath;
