@@ -217,6 +217,18 @@ public sealed class CopilotProviderTests
     }
 
     [Fact]
+    public void NormalizeFailureMessage_formats_startup_timeout_with_actionable_marker()
+    {
+        var message = GitHubCopilotSdkGateway.NormalizeFailureMessage(
+            rawMessage: null,
+            startupTimedOut: true,
+            startupTimeout: TimeSpan.FromSeconds(20));
+
+        message.ShouldContain("[startup_timeout]");
+        message.ShouldContain("timed out after 20 seconds");
+    }
+
+    [Fact]
     public async Task ExecuteAsync_uses_explicit_session_id_for_provider_native_resume_contract()
     {
         var gateway = new StubCopilotSdkGateway(

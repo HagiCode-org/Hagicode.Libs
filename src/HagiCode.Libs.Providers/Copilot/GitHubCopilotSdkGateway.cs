@@ -60,6 +60,18 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
 
             return new PooledCopilotSdkRuntime(client, session, environmentScope, lifecycleEvent);
         }
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested && startupCancellationTokenSource.IsCancellationRequested)
+        {
+            if (client is not null)
+            {
+                await client.DisposeAsync();
+            }
+
+            await environmentScope.DisposeAsync();
+            throw new InvalidOperationException(
+                NormalizeFailureMessage(rawMessage: null, startupTimedOut: true, startupTimeout: request.StartupTimeout),
+                ex);
+        }
         catch
         {
             if (client is not null)
