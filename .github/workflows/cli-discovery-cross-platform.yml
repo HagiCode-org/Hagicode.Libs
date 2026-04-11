@@ -94,11 +94,91 @@ jobs:
           "HAGICODE_WINDOWS_TEST_LOCALE=zh-CN" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Host "Configured zh-CN locale hints for Windows integration test lane."
 
+      - name: Diagnose Windows zh-CN Claude CLI environment before install
+        if: runner.os == 'Windows' && matrix.locale == 'zh-CN'
+        shell: pwsh
+        run: |
+          function Show-CommandDiagnostics {
+            param([string]$CommandName)
+
+            Write-Host "---- where.exe $CommandName ----"
+            & where.exe $CommandName 2>&1 | ForEach-Object { Write-Host $_ }
+
+            Write-Host "---- Get-Command $CommandName -All ----"
+            $command = Get-Command $CommandName -All -ErrorAction SilentlyContinue
+            if ($null -eq $command) {
+              Write-Host "$CommandName not found via Get-Command."
+              return
+            }
+
+            $command | Format-List Name, CommandType, Source, Definition, Path
+          }
+
+          Write-Host "---- Windows zh-CN pre-install diagnostics ----"
+          Write-Host "PATH=$env:PATH"
+          Write-Host "ComSpec=$env:ComSpec"
+          Write-Host "DOTNET_CLI_UI_LANGUAGE=$env:DOTNET_CLI_UI_LANGUAGE"
+          Write-Host "HAGICODE_WINDOWS_TEST_LOCALE=$env:HAGICODE_WINDOWS_TEST_LOCALE"
+
+          Write-Host "---- chcp ----"
+          chcp.com
+
+          Write-Host "---- [Console]::InputEncoding ----"
+          [Console]::InputEncoding | Format-List *
+
+          Write-Host "---- [Console]::OutputEncoding ----"
+          [Console]::OutputEncoding | Format-List *
+
+          Write-Host "---- Get-Culture ----"
+          Get-Culture | Format-List *
+
+          Write-Host "---- Get-UICulture ----"
+          Get-UICulture | Format-List *
+
+          Show-CommandDiagnostics "claude"
+          Show-CommandDiagnostics "claude.cmd"
+
       - name: Install CI CLIs
         run: |
           echo "Installing CI CLIs on ${RUNNER_OS}"
           echo "Locale hints: DOTNET_CLI_UI_LANGUAGE=${DOTNET_CLI_UI_LANGUAGE:-<unset>} LANG=${LANG:-<unset>} LC_ALL=${LC_ALL:-<unset>}"
           dotnet run --project src/HagiCode.Libs.CiSetup.Console -- --install
+
+      - name: Diagnose Windows zh-CN Claude CLI environment after install
+        if: runner.os == 'Windows' && matrix.locale == 'zh-CN'
+        shell: pwsh
+        run: |
+          function Show-CommandDiagnostics {
+            param([string]$CommandName)
+
+            Write-Host "---- where.exe $CommandName ----"
+            & where.exe $CommandName 2>&1 | ForEach-Object { Write-Host $_ }
+
+            Write-Host "---- Get-Command $CommandName -All ----"
+            $command = Get-Command $CommandName -All -ErrorAction SilentlyContinue
+            if ($null -eq $command) {
+              Write-Host "$CommandName not found via Get-Command."
+              return
+            }
+
+            $command | Format-List Name, CommandType, Source, Definition, Path
+          }
+
+          Write-Host "---- Windows zh-CN post-install diagnostics ----"
+          Write-Host "PATH=$env:PATH"
+          Write-Host "ComSpec=$env:ComSpec"
+
+          Write-Host "---- chcp ----"
+          chcp.com
+
+          Write-Host "---- [Console]::InputEncoding ----"
+          [Console]::InputEncoding | Format-List *
+
+          Write-Host "---- [Console]::OutputEncoding ----"
+          [Console]::OutputEncoding | Format-List *
+
+          Show-CommandDiagnostics "claude"
+          Show-CommandDiagnostics "claude.cmd"
 
       - name: Restore HagiCode.Libs solution
         run: |
@@ -111,4 +191,13 @@ jobs:
           dotnet test tests/HagiCode.Libs.Providers.Tests/HagiCode.Libs.Providers.Tests.csproj \
             --no-restore \
             --filter "Category=RealCliInvocationContract" \
+            --logger "console;verbosity=normal"
+
+      - name: Run Windows zh-CN real Claude whitespace shim regression
+        if: runner.os == 'Windows' && matrix.locale == 'zh-CN'
+        run: |
+          echo "Running Windows zh-CN Claude whitespace shim regression on ${RUNNER_OS}"
+          dotnet test tests/HagiCode.Libs.Providers.Tests/HagiCode.Libs.Providers.Tests.csproj \
+            --no-restore \
+            --filter "FullyQualifiedName~ExecuteAsync_real_cli_windows_zh_cn_whitespace_cmd_shim_surfaces_actionable_failure_without_mojibake" \
             --logger "console;verbosity=normal"
