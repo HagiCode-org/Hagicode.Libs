@@ -260,7 +260,11 @@ public sealed class OpenCodeProviderTests
         var path = Path.Combine(Path.GetTempPath(), fileName);
         var content = $"#!/usr/bin/env bash\nset -euo pipefail\nprintf 'opencode server listening on {baseUri}\\n'\nwhile true; do sleep 1; done\n";
         File.WriteAllText(path, content, new UTF8Encoding(false));
-        File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
         return path;
     }
 
