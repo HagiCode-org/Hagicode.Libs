@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
@@ -480,36 +481,39 @@ public sealed class ClaudeCodeProviderTests
     }
 
     [Fact]
-    public void RealCliWhitespaceWrapperSandbox_on_windows_prefers_cmd_companion_for_extensionless_npm_shims()
+    public void RealCliWhitespaceWrapperSandbox_on_windows_prefers_cmd_alias_for_extensionless_npm_shims()
     {
-        var currentDirectory = Directory.GetCurrentDirectory();
-        var rootDirectory = Path.Combine(Path.GetTempPath(), $"hagicode-libs-claude-wrapper-{Guid.NewGuid():N}");
+        using var fixture = TemporaryWrapperTargetFixture.Create();
+        var aliasDirectory = fixture.CreateDirectory("Node Global Tools");
 
-        try
-        {
-            Directory.CreateDirectory(rootDirectory);
-            Directory.SetCurrentDirectory(rootDirectory);
+        var extensionlessShimPath = fixture.CreateFile("claude");
+        var cmdShimPath = fixture.CreateFile(Path.Combine("Node Global Tools", "claude.cmd"));
+        fixture.CreateFile(Path.Combine("Node Global Tools", "claude.ps1"));
 
-            var extensionlessShimPath = Path.Combine(rootDirectory, "claude");
-            var cmdShimPath = Path.Combine(rootDirectory, "claude.cmd");
-            File.WriteAllText(extensionlessShimPath, string.Empty, new UTF8Encoding(false));
-            File.WriteAllText(cmdShimPath, string.Empty, new UTF8Encoding(false));
+        var resolvedPath = RealCliWhitespaceWrapperSandbox.ResolveAliasedExecutablePath(
+            aliasDirectory,
+            extensionlessShimPath,
+            isWindows: true);
 
-            var resolvedPath = RealCliWhitespaceWrapperSandbox.ResolveWrapperTargetExecutablePath(
-                extensionlessShimPath,
-                isWindows: true);
+        resolvedPath.ShouldBe(cmdShimPath);
+    }
 
-            resolvedPath.ShouldBe(cmdShimPath);
-        }
-        finally
-        {
-            Directory.SetCurrentDirectory(currentDirectory);
+    [Fact]
+    public void RealCliWhitespaceWrapperSandbox_on_windows_preserves_cmd_alias_for_cmd_shims()
+    {
+        using var fixture = TemporaryWrapperTargetFixture.Create();
+        var aliasDirectory = fixture.CreateDirectory("Node Global Tools");
 
-            if (Directory.Exists(rootDirectory))
-            {
-                Directory.Delete(rootDirectory, recursive: true);
-            }
-        }
+        var realCmdShimPath = fixture.CreateFile("claude.cmd");
+        var aliasedCmdShimPath = fixture.CreateFile(Path.Combine("Node Global Tools", "claude.cmd"));
+        fixture.CreateFile(Path.Combine("Node Global Tools", "claude.ps1"));
+
+        var resolvedPath = RealCliWhitespaceWrapperSandbox.ResolveAliasedExecutablePath(
+            aliasDirectory,
+            realCmdShimPath,
+            isWindows: true);
+
+        resolvedPath.ShouldBe(aliasedCmdShimPath);
     }
 
     private static TestClaudeCodeProvider CreateProvider(
@@ -657,17 +661,18 @@ public sealed class ClaudeCodeProviderTests
             _rootDirectory = Path.Combine(innerSandbox.TempDirectory, "Claude Wrapper With Spaces");
             Directory.CreateDirectory(_rootDirectory);
 
-            var wrapperTargetPath = ResolveWrapperTargetExecutablePath(realExecutablePath, OperatingSystem.IsWindows());
-            WrapperPath = Path.Combine(_rootDirectory, "claude.cmd");
-            File.WriteAllText(
-                WrapperPath,
-                $$"""
-                @echo off
-                setlocal
-                call "{{wrapperTargetPath}}" %*
-                exit /b %ERRORLEVEL%
-                """,
-                new UTF8Encoding(false));
+            if (OperatingSystem.IsWindows())
+            {
+                var executableDirectory = Path.GetDirectoryName(realExecutablePath)
+                    ?? throw new InvalidOperationException("The real Claude executable path must include a parent directory.");
+                var aliasDirectory = Path.Combine(_rootDirectory, "Node Global Tools");
+                CreateDirectoryJunction(aliasDirectory, executableDirectory);
+                WrapperPath = ResolveAliasedExecutablePath(aliasDirectory, realExecutablePath, isWindows: true);
+            }
+            else
+            {
+                WrapperPath = realExecutablePath;
+            }
 
             var mergedEnvironment = innerSandbox.ResolveAsync().GetAwaiter().GetResult()
                 .ToDictionary(static pair => pair.Key, static pair => pair.Value, StringComparer.Ordinal);
@@ -686,25 +691,68 @@ public sealed class ClaudeCodeProviderTests
 
         public string WrapperPath { get; }
 
-        internal static string ResolveWrapperTargetExecutablePath(string realExecutablePath, bool isWindows)
+        internal static string ResolveAliasedExecutablePath(string aliasDirectory, string realExecutablePath, bool isWindows)
         {
+            ArgumentException.ThrowIfNullOrWhiteSpace(aliasDirectory);
             ArgumentException.ThrowIfNullOrWhiteSpace(realExecutablePath);
 
-            if (!isWindows || !string.IsNullOrWhiteSpace(Path.GetExtension(realExecutablePath)))
+            if (!isWindows)
             {
-                return realExecutablePath;
+                return Path.Combine(aliasDirectory, Path.GetFileName(realExecutablePath));
             }
 
-            foreach (var extension in new[] { ".cmd", ".bat", ".exe" })
+            var extension = Path.GetExtension(realExecutablePath);
+            var fileName = Path.GetFileName(realExecutablePath);
+            if (!string.IsNullOrWhiteSpace(extension))
             {
-                var companionPath = realExecutablePath + extension;
-                if (File.Exists(companionPath))
+                var exactAliasPath = Path.Combine(aliasDirectory, fileName);
+                if (File.Exists(exactAliasPath))
                 {
-                    return companionPath;
+                    return exactAliasPath;
                 }
             }
 
-            return realExecutablePath;
+            var baseName = Path.GetFileNameWithoutExtension(realExecutablePath);
+            foreach (var fallbackExtension in new[] { ".cmd", ".ps1", ".bat", ".exe", string.Empty })
+            {
+                var candidatePath = Path.Combine(aliasDirectory, baseName + fallbackExtension);
+                if (File.Exists(candidatePath))
+                {
+                    return candidatePath;
+                }
+            }
+
+            return Path.Combine(aliasDirectory, fileName);
+        }
+
+        private static void CreateDirectoryJunction(string linkPath, string targetPath)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(linkPath);
+            ArgumentException.ThrowIfNullOrWhiteSpace(targetPath);
+
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            startInfo.ArgumentList.Add("/d");
+            startInfo.ArgumentList.Add("/s");
+            startInfo.ArgumentList.Add("/c");
+            startInfo.ArgumentList.Add($"mklink /J \"{linkPath}\" \"{targetPath}\"");
+
+            using var process = Process.Start(startInfo)
+                ?? throw new InvalidOperationException("Failed to start cmd.exe while creating the whitespace-path junction.");
+            process.WaitForExit();
+
+            if (process.ExitCode != 0 || !Directory.Exists(linkPath))
+            {
+                var standardError = process.StandardError.ReadToEnd();
+                throw new InvalidOperationException(
+                    $"Failed to create the whitespace-path junction for the Claude wrapper sandbox. {standardError}".Trim());
+            }
         }
 
         public Task<IReadOnlyDictionary<string, string?>> ResolveAsync(CancellationToken cancellationToken = default)
@@ -721,6 +769,39 @@ public sealed class ClaudeCodeProviderTests
 
             _disposed = true;
             RealCliInvocationSandbox.DeleteDirectoryWithRetries(_rootDirectory);
+        }
+    }
+
+    private sealed class TemporaryWrapperTargetFixture(string rootDirectory) : IDisposable
+    {
+        public static TemporaryWrapperTargetFixture Create()
+        {
+            var rootDirectory = Path.Combine(Path.GetTempPath(), $"hagicode-libs-claude-wrapper-{Guid.NewGuid():N}");
+            Directory.CreateDirectory(rootDirectory);
+            return new TemporaryWrapperTargetFixture(rootDirectory);
+        }
+
+        public string CreateDirectory(string relativePath)
+        {
+            var fullPath = Path.Combine(rootDirectory, relativePath);
+            Directory.CreateDirectory(fullPath);
+            return fullPath;
+        }
+
+        public string CreateFile(string relativePath)
+        {
+            var fullPath = Path.Combine(rootDirectory, relativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+            File.WriteAllText(fullPath, string.Empty, new UTF8Encoding(false));
+            return fullPath;
+        }
+
+        public void Dispose()
+        {
+            if (Directory.Exists(rootDirectory))
+            {
+                Directory.Delete(rootDirectory, recursive: true);
+            }
         }
     }
 
