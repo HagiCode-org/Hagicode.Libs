@@ -47,8 +47,21 @@ public sealed class SubprocessTransport : ICliTransport
         var handle = EnsureConnected();
 
         var payload = SerializeMessage(message);
-        await handle.StandardInput.WriteLineAsync(payload.AsMemory(), cancellationToken);
-        await handle.StandardInput.FlushAsync(cancellationToken);
+        try
+        {
+            await handle.StandardInput.WriteLineAsync(payload.AsMemory(), cancellationToken);
+            await handle.StandardInput.FlushAsync(cancellationToken);
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException)
+        {
+            var exitException = await TryCreateUnexpectedExitExceptionAsync(handle, cancellationToken, ex).ConfigureAwait(false);
+            if (exitException is not null)
+            {
+                throw exitException;
+            }
+
+            throw;
+        }
     }
 
     /// <inheritdoc />
@@ -62,11 +75,11 @@ public sealed class SubprocessTransport : ICliTransport
             var line = await handle.StandardOutput.ReadLineAsync(cancellationToken);
             if (line is null)
             {
+                await WaitBrieflyForExitAsync(handle, cancellationToken).ConfigureAwait(false);
+
                 if (handle.Process.HasExited && handle.Process.ExitCode != 0)
                 {
-                    var standardError = await handle.StandardError.ReadToEndAsync(cancellationToken);
-                    throw new InvalidOperationException(
-                        $"The subprocess exited unexpectedly with code {handle.Process.ExitCode}: {standardError}");
+                    throw await CreateUnexpectedExitExceptionAsync(handle, cancellationToken).ConfigureAwait(false);
                 }
 
                 yield break;
@@ -176,5 +189,65 @@ public sealed class SubprocessTransport : ICliTransport
         return line.Length > 0 && line[0] == '\uFEFF'
             ? line[1..]
             : line;
+    }
+
+    private static async Task<InvalidOperationException?> TryCreateUnexpectedExitExceptionAsync(
+        CliProcessHandle handle,
+        CancellationToken cancellationToken,
+        Exception innerException)
+    {
+        await WaitBrieflyForExitAsync(handle, cancellationToken).ConfigureAwait(false);
+
+        if (!handle.Process.HasExited)
+        {
+            return null;
+        }
+
+        return await CreateUnexpectedExitExceptionAsync(handle, cancellationToken, innerException).ConfigureAwait(false);
+    }
+
+    private static async Task<InvalidOperationException> CreateUnexpectedExitExceptionAsync(
+        CliProcessHandle handle,
+        CancellationToken cancellationToken,
+        Exception? innerException = null)
+    {
+        var standardError = await TryReadStandardErrorAsync(handle, cancellationToken).ConfigureAwait(false);
+        return new InvalidOperationException(
+            FormatUnexpectedExitMessage(handle.Process.ExitCode, standardError),
+            innerException);
+    }
+
+    private static async Task<string> TryReadStandardErrorAsync(CliProcessHandle handle, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await handle.StandardError.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException)
+        {
+            return string.Empty;
+        }
+    }
+
+    private static string FormatUnexpectedExitMessage(int exitCode, string standardError)
+    {
+        return string.IsNullOrWhiteSpace(standardError)
+            ? $"The subprocess exited unexpectedly with code {exitCode}."
+            : $"The subprocess exited unexpectedly with code {exitCode}: {standardError}";
+    }
+
+    private static async Task WaitBrieflyForExitAsync(CliProcessHandle handle, CancellationToken cancellationToken)
+    {
+        if (handle.Process.HasExited)
+        {
+            return;
+        }
+
+        var waitForExitTask = handle.Process.WaitForExitAsync(cancellationToken);
+        var completedTask = await Task.WhenAny(waitForExitTask, Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken)).ConfigureAwait(false);
+        if (completedTask == waitForExitTask)
+        {
+            await waitForExitTask.ConfigureAwait(false);
+        }
     }
 }

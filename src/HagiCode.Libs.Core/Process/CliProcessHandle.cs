@@ -49,10 +49,21 @@ public sealed class CliProcessHandle : IAsyncDisposable
         }
 
         _disposed = true;
-        StandardInput.Dispose();
-        StandardOutput.Dispose();
-        StandardError.Dispose();
+        TryDispose(StandardInput);
+        TryDispose(StandardOutput);
+        TryDispose(StandardError);
         Process.Dispose();
         return ValueTask.CompletedTask;
+    }
+
+    private static void TryDispose(IDisposable disposable)
+    {
+        try
+        {
+            disposable.Dispose();
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException)
+        {
+        }
     }
 }

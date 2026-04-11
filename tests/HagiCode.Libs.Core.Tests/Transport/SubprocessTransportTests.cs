@@ -138,6 +138,26 @@ public sealed class SubprocessTransportTests
         exception.Message.ShouldContain("startup failed");
     }
 
+    [Fact]
+    public async Task SubprocessTransport_surfaces_exit_diagnostics_when_send_fails_after_process_exits()
+    {
+        var manager = new CliProcessManager();
+        await using var transport = new SubprocessTransport(manager, new ProcessStartContext
+        {
+            ExecutablePath = "/bin/sh",
+            Arguments = ["-lc", "printf 'auth required' >&2; exit 23"]
+        });
+
+        await transport.ConnectAsync();
+        await Task.Delay(150);
+
+        var exception = await Should.ThrowAsync<InvalidOperationException>(async () =>
+            await transport.SendAsync(new CliMessage("user", JsonSerializer.SerializeToElement(new { text = "hello" }))));
+
+        exception.Message.ShouldContain("code 23");
+        exception.Message.ShouldContain("auth required");
+    }
+
     private sealed class WindowsBatchRecordingCliProcessManager(string resolvedExecutablePath, string shellCommand) : CliProcessManager
     {
         public ProcessStartInfo? LastStartInfo { get; private set; }
