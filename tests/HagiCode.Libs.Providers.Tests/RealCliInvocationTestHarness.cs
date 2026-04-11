@@ -204,6 +204,7 @@ internal static class RealCliInvocationTestHarness
 
 internal sealed class RealCliInvocationSandbox : IRuntimeEnvironmentResolver, IDisposable
 {
+    private static readonly TimeSpan DeleteRetryDelay = TimeSpan.FromMilliseconds(250);
     private static readonly string[] SensitiveEnvironmentKeys =
     [
         "ANTHROPIC_API_KEY",
@@ -220,6 +221,7 @@ internal sealed class RealCliInvocationSandbox : IRuntimeEnvironmentResolver, ID
 
     private readonly string _rootDirectory;
     private readonly IReadOnlyDictionary<string, string?> _environment;
+    private bool _disposed;
 
     public RealCliInvocationSandbox()
     {
@@ -293,9 +295,121 @@ internal sealed class RealCliInvocationSandbox : IRuntimeEnvironmentResolver, ID
 
     public void Dispose()
     {
-        if (Directory.Exists(_rootDirectory))
+        if (_disposed)
         {
-            Directory.Delete(_rootDirectory, recursive: true);
+            return;
+        }
+
+        _disposed = true;
+        DeleteDirectoryWithRetries(_rootDirectory);
+    }
+
+    internal static void DeleteDirectoryWithRetries(
+        string rootDirectory,
+        int maxAttempts = 8,
+        TimeSpan? retryDelay = null,
+        Action<string>? deleteDirectory = null,
+        Action<TimeSpan>? sleep = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(rootDirectory);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxAttempts);
+
+        if (!Directory.Exists(rootDirectory))
+        {
+            return;
+        }
+
+        deleteDirectory ??= static directory => Directory.Delete(directory, recursive: true);
+        sleep ??= static delay => Thread.Sleep(delay);
+        var delayBetweenAttempts = retryDelay ?? DeleteRetryDelay;
+        Exception? lastException = null;
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            try
+            {
+                NormalizeAttributesRecursively(rootDirectory);
+                deleteDirectory(rootDirectory);
+
+                if (!Directory.Exists(rootDirectory))
+                {
+                    return;
+                }
+            }
+            catch (Exception ex) when (IsRetryableDeleteException(ex) && attempt < maxAttempts)
+            {
+                lastException = ex;
+                sleep(delayBetweenAttempts);
+                continue;
+            }
+            catch (Exception ex) when (IsRetryableDeleteException(ex))
+            {
+                lastException = ex;
+            }
+
+            if (attempt < maxAttempts)
+            {
+                sleep(delayBetweenAttempts);
+                continue;
+            }
+
+            break;
+        }
+
+        throw new IOException(
+            $"Failed to delete sandbox directory '{rootDirectory}' after {maxAttempts} attempts.",
+            lastException);
+    }
+
+    private static bool IsRetryableDeleteException(Exception exception)
+    {
+        return exception is IOException or UnauthorizedAccessException;
+    }
+
+    private static void NormalizeAttributesRecursively(string rootDirectory)
+    {
+        if (!Directory.Exists(rootDirectory))
+        {
+            return;
+        }
+
+        var pendingDirectories = new Stack<string>();
+        pendingDirectories.Push(rootDirectory);
+
+        while (pendingDirectories.Count > 0)
+        {
+            var currentDirectory = pendingDirectories.Pop();
+            TrySetAttributesToNormal(currentDirectory);
+
+            foreach (var file in Directory.EnumerateFiles(currentDirectory))
+            {
+                TrySetAttributesToNormal(file);
+            }
+
+            foreach (var directory in Directory.EnumerateDirectories(currentDirectory))
+            {
+                pendingDirectories.Push(directory);
+            }
+        }
+    }
+
+    private static void TrySetAttributesToNormal(string path)
+    {
+        try
+        {
+            File.SetAttributes(path, FileAttributes.Normal);
+        }
+        catch (DirectoryNotFoundException)
+        {
+        }
+        catch (FileNotFoundException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+        catch (IOException)
+        {
         }
     }
 }
