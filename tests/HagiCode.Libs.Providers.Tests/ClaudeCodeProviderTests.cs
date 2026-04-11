@@ -479,6 +479,39 @@ public sealed class ClaudeCodeProviderTests
         RealCliInvocationTestHarness.AssertActionableFailure("claude-code/windows-zh-cn-whitespace-shim", failureMessage);
     }
 
+    [Fact]
+    public void RealCliWhitespaceWrapperSandbox_on_windows_prefers_cmd_companion_for_extensionless_npm_shims()
+    {
+        var currentDirectory = Directory.GetCurrentDirectory();
+        var rootDirectory = Path.Combine(Path.GetTempPath(), $"hagicode-libs-claude-wrapper-{Guid.NewGuid():N}");
+
+        try
+        {
+            Directory.CreateDirectory(rootDirectory);
+            Directory.SetCurrentDirectory(rootDirectory);
+
+            var extensionlessShimPath = Path.Combine(rootDirectory, "claude");
+            var cmdShimPath = Path.Combine(rootDirectory, "claude.cmd");
+            File.WriteAllText(extensionlessShimPath, string.Empty, new UTF8Encoding(false));
+            File.WriteAllText(cmdShimPath, string.Empty, new UTF8Encoding(false));
+
+            var resolvedPath = RealCliWhitespaceWrapperSandbox.ResolveWrapperTargetExecutablePath(
+                extensionlessShimPath,
+                isWindows: true);
+
+            resolvedPath.ShouldBe(cmdShimPath);
+        }
+        finally
+        {
+            Directory.SetCurrentDirectory(currentDirectory);
+
+            if (Directory.Exists(rootDirectory))
+            {
+                Directory.Delete(rootDirectory, recursive: true);
+            }
+        }
+    }
+
     private static TestClaudeCodeProvider CreateProvider(
         CliExecutableResolver? executableResolver = null,
         CliProcessManager? processManager = null)
@@ -624,13 +657,14 @@ public sealed class ClaudeCodeProviderTests
             _rootDirectory = Path.Combine(innerSandbox.TempDirectory, "Claude Wrapper With Spaces");
             Directory.CreateDirectory(_rootDirectory);
 
+            var wrapperTargetPath = ResolveWrapperTargetExecutablePath(realExecutablePath, OperatingSystem.IsWindows());
             WrapperPath = Path.Combine(_rootDirectory, "claude.cmd");
             File.WriteAllText(
                 WrapperPath,
                 $$"""
                 @echo off
                 setlocal
-                call "{{realExecutablePath}}" %*
+                call "{{wrapperTargetPath}}" %*
                 exit /b %ERRORLEVEL%
                 """,
                 new UTF8Encoding(false));
@@ -651,6 +685,27 @@ public sealed class ClaudeCodeProviderTests
         }
 
         public string WrapperPath { get; }
+
+        internal static string ResolveWrapperTargetExecutablePath(string realExecutablePath, bool isWindows)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(realExecutablePath);
+
+            if (!isWindows || !string.IsNullOrWhiteSpace(Path.GetExtension(realExecutablePath)))
+            {
+                return realExecutablePath;
+            }
+
+            foreach (var extension in new[] { ".cmd", ".bat", ".exe" })
+            {
+                var companionPath = realExecutablePath + extension;
+                if (File.Exists(companionPath))
+                {
+                    return companionPath;
+                }
+            }
+
+            return realExecutablePath;
+        }
 
         public Task<IReadOnlyDictionary<string, string?>> ResolveAsync(CancellationToken cancellationToken = default)
         {
