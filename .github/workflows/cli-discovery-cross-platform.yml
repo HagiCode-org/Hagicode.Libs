@@ -102,7 +102,20 @@ jobs:
             param([string]$CommandName)
 
             Write-Host "---- where.exe $CommandName ----"
-            & where.exe $CommandName 2>&1 | ForEach-Object { Write-Host $_ }
+            $whereOutput = & where.exe $CommandName 2>&1
+            $whereExitCode = $LASTEXITCODE
+            if ($whereOutput) {
+              $whereOutput | ForEach-Object { Write-Host $_ }
+            }
+            else {
+              Write-Host "(no output)"
+            }
+
+            if ($whereExitCode -ne 0) {
+              Write-Host "where.exe did not find $CommandName (exit code $whereExitCode)."
+            }
+
+            $global:LASTEXITCODE = 0
 
             Write-Host "---- Get-Command $CommandName -All ----"
             $command = Get-Command $CommandName -All -ErrorAction SilentlyContinue
@@ -152,7 +165,20 @@ jobs:
             param([string]$CommandName)
 
             Write-Host "---- where.exe $CommandName ----"
-            & where.exe $CommandName 2>&1 | ForEach-Object { Write-Host $_ }
+            $whereOutput = & where.exe $CommandName 2>&1
+            $whereExitCode = $LASTEXITCODE
+            if ($whereOutput) {
+              $whereOutput | ForEach-Object { Write-Host $_ }
+            }
+            else {
+              Write-Host "(no output)"
+            }
+
+            if ($whereExitCode -ne 0) {
+              Write-Host "where.exe did not find $CommandName (exit code $whereExitCode)."
+            }
+
+            $global:LASTEXITCODE = 0
 
             Write-Host "---- Get-Command $CommandName -All ----"
             $command = Get-Command $CommandName -All -ErrorAction SilentlyContinue
