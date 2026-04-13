@@ -260,6 +260,46 @@ public sealed class HermesProviderTests
     }
 
     [Fact]
+    public void NormalizeNotification_filters_thought_chunks_without_affecting_visible_text_chunks()
+    {
+        var thoughtNotification = new AcpNotification(
+            "session/update",
+            JsonSerializer.SerializeToElement(new
+            {
+                sessionId = "session-1",
+                update = new
+                {
+                    sessionUpdate = "agent_thought_chunk",
+                    content = new { text = "hidden thinking" }
+                }
+            }));
+
+        var visibleNotification = new AcpNotification(
+            "session/update",
+            JsonSerializer.SerializeToElement(new
+            {
+                sessionId = "session-1",
+                update = new
+                {
+                    sessionUpdate = "agent_message_chunk",
+                    content = new object[]
+                    {
+                        new { type = "text", text = "hello" },
+                        new { type = "text", text = " world" }
+                    }
+                }
+            }));
+
+        var thoughtMessages = HermesAcpMessageMapper.NormalizeNotification(thoughtNotification);
+        var visibleMessages = HermesAcpMessageMapper.NormalizeNotification(visibleNotification);
+
+        thoughtMessages.ShouldBeEmpty();
+        visibleMessages.ShouldHaveSingleItem();
+        visibleMessages[0].Type.ShouldBe("assistant");
+        visibleMessages[0].Content.GetProperty("text").GetString().ShouldBe("hello world");
+    }
+
+    [Fact]
     public void NormalizeNotification_preserves_space_only_and_newline_only_fragments()
     {
         var notification = new AcpNotification(

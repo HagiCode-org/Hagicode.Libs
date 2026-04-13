@@ -117,7 +117,7 @@ internal static class HermesAcpMessageMapper
         return updateKind switch
         {
             "agent_message_chunk" => [CreateAssistantUpdateMessage(sessionId, updateElement, "assistant")],
-            "agent_thought_chunk" => [CreateAssistantUpdateMessage(sessionId, updateElement, "assistant.thought")],
+            "agent_thought_chunk" => [],
             "tool_call" => [CreateUpdateMessage("tool.call", sessionId, updateElement)],
             "tool_call_update" => [CreateUpdateMessage("tool.update", sessionId, updateElement)],
             "prompt_completed" => [CreatePromptCompletedMessage(sessionId, updateElement)],
