@@ -51,7 +51,7 @@ public static class ServiceCollectionExtensions
             registry.Register("codex", new CliPoolSettings { MaxActiveSessions = 50, IdleTimeout = TimeSpan.FromMinutes(10) });
             registry.Register("deepagents", new CliPoolSettings { MaxActiveSessions = 50, IdleTimeout = TimeSpan.FromMinutes(10) });
             registry.Register("gemini", new CliPoolSettings { MaxActiveSessions = 50, IdleTimeout = TimeSpan.FromMinutes(10) });
-            registry.Register("hermes", new CliPoolSettings { MaxActiveSessions = 50, IdleTimeout = TimeSpan.FromMinutes(10) });
+            registry.Register("hermes", new CliPoolSettings { MaxActiveSessions = 500, IdleTimeout = TimeSpan.FromHours(24) });
             registry.Register("kimi", new CliPoolSettings { MaxActiveSessions = 50, IdleTimeout = TimeSpan.FromMinutes(10) });
             registry.Register("kiro", new CliPoolSettings { MaxActiveSessions = 50, IdleTimeout = TimeSpan.FromMinutes(10) });
             registry.Register("qodercli", new CliPoolSettings { MaxActiveSessions = 50, IdleTimeout = TimeSpan.FromMinutes(10) });
