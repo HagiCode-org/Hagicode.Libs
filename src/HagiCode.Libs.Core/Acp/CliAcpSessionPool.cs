@@ -10,6 +10,8 @@ namespace HagiCode.Libs.Core.Acp;
 public sealed class CliAcpSessionPool : ICliAcpSessionPool
 {
     private const string MeterName = "HagiCode.Libs.Core.Acp.CliAcpSessionPool";
+    private static readonly object RegistryLock = new();
+    private static readonly List<WeakReference<CliAcpSessionPool>> RegisteredPools = [];
     private static readonly Meter DiagnosticsMeter = new(MeterName);
     private static readonly Counter<long> HitCounter = DiagnosticsMeter.CreateCounter<long>(
         "hagicode.cli_acp_session_pool.hit",
@@ -23,6 +25,18 @@ public sealed class CliAcpSessionPool : ICliAcpSessionPool
     private static readonly Counter<long> FaultCounter = DiagnosticsMeter.CreateCounter<long>(
         "hagicode.cli_acp_session_pool.fault",
         description: "Counts ACP pool faults.");
+    private static readonly ObservableGauge<long> ActiveEntriesGauge = DiagnosticsMeter.CreateObservableGauge<long>(
+        "hagicode.cli_acp_session_pool.active_entries",
+        ObserveActiveEntries,
+        description: "Reports active ACP pool entries.");
+    private static readonly ObservableGauge<long> LeasedEntriesGauge = DiagnosticsMeter.CreateObservableGauge<long>(
+        "hagicode.cli_acp_session_pool.leased_entries",
+        ObserveLeasedEntries,
+        description: "Reports leased ACP pool entries.");
+    private static readonly ObservableGauge<long> IndexedKeysGauge = DiagnosticsMeter.CreateObservableGauge<long>(
+        "hagicode.cli_acp_session_pool.indexed_keys",
+        ObserveIndexedKeys,
+        description: "Reports registered ACP pool lookup keys.");
 
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Dictionary<string, PooledAcpSessionEntry> _keyIndex = new(StringComparer.Ordinal);
@@ -45,6 +59,7 @@ public sealed class CliAcpSessionPool : ICliAcpSessionPool
     {
         _timeProvider = timeProvider ?? TimeProvider.System;
         _logger = logger;
+        RegisterPool(this);
     }
 
     /// <inheritdoc />
@@ -456,6 +471,79 @@ public sealed class CliAcpSessionPool : ICliAcpSessionPool
             { "provider", providerName },
             { "reason", reason.ToString() }
         };
+    }
+
+    private static IEnumerable<Measurement<long>> ObserveActiveEntries()
+    {
+        return ObserveDiagnostics(snapshot => snapshot.ActiveEntryCount, provider => provider.ActiveEntryCount);
+    }
+
+    private static IEnumerable<Measurement<long>> ObserveLeasedEntries()
+    {
+        return ObserveDiagnostics(snapshot => snapshot.LeasedEntryCount, provider => provider.LeasedEntryCount);
+    }
+
+    private static IEnumerable<Measurement<long>> ObserveIndexedKeys()
+    {
+        return ObserveDiagnostics(snapshot => snapshot.IndexedKeyCount, provider => provider.IndexedKeyCount);
+    }
+
+    private static IEnumerable<Measurement<long>> ObserveDiagnostics(
+        Func<CliAcpSessionPoolDiagnostics, long> totalSelector,
+        Func<CliAcpSessionPoolProviderDiagnostics, long> providerSelector)
+    {
+        foreach (var snapshot in GetRegisteredSnapshots())
+        {
+            yield return new Measurement<long>(totalSelector(snapshot));
+
+            foreach (var providerSnapshot in snapshot.ProviderDiagnostics)
+            {
+                yield return new Measurement<long>(
+                    providerSelector(providerSnapshot),
+                    new KeyValuePair<string, object?>("provider", providerSnapshot.ProviderName));
+            }
+        }
+    }
+
+    private static void RegisterPool(CliAcpSessionPool pool)
+    {
+        lock (RegistryLock)
+        {
+            RegisteredPools.Add(new WeakReference<CliAcpSessionPool>(pool));
+        }
+    }
+
+    private static IReadOnlyList<CliAcpSessionPoolDiagnostics> GetRegisteredSnapshots()
+    {
+        var snapshots = new List<CliAcpSessionPoolDiagnostics>();
+        lock (RegistryLock)
+        {
+            for (var index = RegisteredPools.Count - 1; index >= 0; index--)
+            {
+                if (!RegisteredPools[index].TryGetTarget(out var pool))
+                {
+                    RegisteredPools.RemoveAt(index);
+                    continue;
+                }
+
+                CliAcpSessionPoolDiagnostics? snapshot = null;
+                try
+                {
+                    snapshot = pool.GetDiagnosticsSnapshot();
+                }
+                catch (ObjectDisposedException)
+                {
+                    RegisteredPools.RemoveAt(index);
+                }
+
+                if (snapshot != null)
+                {
+                    snapshots.Add(snapshot);
+                }
+            }
+        }
+
+        return snapshots;
     }
 
     private sealed class ProviderDiagnosticsState
