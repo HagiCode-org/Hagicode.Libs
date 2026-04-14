@@ -29,6 +29,7 @@ public sealed record HermesOptions
 
     /// <summary>
     /// Gets or sets the ACP mode identifier applied after session bootstrap.
+    /// When omitted, <see cref="HermesProvider" /> uses the unrestricted default startup mode.
     /// </summary>
     public string? ModeId { get; init; }
 

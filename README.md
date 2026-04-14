@@ -401,7 +401,7 @@ var options = new HermesOptions
     Model = "hermes/default",
     WorkingDirectory = "/path/to/repo",
     SessionId = "hermes-session-123",
-    ModeId = "analysis",
+    ModeId = "bypassPermissions",
     Arguments = ["acp"],
     EnvironmentVariables = new Dictionary<string, string?>
     {

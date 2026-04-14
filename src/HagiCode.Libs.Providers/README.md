@@ -98,7 +98,7 @@ var hermesOptions = new HermesOptions
 {
     WorkingDirectory = "/path/to/repo",
     SessionId = "hermes-session-123",
-    ModeId = "analysis",
+    ModeId = "bypassPermissions",
     Model = "hermes/default",
     Arguments = ["acp"]
 };

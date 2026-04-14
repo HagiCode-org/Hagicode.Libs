@@ -14,6 +14,7 @@ namespace HagiCode.Libs.Providers.Hermes;
 /// </summary>
 public class HermesProvider : ICliProvider<HermesOptions>
 {
+    internal const string DefaultModeId = "bypassPermissions";
     private static readonly string[] DefaultExecutableCandidates = ["hermes", "hermes-cli"];
     private static readonly TimeSpan DefaultStartupTimeout = TimeSpan.FromSeconds(15);
 
@@ -72,11 +73,12 @@ public class HermesProvider : ICliProvider<HermesOptions>
             WorkingDirectory = workingDirectory,
             EnvironmentVariables = BuildEnvironmentVariables(options, runtimeEnvironment)
         };
+        var resolvedModeId = ResolveModeId(options.ModeId);
 
         var poolSettings = ResolvePoolSettings(options);
         if (!poolSettings.Enabled)
         {
-            await foreach (var message in ExecuteOneShotAsync(options, prompt, workingDirectory, startContext, cancellationToken).ConfigureAwait(false))
+            await foreach (var message in ExecuteOneShotAsync(options, prompt, workingDirectory, startContext, resolvedModeId, cancellationToken).ConfigureAwait(false))
             {
                 yield return message;
             }
@@ -93,12 +95,12 @@ public class HermesProvider : ICliProvider<HermesOptions>
                 workingDirectory,
                 startContext.Arguments,
                 startContext.EnvironmentVariables,
-                options.ModeId),
+                resolvedModeId),
             poolSettings);
 
         await using var lease = await _poolCoordinator.AcquireAcpSessionAsync(
             request,
-            ct => CreatePooledEntryAsync(options, workingDirectory, startContext, request, ct),
+            ct => CreatePooledEntryAsync(options, workingDirectory, startContext, resolvedModeId, request, ct),
             cancellationToken).ConfigureAwait(false);
 
         if (lease.IsWarmLease)
@@ -109,7 +111,7 @@ public class HermesProvider : ICliProvider<HermesOptions>
                 options.Model,
                 cancellationToken).ConfigureAwait(false);
             lease.Entry.RefreshSession(normalizedHandle, request.CompatibilityFingerprint);
-            await EnsureModeAsync(lease.Entry.SessionClient, lease.Entry.SessionId, options.ModeId, cancellationToken).ConfigureAwait(false);
+            await EnsureModeAsync(lease.Entry.SessionClient, lease.Entry.SessionId, resolvedModeId, cancellationToken).ConfigureAwait(false);
         }
 
         var lifecycleMessage = lease.IsWarmLease
@@ -275,6 +277,7 @@ public class HermesProvider : ICliProvider<HermesOptions>
         HermesOptions options,
         string workingDirectory,
         ProcessStartContext startContext,
+        string resolvedModeId,
         CliAcpPoolRequest request,
         CancellationToken cancellationToken)
     {
@@ -291,7 +294,7 @@ public class HermesProvider : ICliProvider<HermesOptions>
                 sessionId: null,
                 options.Model,
                 startupCts.Token).ConfigureAwait(false);
-            await EnsureModeAsync(sessionClient, sessionHandle.SessionId, options.ModeId, startupCts.Token).ConfigureAwait(false);
+            await EnsureModeAsync(sessionClient, sessionHandle.SessionId, resolvedModeId, startupCts.Token).ConfigureAwait(false);
 
             return new PooledAcpSessionEntry(
                 Name,
@@ -313,6 +316,7 @@ public class HermesProvider : ICliProvider<HermesOptions>
         string prompt,
         string workingDirectory,
         ProcessStartContext startContext,
+        string resolvedModeId,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         await using var sessionClient = CreateSessionClient(startContext);
@@ -326,7 +330,7 @@ public class HermesProvider : ICliProvider<HermesOptions>
             sessionId: null,
             options.Model,
             startupCts.Token).ConfigureAwait(false);
-        await EnsureModeAsync(sessionClient, sessionHandle.SessionId, options.ModeId, startupCts.Token).ConfigureAwait(false);
+        await EnsureModeAsync(sessionClient, sessionHandle.SessionId, resolvedModeId, startupCts.Token).ConfigureAwait(false);
 
         yield return HermesAcpMessageMapper.CreateSessionLifecycleMessage(sessionHandle);
 
@@ -518,6 +522,11 @@ public class HermesProvider : ICliProvider<HermesOptions>
         {
             TryCancelReceiveLoop(receiveUpdatesCancellation);
         }
+    }
+
+    private static string ResolveModeId(string? modeId)
+    {
+        return ArgumentValueNormalizer.NormalizeOptionalValue(modeId) ?? DefaultModeId;
     }
 
     private static IEnumerable<CliMessage> BuildFallbackMessages(

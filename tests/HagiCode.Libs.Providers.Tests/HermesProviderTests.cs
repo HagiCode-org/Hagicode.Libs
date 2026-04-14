@@ -78,7 +78,20 @@ public sealed class HermesProviderTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_applies_mode_when_requested()
+    public async Task ExecuteAsync_applies_full_permission_mode_by_default()
+    {
+        var provider = CreateProvider(sessionClientFactory: _ => new FakeAcpSessionClient());
+
+        await foreach (var _ in provider.ExecuteAsync(new HermesOptions(), "hello"))
+        {
+        }
+
+        provider.CreatedSessionClients[0].ModeUpdateCalls.ShouldBe(1);
+        provider.CreatedSessionClients[0].LastModeId.ShouldBe("bypassPermissions");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_preserves_explicit_mode_override()
     {
         var provider = CreateProvider(sessionClientFactory: _ => new FakeAcpSessionClient());
 
