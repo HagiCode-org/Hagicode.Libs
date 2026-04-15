@@ -23,7 +23,7 @@ public class CodexProvider : ICliProvider<CodexOptions>
     private const string RetryableGenericRefusalPrefix = "I'm sorry, but I cannot assist with that request.";
     private const string RetryableModelCapacityPrefix = "Selected model is at capacity. Please try a different model.";
     private const string RetryableRateLimitExceededPrefix = "exceeded retry limit, last status: 429 Too Many Requests";
-    private const string RetryableReconnectPrefix = "Reconnecting... 1/5 (stream disconnected before completion:";
+    private const string RetryableReconnectPrefix = "Reconnecting... ";
     private const string ThreadIdMetadataKey = "thread_id";
     private static readonly string[] DefaultExecutableCandidates = ["codex", "codex-cli"];
 
@@ -337,7 +337,8 @@ public class CodexProvider : ICliProvider<CodexOptions>
     }
 
     /// <summary>
-    /// Matches terminal messages that should enter the existing bounded retry flow.
+    /// Matches terminal messages that should enter the existing bounded retry flow, including
+    /// Codex reconnect summaries that expose numeric <c>X/Y</c> progress counters.
     /// </summary>
     public static bool TryExtractRetryableTerminalSummary(string? terminalMessage, out string retrySummary)
     {
@@ -351,13 +352,56 @@ public class CodexProvider : ICliProvider<CodexOptions>
         if (normalized.StartsWith(RetryableGenericRefusalPrefix, StringComparison.Ordinal) ||
             normalized.StartsWith(RetryableModelCapacityPrefix, StringComparison.Ordinal) ||
             normalized.StartsWith(RetryableRateLimitExceededPrefix, StringComparison.Ordinal) ||
-            normalized.StartsWith(RetryableReconnectPrefix, StringComparison.Ordinal))
+            HasRetryableReconnectPrefix(normalized))
         {
             retrySummary = normalized;
             return true;
         }
 
         return false;
+    }
+
+    private static bool HasRetryableReconnectPrefix(string terminalMessage)
+    {
+        if (!terminalMessage.StartsWith(RetryableReconnectPrefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        // Codex varies the reconnect counter, so only the numeric X/Y prefix is stable.
+        var reconnectProgress = terminalMessage.AsSpan(RetryableReconnectPrefix.Length);
+        var slashIndex = reconnectProgress.IndexOf('/');
+        if (slashIndex <= 0 || !HasAsciiDigits(reconnectProgress[..slashIndex]))
+        {
+            return false;
+        }
+
+        var afterSlash = reconnectProgress[(slashIndex + 1)..];
+        var parenthesisIndex = afterSlash.IndexOf(" (".AsSpan());
+        if (parenthesisIndex <= 0 || !HasAsciiDigits(afterSlash[..parenthesisIndex]))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool HasAsciiDigits(ReadOnlySpan<char> value)
+    {
+        if (value.IsEmpty)
+        {
+            return false;
+        }
+
+        foreach (var character in value)
+        {
+            if (character is < '0' or > '9')
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     internal virtual IReadOnlyList<string> BuildCommandArguments(CodexOptions options)

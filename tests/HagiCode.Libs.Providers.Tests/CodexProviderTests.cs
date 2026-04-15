@@ -21,10 +21,14 @@ public sealed class CodexProviderTests
         "Reconnecting... 1/5 (stream disconnected before completion: error sending request for url https://api.example.com/v1)";
     private const string RetryableContentFilterDisconnectMessage =
         "Reconnecting... 1/5 (stream disconnected before completion: Incomplete response returned, reason: content_filter)";
+    private const string RetryableLaterAttemptDisconnectMessage =
+        "Reconnecting... 3/5 (stream disconnected before completion: temporary upstream overload)";
     private const string RetryableServerErrorDisconnectMessage =
-        "Reconnecting... 1/5 (stream disconnected before completion: The server had an error processing your request. Sorry about that! Please try again.)";
+        "Reconnecting... 5/5 (stream disconnected before completion: The server had an error processing your request. Sorry about that! Please try again.)";
     private const string RetryableGenericReconnectMessage =
-        "Reconnecting... 1/5 (stream disconnected before completion: temporary upstream overload)";
+        "Reconnecting... 2/5 (stream disconnected before completion: authentication gateway reset by peer)";
+    private const string NonRetryableNonNumericReconnectMessage =
+        "Reconnecting... soon (stream disconnected before completion: temporary upstream overload)";
     private const string RetryableGenericRefusalMessage = "I'm sorry, but I cannot assist with that request.";
     private const string RetryableGenericRefusalWithSuffixMessage = "I'm sorry, but I cannot assist with that request. Please revise the prompt.";
     private const string RetryableModelCapacityMessage = "Selected model is at capacity. Please try a different model.";
@@ -396,6 +400,24 @@ public sealed class CodexProviderTests
             .ShouldBeTrue();
 
         retrySummary.ShouldBe(RetryableGenericReconnectMessage);
+    }
+
+    [Fact]
+    public void TryExtractRetryableTerminalSummary_recognizes_later_reconnect_attempts()
+    {
+        CodexProvider.TryExtractRetryableTerminalSummary(RetryableLaterAttemptDisconnectMessage, out var retrySummary)
+            .ShouldBeTrue();
+
+        retrySummary.ShouldBe(RetryableLaterAttemptDisconnectMessage);
+    }
+
+    [Fact]
+    public void TryExtractRetryableTerminalSummary_rejects_non_numeric_reconnect_prefix()
+    {
+        CodexProvider.TryExtractRetryableTerminalSummary(NonRetryableNonNumericReconnectMessage, out var retrySummary)
+            .ShouldBeFalse();
+
+        retrySummary.ShouldBeEmpty();
     }
 
     [Fact]
