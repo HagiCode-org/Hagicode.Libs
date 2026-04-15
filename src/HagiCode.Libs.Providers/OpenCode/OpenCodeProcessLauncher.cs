@@ -29,6 +29,19 @@ public sealed class OpenCodeProcessLauncher
 
         var executablePath = ResolveExecutablePath(options, runtimeEnvironment)
             ?? throw new FileNotFoundException("OpenCode executable was not found. Install OpenCode or set OpenCodeOptions.ExecutablePath.");
+        return await StartAsync(executablePath, options, runtimeEnvironment, cancellationToken).ConfigureAwait(false);
+    }
+
+    internal async Task<OpenCodeProcessHandle> StartAsync(
+        string executablePath,
+        OpenCodeStandaloneServerOptions options,
+        IReadOnlyDictionary<string, string?> runtimeEnvironment,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(runtimeEnvironment);
+
         var port = GetFreeTcpPort();
         var startupTimeout = options.StartupTimeout ?? TimeSpan.FromSeconds(15);
         var startInfo = new ProcessStartInfo

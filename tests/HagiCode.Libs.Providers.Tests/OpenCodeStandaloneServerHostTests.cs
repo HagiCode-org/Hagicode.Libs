@@ -81,6 +81,46 @@ public sealed class OpenCodeStandaloneServerHostTests
         result.ErrorMessage.ShouldContain("health_probe");
     }
 
+    [Fact]
+    public async Task WarmupAsync_when_owned_runtime_executable_is_missing_returns_owned_runtime_failure()
+    {
+        await using var host = new OpenCodeStandaloneServerHost(new CliExecutableResolver());
+        var missingExecutablePath = Path.Combine(Path.GetTempPath(), $"opencode-missing-{Guid.NewGuid():N}.sh");
+
+        var result = await host.WarmupAsync(new OpenCodeStandaloneServerOptions
+        {
+            ExecutablePath = missingExecutablePath,
+            WorkingDirectory = Path.GetTempPath(),
+        });
+
+        result.Status.ShouldBe(OpenCodeStandaloneServerStatus.Unhealthy);
+        result.Stage.ShouldBe(OpenCodeLifecycleStage.StartOwnedRuntime);
+        result.ExecutionProfile.ShouldBe("live");
+        result.OwnsRuntime.ShouldBeTrue();
+        result.ErrorMessage.ShouldContain("OpenCode executable was not found");
+        result.ErrorMessage.ShouldContain(missingExecutablePath);
+        result.DiagnosticOutput.ShouldContain(missingExecutablePath);
+    }
+
+    [Fact]
+    public async Task AcquireAsync_when_owned_runtime_executable_is_missing_throws_lifecycle_exception()
+    {
+        await using var host = new OpenCodeStandaloneServerHost(new CliExecutableResolver());
+        var missingExecutablePath = Path.Combine(Path.GetTempPath(), $"opencode-missing-{Guid.NewGuid():N}.sh");
+
+        var exception = await Should.ThrowAsync<OpenCodeStandaloneServerLifecycleException>(async () =>
+            await host.AcquireAsync(new OpenCodeStandaloneServerOptions
+            {
+                ExecutablePath = missingExecutablePath,
+                WorkingDirectory = Path.GetTempPath(),
+            }));
+
+        exception.Result.Status.ShouldBe(OpenCodeStandaloneServerStatus.Unhealthy);
+        exception.Result.Stage.ShouldBe(OpenCodeLifecycleStage.StartOwnedRuntime);
+        exception.Result.ErrorMessage.ShouldContain("OpenCode executable was not found");
+        exception.Result.ErrorMessage.ShouldContain(missingExecutablePath);
+    }
+
     private static string CreateServeShim(Uri baseUri)
     {
         var fileName = $"opencode-host-shim-{Guid.NewGuid():N}.sh";

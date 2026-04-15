@@ -267,7 +267,18 @@ public sealed class OpenCodeStandaloneServerHost : IOpenCodeStandaloneServerClie
             }
 
             stage = OpenCodeLifecycleStage.StartOwnedRuntime;
-            var process = await _processLauncher.StartAsync(options, runtimeEnvironment, cancellationToken).ConfigureAwait(false);
+            var executablePath = _processLauncher.ResolveExecutablePath(options, runtimeEnvironment);
+            if (string.IsNullOrWhiteSpace(executablePath) || !File.Exists(executablePath))
+            {
+                throw CreateMissingExecutableLifecycleException(
+                    options,
+                    runtimeKey,
+                    workingDirectory,
+                    attemptedAt,
+                    executablePath);
+            }
+
+            var process = await _processLauncher.StartAsync(executablePath, options, runtimeEnvironment, cancellationToken).ConfigureAwait(false);
             runtime = CreateHandle(process.BaseUri, options, runtimeKey, requestTimeout, "live", ownsRuntime: true, process, attemptedAt, process.CapturedOutput);
             await ProbeHealthyAsync(runtime, options, runtimeKey, cancellationToken).ConfigureAwait(false);
             return runtime;
@@ -446,6 +457,35 @@ public sealed class OpenCodeStandaloneServerHost : IOpenCodeStandaloneServerClie
                 ErrorMessage = errorMessage,
                 DiagnosticOutput = string.IsNullOrWhiteSpace(diagnosticOutput) ? null : diagnosticOutput,
             });
+    }
+
+    private static OpenCodeStandaloneServerLifecycleException CreateMissingExecutableLifecycleException(
+        OpenCodeStandaloneServerOptions options,
+        string runtimeKey,
+        string? workingDirectory,
+        DateTimeOffset attemptedAt,
+        string? resolvedExecutablePath)
+    {
+        var configuredExecutable = string.IsNullOrWhiteSpace(options.ExecutablePath)
+            ? "opencode"
+            : options.ExecutablePath.Trim();
+        var resolvedDisplay = string.IsNullOrWhiteSpace(resolvedExecutablePath)
+            ? "(unresolved)"
+            : resolvedExecutablePath.Trim();
+        var workingDirectoryDisplay = workingDirectory ?? "(none)";
+        var errorMessage =
+            $"OpenCode lifecycle stage 'owned_runtime' failed: OpenCode executable was not found. Configured executable='{configuredExecutable}', resolved executable='{resolvedDisplay}', workingDirectory='{workingDirectoryDisplay}'.";
+
+        return CreateLifecycleException(
+            OpenCodeStandaloneServerStatus.Unhealthy,
+            OpenCodeLifecycleStage.StartOwnedRuntime,
+            runtimeKey,
+            executionProfile: "live",
+            ownsRuntime: true,
+            workingDirectory,
+            attemptedAt,
+            errorMessage,
+            diagnosticOutput: errorMessage);
     }
 
     private static string FormatStage(OpenCodeLifecycleStage stage)
