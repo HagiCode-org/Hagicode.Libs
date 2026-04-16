@@ -1,6 +1,7 @@
 namespace HagiCode.Libs.Providers.Kimi;
 
 using HagiCode.Libs.Core.Acp;
+using HagiCode.Libs.Providers;
 
 /// <summary>
 /// Describes a Kimi ACP CLI invocation.
@@ -64,6 +65,11 @@ public sealed record KimiOptions
     /// Tokens are boundary-trimmed individually, whitespace-only tokens are ignored, and duplicate ACP launch arguments are skipped.
     /// </summary>
     public IReadOnlyList<string> ExtraArguments { get; init; } = [];
+
+    /// <summary>
+    /// Gets or sets the execution-local terminal failure auto-retry settings.
+    /// </summary>
+    public ProviderErrorAutoRetrySettings? ProviderErrorAutoRetry { get; init; }
 
     /// <summary>
     /// Gets or sets provider-level pooling overrides.

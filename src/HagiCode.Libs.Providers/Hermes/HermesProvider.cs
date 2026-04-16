@@ -5,6 +5,7 @@ using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Environment;
 using HagiCode.Libs.Core.Process;
 using HagiCode.Libs.Core.Transport;
+using HagiCode.Libs.Providers;
 using HagiCode.Libs.Providers.Pooling;
 
 namespace HagiCode.Libs.Providers.Hermes;
@@ -125,14 +126,17 @@ public class HermesProvider : ICliProvider<HermesOptions>
         {
             yield return lifecycleMessage;
 
-            var promptTask = lease.Entry.SessionClient.SendPromptAsync(
-                lease.Entry.SessionId,
-                prompt,
-                cancellationToken);
-            await foreach (var message in StreamPromptMessagesAsync(
-                               lease.Entry.SessionClient,
-                               lease.Entry.SessionId,
-                               promptTask,
+            await foreach (var message in ProviderErrorAutoRetryCoordinator.ExecuteAsync(
+                               prompt,
+                               options.ProviderErrorAutoRetry,
+                               retryPrompt => StreamPromptAttemptAsync(
+                                   lease.Entry.SessionClient,
+                                   lease.Entry.SessionId,
+                                   retryPrompt,
+                                   cancellationToken),
+                               () => !string.IsNullOrWhiteSpace(lease.Entry.SessionId),
+                               DelayAsync,
+                               retryableTerminalType: "terminal.failed",
                                cancellationToken).ConfigureAwait(false))
             {
                 if (string.Equals(message.Type, "terminal.failed", StringComparison.OrdinalIgnoreCase))
@@ -334,15 +338,26 @@ public class HermesProvider : ICliProvider<HermesOptions>
 
         yield return HermesAcpMessageMapper.CreateSessionLifecycleMessage(sessionHandle);
 
-        var promptTask = sessionClient.SendPromptAsync(sessionHandle.SessionId, prompt, cancellationToken);
-        await foreach (var message in StreamPromptMessagesAsync(
-                           sessionClient,
-                           sessionHandle.SessionId,
-                           promptTask,
+        await foreach (var message in ProviderErrorAutoRetryCoordinator.ExecuteAsync(
+                           prompt,
+                           options.ProviderErrorAutoRetry,
+                           retryPrompt => StreamPromptAttemptAsync(
+                               sessionClient,
+                               sessionHandle.SessionId,
+                               retryPrompt,
+                               cancellationToken),
+                           () => !string.IsNullOrWhiteSpace(sessionHandle.SessionId),
+                           DelayAsync,
+                           retryableTerminalType: "terminal.failed",
                            cancellationToken).ConfigureAwait(false))
         {
             yield return message;
         }
+    }
+
+    protected virtual Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken)
+    {
+        return Task.Delay(delay, cancellationToken);
     }
 
     private async Task<IReadOnlyDictionary<string, string?>> ResolveRuntimeEnvironmentAsync(CancellationToken cancellationToken)
@@ -522,6 +537,16 @@ public class HermesProvider : ICliProvider<HermesOptions>
         {
             TryCancelReceiveLoop(receiveUpdatesCancellation);
         }
+    }
+
+    private static IAsyncEnumerable<CliMessage> StreamPromptAttemptAsync(
+        IAcpSessionClient sessionClient,
+        string sessionId,
+        string prompt,
+        CancellationToken cancellationToken)
+    {
+        var promptTask = sessionClient.SendPromptAsync(sessionId, prompt, cancellationToken);
+        return StreamPromptMessagesAsync(sessionClient, sessionId, promptTask, cancellationToken);
     }
 
     private static string ResolveModeId(string? modeId)
