@@ -21,20 +21,9 @@ public sealed class CodexProviderTests
         "Reconnecting... 1/5 (stream disconnected before completion: error sending request for url https://api.example.com/v1)";
     private const string RetryableContentFilterDisconnectMessage =
         "Reconnecting... 1/5 (stream disconnected before completion: Incomplete response returned, reason: content_filter)";
-    private const string RetryableLaterAttemptDisconnectMessage =
-        "Reconnecting... 3/5 (stream disconnected before completion: temporary upstream overload)";
     private const string RetryableServerErrorDisconnectMessage =
         "Reconnecting... 5/5 (stream disconnected before completion: The server had an error processing your request. Sorry about that! Please try again.)";
-    private const string RetryableGenericReconnectMessage =
-        "Reconnecting... 2/5 (stream disconnected before completion: authentication gateway reset by peer)";
-    private const string NonRetryableNonNumericReconnectMessage =
-        "Reconnecting... soon (stream disconnected before completion: temporary upstream overload)";
     private const string RetryableGenericRefusalMessage = "I'm sorry, but I cannot assist with that request.";
-    private const string RetryableGenericRefusalWithSuffixMessage = "I'm sorry, but I cannot assist with that request. Please revise the prompt.";
-    private const string RetryableModelCapacityMessage = "Selected model is at capacity. Please try a different model.";
-    private const string RetryableModelCapacityWithSuffixMessage = "Selected model is at capacity. Please try a different model. request id=req_capacity_123";
-    private const string RetryableRateLimitExceededMessage = "exceeded retry limit, last status: 429 Too Many Requests";
-    private const string RetryableRateLimitExceededWithSuffixMessage = "exceeded retry limit, last status: 429 Too Many Requests. request id=req_123";
     private static readonly string[] CodexExecutableCandidates = ["codex", "codex-cli"];
 
     [Fact]
@@ -272,7 +261,7 @@ public sealed class CodexProviderTests
             chinesePrompt));
 
         provider.LastProcessStartInfo.ShouldNotBeNull();
-        provider.LastProcessStartInfo.FileName.ShouldBe("cmd.exe");
+        provider.LastProcessStartInfo.FileName.ShouldBe(@"C:\tools\codex.cmd");
         provider.LastProcessStartInfo.StandardInputEncoding.ShouldNotBeNull();
         provider.LastProcessStartInfo.StandardInputEncoding.WebName.ShouldBe(Encoding.UTF8.WebName);
         provider.SentMessages.ShouldHaveSingleItem();
@@ -357,7 +346,7 @@ public sealed class CodexProviderTests
     }
 
     [Fact]
-    public void TryExtractTerminalMessage_recognizes_retryable_samples()
+    public void TryExtractTerminalMessage_extracts_terminal_text_without_retry_classification()
     {
         CodexProvider.TryExtractTerminalMessage(
                 JsonSerializer.SerializeToElement(new { type = "turn.failed", error = new { message = RetryableTransportDisconnectMessage } }),
@@ -385,88 +374,7 @@ public sealed class CodexProviderTests
     }
 
     [Fact]
-    public void TryExtractRetryableTerminalSummary_recognizes_new_server_error_reconnect_prefix()
-    {
-        CodexProvider.TryExtractRetryableTerminalSummary(RetryableServerErrorDisconnectMessage, out var retrySummary)
-            .ShouldBeTrue();
-
-        retrySummary.ShouldBe(RetryableServerErrorDisconnectMessage);
-    }
-
-    [Fact]
-    public void TryExtractRetryableTerminalSummary_recognizes_reconnect_prefix_without_known_suffix()
-    {
-        CodexProvider.TryExtractRetryableTerminalSummary(RetryableGenericReconnectMessage, out var retrySummary)
-            .ShouldBeTrue();
-
-        retrySummary.ShouldBe(RetryableGenericReconnectMessage);
-    }
-
-    [Fact]
-    public void TryExtractRetryableTerminalSummary_recognizes_later_reconnect_attempts()
-    {
-        CodexProvider.TryExtractRetryableTerminalSummary(RetryableLaterAttemptDisconnectMessage, out var retrySummary)
-            .ShouldBeTrue();
-
-        retrySummary.ShouldBe(RetryableLaterAttemptDisconnectMessage);
-    }
-
-    [Fact]
-    public void TryExtractRetryableTerminalSummary_rejects_non_numeric_reconnect_prefix()
-    {
-        CodexProvider.TryExtractRetryableTerminalSummary(NonRetryableNonNumericReconnectMessage, out var retrySummary)
-            .ShouldBeFalse();
-
-        retrySummary.ShouldBeEmpty();
-    }
-
-    [Fact]
-    public void TryExtractRetryableTerminalSummary_recognizes_rate_limit_retry_cap_message()
-    {
-        CodexProvider.TryExtractRetryableTerminalSummary(RetryableRateLimitExceededMessage, out var retrySummary)
-            .ShouldBeTrue();
-
-        retrySummary.ShouldBe(RetryableRateLimitExceededMessage);
-    }
-
-    [Fact]
-    public void TryExtractRetryableTerminalSummary_recognizes_generic_refusal_prefix_with_suffix()
-    {
-        CodexProvider.TryExtractRetryableTerminalSummary(RetryableGenericRefusalWithSuffixMessage, out var retrySummary)
-            .ShouldBeTrue();
-
-        retrySummary.ShouldBe(RetryableGenericRefusalWithSuffixMessage);
-    }
-
-    [Fact]
-    public void TryExtractRetryableTerminalSummary_recognizes_model_capacity_prefix()
-    {
-        CodexProvider.TryExtractRetryableTerminalSummary(RetryableModelCapacityMessage, out var retrySummary)
-            .ShouldBeTrue();
-
-        retrySummary.ShouldBe(RetryableModelCapacityMessage);
-    }
-
-    [Fact]
-    public void TryExtractRetryableTerminalSummary_recognizes_model_capacity_prefix_with_suffix()
-    {
-        CodexProvider.TryExtractRetryableTerminalSummary(RetryableModelCapacityWithSuffixMessage, out var retrySummary)
-            .ShouldBeTrue();
-
-        retrySummary.ShouldBe(RetryableModelCapacityWithSuffixMessage);
-    }
-
-    [Fact]
-    public void TryExtractRetryableTerminalSummary_recognizes_rate_limit_prefix_with_suffix()
-    {
-        CodexProvider.TryExtractRetryableTerminalSummary(RetryableRateLimitExceededWithSuffixMessage, out var retrySummary)
-            .ShouldBeTrue();
-
-        retrySummary.ShouldBe(RetryableRateLimitExceededWithSuffixMessage);
-    }
-
-    [Fact]
-    public async Task ExecuteAsync_reuses_pooled_thread_id_after_retryable_failure_replay()
+    public async Task ExecuteAsync_reuses_pooled_thread_id_after_terminal_failure_and_explicit_resume()
     {
         var provider = CreateProvider(messageBatches:
         [
@@ -483,7 +391,12 @@ public sealed class CodexProviderTests
             new CodexOptions
             {
                 WorkingDirectory = "/tmp/project",
-                LogicalSessionKey = "session-retry"
+                LogicalSessionKey = "session-retry",
+                ProviderErrorAutoRetry = new ProviderErrorAutoRetrySettings
+                {
+                    Enabled = false,
+                    Strategy = ProviderErrorAutoRetrySettings.DefaultStrategy
+                }
             },
             "first"));
 
@@ -502,7 +415,7 @@ public sealed class CodexProviderTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_keeps_anonymous_retry_replays_unbound()
+    public async Task ExecuteAsync_keeps_anonymous_explicit_replays_unbound()
     {
         var provider = CreateProvider(messageBatches:
         [
@@ -518,7 +431,12 @@ public sealed class CodexProviderTests
         await DrainCliMessagesAsync(provider.ExecuteAsync(
             new CodexOptions
             {
-                WorkingDirectory = "/tmp/project"
+                WorkingDirectory = "/tmp/project",
+                ProviderErrorAutoRetry = new ProviderErrorAutoRetrySettings
+                {
+                    Enabled = false,
+                    Strategy = ProviderErrorAutoRetrySettings.DefaultStrategy
+                }
             },
             "first"));
 
@@ -531,6 +449,130 @@ public sealed class CodexProviderTests
 
         provider.StartContexts.Count.ShouldBe(2);
         provider.StartContexts[1].Arguments.ShouldNotContain("resume");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_retries_turn_failed_with_continuation_prompt_and_same_thread_context()
+    {
+        var provider = CreateRetryAwareProvider(
+        [
+            [
+                new CliMessage("thread.started", JsonSerializer.SerializeToElement(new { type = "thread.started", thread_id = "thread-retry" })),
+                new CliMessage("turn.failed", JsonSerializer.SerializeToElement(new { type = "turn.failed", error = new { message = RetryableServerErrorDisconnectMessage } }))
+            ],
+            [
+                new CliMessage("turn.completed", JsonSerializer.SerializeToElement(new { type = "turn.completed" }))
+            ]
+        ]);
+        var messages = new List<CliMessage>();
+
+        await foreach (var message in provider.ExecuteAsync(
+                           new CodexOptions
+                           {
+                               WorkingDirectory = "/tmp/project",
+                               LogicalSessionKey = "session-retry",
+                               ProviderErrorAutoRetry = new ProviderErrorAutoRetrySettings
+                               {
+                                   Enabled = true,
+                                   Strategy = ProviderErrorAutoRetrySettings.DefaultStrategy
+                               }
+                           },
+                           "finish the job"))
+        {
+            messages.Add(message);
+        }
+
+        messages.Select(static message => message.Type).ShouldBe(["thread.started", "turn.completed"]);
+        provider.RecordedDelays.ShouldBe([TimeSpan.FromSeconds(10)]);
+        provider.StartContexts.Count.ShouldBe(2);
+        provider.StartContexts[1].Arguments.ShouldContain("resume");
+        provider.StartContexts[1].Arguments.ShouldContain("thread-retry");
+        provider.SentMessages.Count.ShouldBe(2);
+        provider.SentMessages[0].Content.GetProperty("input").GetString().ShouldBe("finish the job");
+        provider.SentMessages[1].Content.GetProperty("input").GetString()
+            .ShouldBe(ProviderErrorAutoRetrySettings.ContinuationPrompt);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_does_not_retry_turn_failed_when_auto_retry_is_disabled()
+    {
+        var provider = CreateRetryAwareProvider(
+        [
+            [
+                new CliMessage("thread.started", JsonSerializer.SerializeToElement(new { type = "thread.started", thread_id = "thread-no-retry" })),
+                new CliMessage("turn.failed", JsonSerializer.SerializeToElement(new { type = "turn.failed", error = new { message = RetryableTransportDisconnectMessage } }))
+            ]
+        ]);
+        var messages = new List<CliMessage>();
+
+        await foreach (var message in provider.ExecuteAsync(
+                           new CodexOptions
+                           {
+                               WorkingDirectory = "/tmp/project",
+                               ProviderErrorAutoRetry = new ProviderErrorAutoRetrySettings
+                               {
+                                   Enabled = false,
+                                   Strategy = ProviderErrorAutoRetrySettings.DefaultStrategy
+                               }
+                           },
+                           "do not retry"))
+        {
+            messages.Add(message);
+        }
+
+        messages.Select(static message => message.Type).ShouldBe(["thread.started", "turn.failed"]);
+        provider.RecordedDelays.ShouldBeEmpty();
+        provider.StartContexts.Count.ShouldBe(1);
+        provider.SentMessages.ShouldHaveSingleItem();
+        provider.SentMessages[0].Content.GetProperty("input").GetString().ShouldBe("do not retry");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_emits_terminal_failure_after_retry_schedule_is_exhausted()
+    {
+        var provider = CreateRetryAwareProvider(
+        [
+            [
+                new CliMessage("thread.started", JsonSerializer.SerializeToElement(new { type = "thread.started", thread_id = "thread-exhausted" })),
+                new CliMessage("turn.failed", JsonSerializer.SerializeToElement(new { type = "turn.failed", error = new { message = RetryableTransportDisconnectMessage } }))
+            ],
+            [
+                new CliMessage("turn.failed", JsonSerializer.SerializeToElement(new { type = "turn.failed", error = new { message = RetryableContentFilterDisconnectMessage } }))
+            ],
+            [
+                new CliMessage("turn.failed", JsonSerializer.SerializeToElement(new { type = "turn.failed", error = new { message = RetryableServerErrorDisconnectMessage } }))
+            ],
+            [
+                new CliMessage("turn.failed", JsonSerializer.SerializeToElement(new { type = "turn.failed", error = new { message = RetryableGenericRefusalMessage } }))
+            ]
+        ]);
+        var messages = new List<CliMessage>();
+
+        await foreach (var message in provider.ExecuteAsync(
+                           new CodexOptions
+                           {
+                               WorkingDirectory = "/tmp/project",
+                               LogicalSessionKey = "session-exhausted"
+                           },
+                           "still failing"))
+        {
+            messages.Add(message);
+        }
+
+        messages.Select(static message => message.Type).ShouldBe(["thread.started", "turn.failed"]);
+        messages.Last().Content.GetProperty("error").GetProperty("message").GetString().ShouldBe(RetryableGenericRefusalMessage);
+        provider.RecordedDelays.ShouldBe(
+        [
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromSeconds(20),
+            TimeSpan.FromSeconds(60)
+        ]);
+        provider.StartContexts.Count.ShouldBe(4);
+        provider.StartContexts[1].Arguments.ShouldContain("thread-exhausted");
+        provider.SentMessages.Count.ShouldBe(4);
+        provider.SentMessages.Skip(1)
+            .Select(message => message.Content.GetProperty("input").GetString())
+            .ShouldAllBe(prompt => prompt == ProviderErrorAutoRetrySettings.ContinuationPrompt);
     }
 
     [Fact]
@@ -816,6 +858,17 @@ public sealed class CodexProviderTests
             messageBatches);
     }
 
+    private static RetryAwareCodexProvider CreateRetryAwareProvider(
+        IReadOnlyList<IReadOnlyList<CliMessage>> messageBatches)
+    {
+        return new RetryAwareCodexProvider(
+            new StubExecutableResolver(),
+            new StubCliProcessManager(),
+            new StubRuntimeEnvironmentResolver(),
+            null,
+            messageBatches);
+    }
+
     private static CoordinatedCodexProvider CreateCoordinatedProvider(params CoordinatedTransportScript[] scripts)
     {
         return new CoordinatedCodexProvider(
@@ -891,6 +944,36 @@ public sealed class CodexProviderTests
             StartContexts.Add(startContext);
             var batch = _messageBatches.Count > 0 ? _messageBatches.Dequeue() : DefaultBatch;
             return new StubTransport(SentMessages, batch);
+        }
+    }
+
+    private sealed class RetryAwareCodexProvider(
+        CliExecutableResolver executableResolver,
+        CliProcessManager processManager,
+        IRuntimeEnvironmentResolver runtimeEnvironmentResolver,
+        ICliExecutionFacade? executionFacade,
+        IReadOnlyList<IReadOnlyList<CliMessage>> messageBatches)
+        : CodexProvider(executableResolver, processManager, runtimeEnvironmentResolver, executionFacade)
+    {
+        private readonly Queue<IReadOnlyList<CliMessage>> _messageBatches = new(messageBatches);
+
+        public List<ProcessStartContext> StartContexts { get; } = [];
+
+        public List<CliMessage> SentMessages { get; } = [];
+
+        public List<TimeSpan> RecordedDelays { get; } = [];
+
+        protected override ICliTransport CreateTransport(ProcessStartContext startContext)
+        {
+            StartContexts.Add(startContext);
+            var batch = _messageBatches.Count > 0 ? _messageBatches.Dequeue() : TestCodexProvider.DefaultBatch;
+            return new StubTransport(SentMessages, batch);
+        }
+
+        protected override Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken)
+        {
+            RecordedDelays.Add(delay);
+            return Task.CompletedTask;
         }
     }
 
