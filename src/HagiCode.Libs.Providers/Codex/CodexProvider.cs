@@ -7,6 +7,7 @@ using HagiCode.Libs.Core.Execution;
 using HagiCode.Libs.Core.Process;
 using HagiCode.Libs.Core.Transport;
 using HagiCode.Libs.Core.Acp;
+using HagiCode.Libs.Providers;
 using HagiCode.Libs.Providers.Pooling;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -20,10 +21,6 @@ public class CodexProvider : ICliProvider<CodexOptions>
 {
     private const string InternalOriginatorEnvironmentVariable = "CODEX_INTERNAL_ORIGINATOR_OVERRIDE";
     private const string InternalOriginatorValue = "codex_sdk_csharp";
-    private const string RetryableGenericRefusalPrefix = "I'm sorry, but I cannot assist with that request.";
-    private const string RetryableModelCapacityPrefix = "Selected model is at capacity. Please try a different model.";
-    private const string RetryableRateLimitExceededPrefix = "exceeded retry limit, last status: 429 Too Many Requests";
-    private const string RetryableReconnectPrefix = "Reconnecting... ";
     private const string ThreadIdMetadataKey = "thread_id";
     private static readonly string[] DefaultExecutableCandidates = ["codex", "codex-cli"];
 
@@ -190,29 +187,22 @@ public class CodexProvider : ICliProvider<CodexOptions>
         var executionStopwatch = Stopwatch.StartNew();
         try
         {
-            await using var transport = CreateTransport(startContext);
-            await transport.ConnectAsync(cancellationToken).ConfigureAwait(false);
-            await transport.SendAsync(CreatePromptMessage(prompt), cancellationToken).ConfigureAwait(false);
-
-            await foreach (var message in transport.ReceiveAsync(cancellationToken).ConfigureAwait(false))
+            await foreach (var message in ProviderErrorAutoRetryCoordinator.ExecuteAsync(
+                               prompt,
+                               options.ProviderErrorAutoRetry,
+                               retryPrompt => ExecuteCodexAttemptAsync(
+                                   effectiveOptions,
+                                   retryPrompt,
+                                   executablePath,
+                                   runtimeEnvironment,
+                                   logicalSessionKey,
+                                   lease,
+                                   cancellationToken),
+                               () => !string.IsNullOrWhiteSpace(lease.Entry.Resource.ThreadId ?? resolvedThreadId),
+                               DelayAsync,
+                               retryableTerminalType: "turn.failed",
+                               cancellationToken).ConfigureAwait(false))
             {
-                if (TryGetThreadId(message.Content, out var threadId))
-                {
-                    lease.Entry.Resource.ThreadId = threadId;
-                    lease.Entry.Metadata[ThreadIdMetadataKey] = threadId;
-                    if (!string.IsNullOrWhiteSpace(threadId))
-                    {
-                        RememberThreadId(logicalSessionKey, threadId);
-                        await lease.RegisterKeyAsync(BuildThreadLookupKey(threadId), cancellationToken).ConfigureAwait(false);
-                        _logger.LogInformation(
-                            "Codex pool reindexed after thread acquisition: provider={ProviderName}, logicalSessionKey={LogicalSessionKey}, newThreadId={ThreadId}, registeredKeyCount={RegisteredKeyCount}",
-                            Name,
-                            logicalSessionKey ?? "(none)",
-                            threadId,
-                            lease.Entry.RegisteredKeys.Count);
-                    }
-                }
-
                 if (string.Equals(message.Type, "turn.failed", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(message.Type, "error", StringComparison.OrdinalIgnoreCase))
                 {
@@ -334,74 +324,6 @@ public class CodexProvider : ICliProvider<CodexOptions>
         }
 
         return false;
-    }
-
-    /// <summary>
-    /// Matches terminal messages that should enter the existing bounded retry flow, including
-    /// Codex reconnect summaries that expose numeric <c>X/Y</c> progress counters.
-    /// </summary>
-    public static bool TryExtractRetryableTerminalSummary(string? terminalMessage, out string retrySummary)
-    {
-        retrySummary = string.Empty;
-        var normalized = ArgumentValueNormalizer.NormalizeOptionalValue(terminalMessage);
-        if (normalized is null)
-        {
-            return false;
-        }
-
-        if (normalized.StartsWith(RetryableGenericRefusalPrefix, StringComparison.Ordinal) ||
-            normalized.StartsWith(RetryableModelCapacityPrefix, StringComparison.Ordinal) ||
-            normalized.StartsWith(RetryableRateLimitExceededPrefix, StringComparison.Ordinal) ||
-            HasRetryableReconnectPrefix(normalized))
-        {
-            retrySummary = normalized;
-            return true;
-        }
-
-        return false;
-    }
-
-    private static bool HasRetryableReconnectPrefix(string terminalMessage)
-    {
-        if (!terminalMessage.StartsWith(RetryableReconnectPrefix, StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        // Codex varies the reconnect counter, so only the numeric X/Y prefix is stable.
-        var reconnectProgress = terminalMessage.AsSpan(RetryableReconnectPrefix.Length);
-        var slashIndex = reconnectProgress.IndexOf('/');
-        if (slashIndex <= 0 || !HasAsciiDigits(reconnectProgress[..slashIndex]))
-        {
-            return false;
-        }
-
-        var afterSlash = reconnectProgress[(slashIndex + 1)..];
-        var parenthesisIndex = afterSlash.IndexOf(" (".AsSpan());
-        if (parenthesisIndex <= 0 || !HasAsciiDigits(afterSlash[..parenthesisIndex]))
-        {
-            return false;
-        }
-
-        return true;
-    }
-
-    private static bool HasAsciiDigits(ReadOnlySpan<char> value)
-    {
-        if (value.IsEmpty)
-        {
-            return false;
-        }
-
-        foreach (var character in value)
-        {
-            if (character is < '0' or > '9')
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     internal virtual IReadOnlyList<string> BuildCommandArguments(CodexOptions options)
@@ -590,6 +512,11 @@ public class CodexProvider : ICliProvider<CodexOptions>
         return new CodexExecTransport(_processManager, startContext);
     }
 
+    protected virtual Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken)
+    {
+        return Task.Delay(delay, cancellationToken);
+    }
+
     private CliPoolSettings ResolvePoolSettings(CodexOptions options)
     {
         return CliPoolSettings.Merge(_poolConfiguration.GetSettings(Name), options.PoolSettings);
@@ -671,12 +598,89 @@ public class CodexProvider : ICliProvider<CodexOptions>
         IReadOnlyDictionary<string, string?> runtimeEnvironment,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
+        var currentThreadId = ArgumentValueNormalizer.NormalizeOptionalValue(options.ThreadId);
+        await foreach (var message in ProviderErrorAutoRetryCoordinator.ExecuteAsync(
+                           prompt,
+                           options.ProviderErrorAutoRetry,
+                           retryPrompt => ExecuteOneShotAttemptAsync(
+                           options,
+                           retryPrompt,
+                           executablePath,
+                           runtimeEnvironment,
+                           currentThreadId,
+                           threadId =>
+                           {
+                               currentThreadId = threadId;
+                               return Task.CompletedTask;
+                           },
+                           cancellationToken),
+                           () => !string.IsNullOrWhiteSpace(currentThreadId),
+                           DelayAsync,
+                           retryableTerminalType: "turn.failed",
+                           cancellationToken).ConfigureAwait(false))
+        {
+            yield return message;
+        }
+    }
+
+    private async IAsyncEnumerable<CliMessage> ExecuteCodexAttemptAsync(
+        CodexOptions baseOptions,
+        string prompt,
+        string executablePath,
+        IReadOnlyDictionary<string, string?> runtimeEnvironment,
+        string? logicalSessionKey,
+        CliRuntimePoolLease<CodexPooledThreadState> lease,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var effectiveOptions = baseOptions with
+        {
+            ThreadId = lease.Entry.Resource.ThreadId ?? baseOptions.ThreadId
+        };
+
+        await foreach (var message in ExecuteOneShotAttemptAsync(
+                           effectiveOptions,
+                           prompt,
+                           executablePath,
+                           runtimeEnvironment,
+                           effectiveOptions.ThreadId,
+                           async threadId =>
+                           {
+                               lease.Entry.Resource.ThreadId = threadId;
+                               lease.Entry.Metadata[ThreadIdMetadataKey] = threadId;
+                               RememberThreadId(logicalSessionKey, threadId);
+                               await lease.RegisterKeyAsync(BuildThreadLookupKey(threadId), cancellationToken).ConfigureAwait(false);
+                               _logger.LogInformation(
+                                   "Codex pool reindexed after thread acquisition: provider={ProviderName}, logicalSessionKey={LogicalSessionKey}, newThreadId={ThreadId}, registeredKeyCount={RegisteredKeyCount}",
+                                   Name,
+                                   logicalSessionKey ?? "(none)",
+                                   threadId,
+                                   lease.Entry.RegisteredKeys.Count);
+                           },
+                           cancellationToken).ConfigureAwait(false))
+        {
+            yield return message;
+        }
+    }
+
+    private async IAsyncEnumerable<CliMessage> ExecuteOneShotAttemptAsync(
+        CodexOptions options,
+        string prompt,
+        string executablePath,
+        IReadOnlyDictionary<string, string?> runtimeEnvironment,
+        string? currentThreadId,
+        Func<string, Task>? setThreadId,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var attemptOptions = options with
+        {
+            ThreadId = currentThreadId ?? options.ThreadId
+        };
         var startContext = new ProcessStartContext
         {
             ExecutablePath = executablePath,
-            Arguments = BuildCommandArguments(options),
-            WorkingDirectory = options.WorkingDirectory,
-            EnvironmentVariables = BuildEnvironmentVariables(options, runtimeEnvironment)
+            Arguments = BuildCommandArguments(attemptOptions),
+            WorkingDirectory = attemptOptions.WorkingDirectory,
+            EnvironmentVariables = BuildEnvironmentVariables(attemptOptions, runtimeEnvironment)
         };
 
         await using var transport = CreateTransport(startContext);
@@ -685,6 +689,14 @@ public class CodexProvider : ICliProvider<CodexOptions>
 
         await foreach (var message in transport.ReceiveAsync(cancellationToken).ConfigureAwait(false))
         {
+            if (TryGetThreadId(message.Content, out var threadId) && !string.IsNullOrWhiteSpace(threadId))
+            {
+                if (setThreadId is not null)
+                {
+                    await setThreadId(threadId).ConfigureAwait(false);
+                }
+            }
+
             yield return message;
             if (IsTerminalMessageType(message.Type))
             {

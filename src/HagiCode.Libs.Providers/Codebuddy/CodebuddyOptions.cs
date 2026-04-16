@@ -1,6 +1,7 @@
 namespace HagiCode.Libs.Providers.Codebuddy;
 
 using HagiCode.Libs.Core.Acp;
+using HagiCode.Libs.Providers;
 
 /// <summary>
 /// Describes a CodeBuddy ACP CLI invocation.
@@ -52,6 +53,11 @@ public sealed record CodebuddyOptions
     /// Tokens are boundary-trimmed individually and whitespace-only tokens are ignored.
     /// </summary>
     public IReadOnlyList<string> ExtraArguments { get; init; } = [];
+
+    /// <summary>
+    /// Gets or sets the execution-local terminal failure auto-retry settings.
+    /// </summary>
+    public ProviderErrorAutoRetrySettings? ProviderErrorAutoRetry { get; init; }
 
     /// <summary>
     /// Gets or sets provider-level pooling overrides.
