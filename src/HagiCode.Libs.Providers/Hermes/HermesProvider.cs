@@ -72,7 +72,8 @@ public class HermesProvider : ICliProvider<HermesOptions>
             ExecutablePath = executablePath,
             Arguments = BuildCommandArguments(options),
             WorkingDirectory = workingDirectory,
-            EnvironmentVariables = BuildEnvironmentVariables(options, runtimeEnvironment)
+            EnvironmentVariables = BuildEnvironmentVariables(options, runtimeEnvironment),
+            Ownership = new CliProcessOwnershipRegistration { ProviderName = Name }
         };
         var resolvedModeId = ResolveModeId(options.ModeId);
 
@@ -176,7 +177,8 @@ public class HermesProvider : ICliProvider<HermesOptions>
                 ExecutablePath = executablePath,
                 Arguments = ["acp"],
                 WorkingDirectory = Directory.GetCurrentDirectory(),
-                EnvironmentVariables = runtimeEnvironment
+                EnvironmentVariables = runtimeEnvironment,
+                Ownership = new CliProcessOwnershipRegistration { ProviderName = Name }
             };
 
             await using var sessionClient = CreateSessionClient(startContext);

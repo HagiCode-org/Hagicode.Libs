@@ -70,7 +70,8 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
             ExecutablePath = executablePath,
             Arguments = BuildCommandArguments(options),
             WorkingDirectory = workingDirectory,
-            EnvironmentVariables = BuildEnvironmentVariables(options, runtimeEnvironment)
+            EnvironmentVariables = BuildEnvironmentVariables(options, runtimeEnvironment),
+            Ownership = new CliProcessOwnershipRegistration { ProviderName = Name }
         };
 
         var poolSettings = ResolvePoolSettings(options);
@@ -167,7 +168,8 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
                 ExecutablePath = executablePath,
                 Arguments = ["--acp"],
                 WorkingDirectory = Directory.GetCurrentDirectory(),
-                EnvironmentVariables = runtimeEnvironment
+                EnvironmentVariables = runtimeEnvironment,
+                Ownership = new CliProcessOwnershipRegistration { ProviderName = Name }
             };
 
             await using var sessionClient = CreateSessionClient(startContext);

@@ -407,7 +407,8 @@ public class DeepAgentsProvider : ICliProvider<DeepAgentsOptions>
             ExecutablePath = launcher.ExecutablePath,
             Arguments = launcher.Arguments,
             WorkingDirectory = workingDirectory,
-            EnvironmentVariables = BuildEnvironmentVariables(options, runtimeEnvironment)
+            EnvironmentVariables = BuildEnvironmentVariables(options, runtimeEnvironment),
+            Ownership = new CliProcessOwnershipRegistration { ProviderName = Name }
         };
     }
 
