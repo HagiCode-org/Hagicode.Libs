@@ -20,6 +20,15 @@ public sealed class CliProviderPoolConfigurationRegistry
     }
 
     /// <summary>
+    /// Gets a value indicating whether the provider has an explicit registry entry.
+    /// </summary>
+    public bool HasSettings(string providerName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(providerName);
+        return _settings.ContainsKey(providerName);
+    }
+
+    /// <summary>
     /// Gets the configured settings for the provider.
     /// </summary>
     public CliPoolSettings GetSettings(string providerName)
