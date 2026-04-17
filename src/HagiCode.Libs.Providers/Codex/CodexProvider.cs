@@ -173,7 +173,8 @@ public class CodexProvider : ICliProvider<CodexOptions>
             ExecutablePath = executablePath,
             Arguments = BuildCommandArguments(effectiveOptions),
             WorkingDirectory = effectiveOptions.WorkingDirectory,
-            EnvironmentVariables = BuildEnvironmentVariables(effectiveOptions, runtimeEnvironment)
+            EnvironmentVariables = BuildEnvironmentVariables(effectiveOptions, runtimeEnvironment),
+            Ownership = new CliProcessOwnershipRegistration { ProviderName = Name }
         };
 
         _logger.LogInformation(
@@ -200,7 +201,7 @@ public class CodexProvider : ICliProvider<CodexOptions>
                                    cancellationToken),
                                () => !string.IsNullOrWhiteSpace(lease.Entry.Resource.ThreadId ?? resolvedThreadId),
                                DelayAsync,
-                               retryableTerminalType: "turn.failed",
+                               IsRetryableTerminalFailure,
                                cancellationToken).ConfigureAwait(false))
             {
                 if (string.Equals(message.Type, "turn.failed", StringComparison.OrdinalIgnoreCase) ||
@@ -324,6 +325,16 @@ public class CodexProvider : ICliProvider<CodexOptions>
         }
 
         return false;
+    }
+
+    internal static bool IsRetryableTerminalFailure(CliMessage message)
+    {
+        if (string.Equals(message.Type, "turn.failed", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return string.Equals(message.Type, "error", StringComparison.OrdinalIgnoreCase);
     }
 
     internal virtual IReadOnlyList<string> BuildCommandArguments(CodexOptions options)
@@ -616,7 +627,7 @@ public class CodexProvider : ICliProvider<CodexOptions>
                            cancellationToken),
                            () => !string.IsNullOrWhiteSpace(currentThreadId),
                            DelayAsync,
-                           retryableTerminalType: "turn.failed",
+                           IsRetryableTerminalFailure,
                            cancellationToken).ConfigureAwait(false))
         {
             yield return message;
@@ -680,7 +691,8 @@ public class CodexProvider : ICliProvider<CodexOptions>
             ExecutablePath = executablePath,
             Arguments = BuildCommandArguments(attemptOptions),
             WorkingDirectory = attemptOptions.WorkingDirectory,
-            EnvironmentVariables = BuildEnvironmentVariables(attemptOptions, runtimeEnvironment)
+            EnvironmentVariables = BuildEnvironmentVariables(attemptOptions, runtimeEnvironment),
+            Ownership = new CliProcessOwnershipRegistration { ProviderName = Name }
         };
 
         await using var transport = CreateTransport(startContext);

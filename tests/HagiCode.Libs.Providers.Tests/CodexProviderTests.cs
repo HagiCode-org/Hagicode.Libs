@@ -19,6 +19,8 @@ public sealed class CodexProviderTests
     private const string RealCliTestsEnvironmentVariable = "HAGICODE_REAL_CLI_TESTS";
     private const string RetryableTransportDisconnectMessage =
         "Reconnecting... 1/5 (stream disconnected before completion: error sending request for url https://api.example.com/v1)";
+    private const string RetryableSseIdleTimeoutMessage =
+        "Reconnecting... 1/5 (stream disconnected before completion: idle timeout waiting for SSE)";
     private const string RetryableContentFilterDisconnectMessage =
         "Reconnecting... 1/5 (stream disconnected before completion: Incomplete response returned, reason: content_filter)";
     private const string RetryableServerErrorDisconnectMessage =
@@ -367,6 +369,12 @@ public sealed class CodexProviderTests
         serverErrorMessage.ShouldBe(RetryableServerErrorDisconnectMessage);
 
         CodexProvider.TryExtractTerminalMessage(
+                JsonSerializer.SerializeToElement(new { type = "error", message = RetryableSseIdleTimeoutMessage }),
+                out var idleTimeoutMessage)
+            .ShouldBeTrue();
+        idleTimeoutMessage.ShouldBe(RetryableSseIdleTimeoutMessage);
+
+        CodexProvider.TryExtractTerminalMessage(
                 JsonSerializer.SerializeToElement(new { type = "turn.completed", result = RetryableGenericRefusalMessage }),
                 out var refusalMessage)
             .ShouldBeTrue();
@@ -494,6 +502,47 @@ public sealed class CodexProviderTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_retries_retryable_error_envelope_with_continuation_prompt_and_same_thread_context()
+    {
+        var provider = CreateRetryAwareProvider(
+        [
+            [
+                new CliMessage("thread.started", JsonSerializer.SerializeToElement(new { type = "thread.started", thread_id = "thread-error-retry" })),
+                new CliMessage("error", JsonSerializer.SerializeToElement(new { type = "error", message = RetryableSseIdleTimeoutMessage }))
+            ],
+            [
+                new CliMessage("turn.completed", JsonSerializer.SerializeToElement(new { type = "turn.completed" }))
+            ]
+        ]);
+        var messages = new List<CliMessage>();
+
+        await foreach (var message in provider.ExecuteAsync(
+                           new CodexOptions
+                           {
+                               WorkingDirectory = "/tmp/project",
+                               LogicalSessionKey = "session-error-retry",
+                               ProviderErrorAutoRetry = new ProviderErrorAutoRetrySettings
+                               {
+                                   Enabled = true,
+                                   Strategy = ProviderErrorAutoRetrySettings.DefaultStrategy
+                               }
+                           },
+                           "recover the stream"))
+        {
+            messages.Add(message);
+        }
+
+        messages.Select(static message => message.Type).ShouldBe(["thread.started", "turn.completed"]);
+        provider.RecordedDelays.ShouldBe([TimeSpan.FromSeconds(10)]);
+        provider.StartContexts.Count.ShouldBe(2);
+        provider.StartContexts[1].Arguments.ShouldContain("resume");
+        provider.StartContexts[1].Arguments.ShouldContain("thread-error-retry");
+        provider.SentMessages.Count.ShouldBe(2);
+        provider.SentMessages[1].Content.GetProperty("input").GetString()
+            .ShouldBe(ProviderErrorAutoRetrySettings.ContinuationPrompt);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_does_not_retry_turn_failed_when_auto_retry_is_disabled()
     {
         var provider = CreateRetryAwareProvider(
@@ -525,6 +574,71 @@ public sealed class CodexProviderTests
         provider.StartContexts.Count.ShouldBe(1);
         provider.SentMessages.ShouldHaveSingleItem();
         provider.SentMessages[0].Content.GetProperty("input").GetString().ShouldBe("do not retry");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_does_not_retry_retryable_error_envelope_without_thread_context()
+    {
+        var provider = CreateRetryAwareProvider(
+        [
+            [
+                new CliMessage("error", JsonSerializer.SerializeToElement(new { type = "error", message = RetryableSseIdleTimeoutMessage }))
+            ]
+        ]);
+        var messages = new List<CliMessage>();
+
+        await foreach (var message in provider.ExecuteAsync(
+                           new CodexOptions
+                           {
+                               WorkingDirectory = "/tmp/project"
+                           },
+                           "no thread to resume"))
+        {
+            messages.Add(message);
+        }
+
+        messages.Select(static message => message.Type).ShouldBe(["error"]);
+        messages[0].Content.GetProperty("message").GetString().ShouldBe(RetryableSseIdleTimeoutMessage);
+        provider.RecordedDelays.ShouldBeEmpty();
+        provider.StartContexts.Count.ShouldBe(1);
+        provider.SentMessages.ShouldHaveSingleItem();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_retries_generic_error_envelope_when_thread_context_is_available()
+    {
+        const string terminalErrorMessage = "authentication failed";
+        var provider = CreateRetryAwareProvider(
+        [
+            [
+                new CliMessage("thread.started", JsonSerializer.SerializeToElement(new { type = "thread.started", thread_id = "thread-auth-error" })),
+                new CliMessage("error", JsonSerializer.SerializeToElement(new { type = "error", message = terminalErrorMessage }))
+            ],
+            [
+                new CliMessage("turn.completed", JsonSerializer.SerializeToElement(new { type = "turn.completed" }))
+            ]
+        ]);
+        var messages = new List<CliMessage>();
+
+        await foreach (var message in provider.ExecuteAsync(
+                           new CodexOptions
+                           {
+                               WorkingDirectory = "/tmp/project",
+                               LogicalSessionKey = "session-auth-error"
+                           },
+                           "surface the error"))
+        {
+            messages.Add(message);
+        }
+
+        messages.Select(static message => message.Type).ShouldBe(["thread.started", "turn.completed"]);
+        provider.RecordedDelays.ShouldBe([TimeSpan.FromSeconds(10)]);
+        provider.StartContexts.Count.ShouldBe(2);
+        provider.StartContexts[1].Arguments.ShouldContain("resume");
+        provider.StartContexts[1].Arguments.ShouldContain("thread-auth-error");
+        provider.SentMessages.Count.ShouldBe(2);
+        provider.SentMessages[1].Content.GetProperty("input").GetString()
+            .ShouldBe(ProviderErrorAutoRetrySettings.ContinuationPrompt);
     }
 
     [Fact]
