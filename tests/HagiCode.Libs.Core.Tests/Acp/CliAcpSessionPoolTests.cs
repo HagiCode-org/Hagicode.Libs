@@ -137,6 +137,112 @@ public sealed class CliAcpSessionPoolTests
     }
 
     [Fact]
+    public async Task AcquireAsync_reclaims_expired_idle_entries_before_capacity_check()
+    {
+        var timeProvider = new ManualTimeProvider();
+        await using var pool = new CliAcpSessionPool(timeProvider);
+        var settings = new CliPoolSettings { IdleTimeout = TimeSpan.FromSeconds(5), MaxActiveSessions = 1 };
+        var staleClient = new StubAcpSessionClient();
+
+        await using (var lease = await pool.AcquireAsync(
+                         CreateRequest("codex", "stale-key", "fp-stale", settings),
+                         _ => Task.FromResult(new PooledAcpSessionEntry(
+                             "codex",
+                             "session-stale",
+                             staleClient,
+                             "fp-stale",
+                             new AcpSessionHandle("session-stale", false, default),
+                             settings,
+                             timeProvider))))
+        {
+        }
+
+        timeProvider.Advance(TimeSpan.FromSeconds(6));
+
+        await using var secondLease = await pool.AcquireAsync(
+            CreateRequest("codex", "fresh-key", "fp-fresh", settings),
+            _ => Task.FromResult(CreateEntry("codex", "session-fresh", "fp-fresh", timeProvider)));
+
+        staleClient.DisposeCalls.ShouldBe(1);
+        secondLease.IsWarmLease.ShouldBeFalse();
+        secondLease.Entry.SessionId.ShouldBe("session-fresh");
+        pool.GetDiagnosticsSnapshot().LastEviction?.Reason.ShouldBe(CliAcpSessionPoolEventReason.Idle);
+    }
+
+    [Fact]
+    public async Task AcquireAsync_evicts_oldest_idle_entry_when_provider_is_still_at_capacity()
+    {
+        var timeProvider = new ManualTimeProvider();
+        await using var pool = new CliAcpSessionPool(timeProvider);
+        var settings = new CliPoolSettings { IdleTimeout = TimeSpan.FromMinutes(5), MaxActiveSessions = 2 };
+        var oldestClient = new StubAcpSessionClient();
+        var newerClient = new StubAcpSessionClient();
+
+        await using (var lease = await pool.AcquireAsync(
+                         CreateRequest("copilot", "first-key", "fp-1", settings),
+                         _ => Task.FromResult(new PooledAcpSessionEntry(
+                             "copilot",
+                             "session-1",
+                             oldestClient,
+                             "fp-1",
+                             new AcpSessionHandle("session-1", false, default),
+                             settings,
+                             timeProvider))))
+        {
+        }
+
+        timeProvider.Advance(TimeSpan.FromSeconds(1));
+
+        await using (var lease = await pool.AcquireAsync(
+                         CreateRequest("copilot", "second-key", "fp-2", settings),
+                         _ => Task.FromResult(new PooledAcpSessionEntry(
+                             "copilot",
+                             "session-2",
+                             newerClient,
+                             "fp-2",
+                             new AcpSessionHandle("session-2", false, default),
+                             settings,
+                             timeProvider))))
+        {
+        }
+
+        await using var replacementLease = await pool.AcquireAsync(
+            CreateRequest("copilot", "third-key", "fp-3", settings),
+            _ => Task.FromResult(CreateEntry("copilot", "session-3", "fp-3", timeProvider)));
+
+        oldestClient.DisposeCalls.ShouldBe(1);
+        newerClient.DisposeCalls.ShouldBe(0);
+        replacementLease.Entry.SessionId.ShouldBe("session-3");
+        pool.GetDiagnosticsSnapshot().LastEviction?.Reason.ShouldBe(CliAcpSessionPoolEventReason.Capacity);
+    }
+
+    [Fact]
+    public async Task AcquireAsync_throws_when_provider_capacity_is_fully_leased()
+    {
+        var timeProvider = new ManualTimeProvider();
+        await using var pool = new CliAcpSessionPool(timeProvider);
+        var settings = new CliPoolSettings { IdleTimeout = TimeSpan.FromMinutes(5), MaxActiveSessions = 1 };
+
+        await using var lease = await pool.AcquireAsync(
+            CreateRequest("gemini", "leased-key", "fp-1", settings),
+            _ => Task.FromResult(new PooledAcpSessionEntry(
+                "gemini",
+                "session-1",
+                new StubAcpSessionClient(),
+                "fp-1",
+                new AcpSessionHandle("session-1", false, default),
+                settings,
+                timeProvider)));
+
+        var exception = await Should.ThrowAsync<InvalidOperationException>(async () =>
+            await pool.AcquireAsync(
+                CreateRequest("gemini", "other-key", "fp-2", settings),
+                _ => Task.FromResult(CreateEntry("gemini", "session-2", "fp-2", timeProvider))));
+
+        exception.Message.ShouldContain("maximum active session limit");
+    }
+
+    [Fact]
     public async Task ReturnAsync_faulted_lease_disposes_entry_immediately()
     {
         var timeProvider = new ManualTimeProvider();

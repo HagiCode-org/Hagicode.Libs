@@ -8,7 +8,13 @@ internal sealed class CliRuntimePool<TResource> : IAsyncDisposable
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Dictionary<string, CliRuntimePoolEntry<TResource>> _keyIndex = new(StringComparer.Ordinal);
     private readonly HashSet<CliRuntimePoolEntry<TResource>> _entries = [];
+    private readonly TimeProvider _timeProvider;
     private bool _disposed;
+
+    public CliRuntimePool(TimeProvider? timeProvider = null)
+    {
+        _timeProvider = timeProvider ?? TimeProvider.System;
+    }
 
     public async Task<CliRuntimePoolLease<TResource>> AcquireAsync(
         CliRuntimePoolRequest request,
@@ -213,6 +219,8 @@ internal sealed class CliRuntimePool<TResource> : IAsyncDisposable
 
     private async Task EnforceCapacityUnsafeAsync(string providerName, CliPoolSettings settings)
     {
+        await ReapIdleEntriesUnsafeAsync(providerName).ConfigureAwait(false);
+
         var providerEntries = _entries.Where(entry => string.Equals(entry.ProviderName, providerName, StringComparison.Ordinal)).ToArray();
         if (providerEntries.Length < settings.MaxActiveSessions)
         {
@@ -233,7 +241,7 @@ internal sealed class CliRuntimePool<TResource> : IAsyncDisposable
 
     private async Task<int> ReapIdleEntriesUnsafeAsync(string? providerName)
     {
-        var now = DateTimeOffset.UtcNow;
+        var now = _timeProvider.GetUtcNow();
         var toRemove = new List<CliRuntimePoolEntry<TResource>>();
         foreach (var entry in _entries)
         {

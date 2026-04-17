@@ -293,6 +293,8 @@ public sealed class CliAcpSessionPool : ICliAcpSessionPool
 
     private async Task EnforceCapacityUnsafeAsync(string providerName, CliPoolSettings settings)
     {
+        await ReapIdleEntriesUnsafeAsync(providerName).ConfigureAwait(false);
+
         var providerEntries = _entries.Where(entry => string.Equals(entry.ProviderName, providerName, StringComparison.Ordinal)).ToArray();
         if (providerEntries.Length < settings.MaxActiveSessions)
         {
