@@ -48,7 +48,18 @@ public sealed class DependencyInjectionTests
         executionFacade.ShouldNotBeNull();
         acpPool.ShouldNotBeNull();
         poolCoordinator.ShouldNotBeNull();
+        poolConfiguration.GetSettings("claude-code").IdleTimeout.ShouldBe(TimeSpan.FromMinutes(5));
+        poolConfiguration.GetSettings("codebuddy").IdleTimeout.ShouldBe(TimeSpan.FromMinutes(10));
+        poolConfiguration.GetSettings("copilot").IdleTimeout.ShouldBe(TimeSpan.FromMinutes(10));
+        poolConfiguration.GetSettings("codex").IdleTimeout.ShouldBe(TimeSpan.FromMinutes(10));
+        poolConfiguration.GetSettings("deepagents").IdleTimeout.ShouldBe(TimeSpan.FromMinutes(10));
+        poolConfiguration.GetSettings("gemini").IdleTimeout.ShouldBe(TimeSpan.FromMinutes(10));
         poolConfiguration.GetSettings("hermes").Enabled.ShouldBeTrue();
+        poolConfiguration.GetSettings("hermes").IdleTimeout.ShouldBe(TimeSpan.FromHours(24));
+        poolConfiguration.GetSettings("kimi").IdleTimeout.ShouldBe(TimeSpan.FromMinutes(10));
+        poolConfiguration.GetSettings("kiro").IdleTimeout.ShouldBe(TimeSpan.FromMinutes(10));
+        poolConfiguration.GetSettings("qodercli").IdleTimeout.ShouldBe(TimeSpan.FromMinutes(10));
+        poolConfiguration.HasSettings("opencode").ShouldBeFalse();
         registry.GetProvider("claude-code").ShouldNotBeNull();
         registry.GetProvider("claude").ShouldNotBeNull();
         registry.GetProvider("claudecode").ShouldNotBeNull();
