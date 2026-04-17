@@ -1,6 +1,7 @@
 namespace HagiCode.Libs.Providers.ClaudeCode;
 
 using HagiCode.Libs.Core.Acp;
+using HagiCode.Libs.Providers;
 
 /// <summary>
 /// Describes a Claude Code CLI invocation.
@@ -97,6 +98,11 @@ public sealed record ClaudeCodeOptions
     /// Gets or sets the path to an MCP server configuration file.
     /// </summary>
     public string? McpServersPath { get; init; }
+
+    /// <summary>
+    /// Gets or sets provider-level terminal error auto-retry behavior.
+    /// </summary>
+    public ProviderErrorAutoRetrySettings? ProviderErrorAutoRetry { get; init; }
 
     /// <summary>
     /// Gets or sets provider-level pooling overrides.

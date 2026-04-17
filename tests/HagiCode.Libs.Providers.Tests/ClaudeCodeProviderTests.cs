@@ -343,6 +343,76 @@ public sealed class ClaudeCodeProviderTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_retries_error_with_continuation_prompt_when_session_context_is_available()
+    {
+        var provider = CreateProvider(messageBatches:
+        [
+            [
+                new CliMessage("error", JsonSerializer.SerializeToElement(new { type = "error", message = "stream dropped" }))
+            ],
+            [
+                new CliMessage("result", JsonSerializer.SerializeToElement(new { type = "result", done = true }))
+            ]
+        ]);
+        var messages = new List<CliMessage>();
+
+        await foreach (var message in provider.ExecuteAsync(
+                           new ClaudeCodeOptions
+                           {
+                               SessionId = "session-retry",
+                               WorkingDirectory = "/tmp/project",
+                               ProviderErrorAutoRetry = new ProviderErrorAutoRetrySettings
+                               {
+                                   Enabled = true,
+                                   Strategy = ProviderErrorAutoRetrySettings.DefaultStrategy
+                               }
+                           },
+                           "continue the task"))
+        {
+            messages.Add(message);
+        }
+
+        messages.Select(static message => message.Type).ShouldBe(["result"]);
+        provider.CreatedTransportCount.ShouldBe(1);
+        provider.RecordedDelays.ShouldBe([TimeSpan.FromSeconds(10)]);
+        provider.SentMessages.Count.ShouldBe(2);
+        provider.SentMessages[0].Content.GetProperty("message").GetProperty("content").GetString().ShouldBe("continue the task");
+        provider.SentMessages[1].Content.GetProperty("message").GetProperty("content").GetString()
+            .ShouldBe(ProviderErrorAutoRetrySettings.ContinuationPrompt);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_does_not_retry_error_when_session_context_is_missing()
+    {
+        var provider = CreateProvider(messageBatches:
+        [
+            [
+                new CliMessage("error", JsonSerializer.SerializeToElement(new { type = "error", message = "stream dropped" }))
+            ]
+        ]);
+        var messages = new List<CliMessage>();
+
+        await foreach (var message in provider.ExecuteAsync(
+                           new ClaudeCodeOptions
+                           {
+                               WorkingDirectory = "/tmp/project",
+                               ProviderErrorAutoRetry = new ProviderErrorAutoRetrySettings
+                               {
+                                   Enabled = true,
+                                   Strategy = ProviderErrorAutoRetrySettings.DefaultStrategy
+                               }
+                           },
+                           "no context"))
+        {
+            messages.Add(message);
+        }
+
+        messages.Select(static message => message.Type).ShouldBe(["error"]);
+        provider.RecordedDelays.ShouldBeEmpty();
+        provider.SentMessages.ShouldHaveSingleItem();
+    }
+
+    [Fact]
     public async Task PingAsync_reports_version_when_process_succeeds()
     {
         var processManager = new StubCliProcessManager
@@ -518,22 +588,33 @@ public sealed class ClaudeCodeProviderTests
 
     private static TestClaudeCodeProvider CreateProvider(
         CliExecutableResolver? executableResolver = null,
-        CliProcessManager? processManager = null)
+        CliProcessManager? processManager = null,
+        IReadOnlyList<IReadOnlyList<CliMessage>>? messageBatches = null)
     {
         return new TestClaudeCodeProvider(
             executableResolver ?? new StubExecutableResolver(),
             processManager ?? new StubCliProcessManager(),
-            new StubRuntimeEnvironmentResolver());
+            new StubRuntimeEnvironmentResolver(),
+            messageBatches);
     }
 
     private sealed class TestClaudeCodeProvider(
         CliExecutableResolver executableResolver,
         CliProcessManager processManager,
-        IRuntimeEnvironmentResolver runtimeEnvironmentResolver)
+        IRuntimeEnvironmentResolver runtimeEnvironmentResolver,
+        IReadOnlyList<IReadOnlyList<CliMessage>>? messageBatches)
         : ClaudeCodeProvider(executableResolver, processManager, runtimeEnvironmentResolver)
     {
+        private readonly Queue<IReadOnlyList<CliMessage>> _messageBatches = new(messageBatches ?? []);
+        private static readonly IReadOnlyList<CliMessage> DefaultMessageBatch =
+        [
+            new CliMessage("assistant", JsonSerializer.SerializeToElement(new { type = "assistant", content = "hi" })),
+            new CliMessage("result", JsonSerializer.SerializeToElement(new { type = "result", done = true }))
+        ];
+
         public ProcessStartContext? LastStartContext { get; private set; }
         public List<CliMessage> SentMessages { get; } = [];
+        public List<TimeSpan> RecordedDelays { get; } = [];
         public int CreatedTransportCount { get; private set; }
         public SemaphoreSlim? OverrideExecutionLock { get; set; }
         public int ReleaseExecutionLockCallCount { get; private set; }
@@ -543,7 +624,7 @@ public sealed class ClaudeCodeProviderTests
         {
             LastStartContext = startContext;
             CreatedTransportCount++;
-            return new StubTransport(SentMessages);
+            return new StubTransport(SentMessages, GetNextMessageBatch);
         }
 
         protected override Task AcquireExecutionLockAsync(
@@ -564,9 +645,24 @@ public sealed class ClaudeCodeProviderTests
 
             (OverrideExecutionLock ?? executionLock).Release();
         }
+
+        protected override Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken)
+        {
+            RecordedDelays.Add(delay);
+            return Task.CompletedTask;
+        }
+
+        private IReadOnlyList<CliMessage> GetNextMessageBatch()
+        {
+            return _messageBatches.Count > 0
+                ? _messageBatches.Dequeue()
+                : DefaultMessageBatch;
+        }
     }
 
-    private sealed class StubTransport(List<CliMessage> sentMessages) : ICliTransport
+    private sealed class StubTransport(
+        List<CliMessage> sentMessages,
+        Func<IReadOnlyList<CliMessage>> getNextMessageBatch) : ICliTransport
     {
         public bool IsConnected { get; private set; }
 
@@ -588,9 +684,15 @@ public sealed class ClaudeCodeProviderTests
 
         public async IAsyncEnumerable<CliMessage> ReceiveAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            yield return new CliMessage("assistant", JsonSerializer.SerializeToElement(new { type = "assistant", content = "hi" }));
-            await Task.Yield();
-            yield return new CliMessage("result", JsonSerializer.SerializeToElement(new { type = "result", done = true }));
+            var batch = getNextMessageBatch();
+            for (var index = 0; index < batch.Count; index++)
+            {
+                yield return batch[index];
+                if (index < batch.Count - 1)
+                {
+                    await Task.Yield();
+                }
+            }
         }
 
         public Task SendAsync(CliMessage message, CancellationToken cancellationToken = default)

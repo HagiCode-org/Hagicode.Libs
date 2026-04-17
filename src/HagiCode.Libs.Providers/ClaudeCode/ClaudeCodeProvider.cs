@@ -71,7 +71,8 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
             WorkingDirectory = options.WorkingDirectory,
             EnvironmentVariables = BuildEnvironmentVariables(options, runtimeEnvironment),
             InputEncoding = Utf8NoBom,
-            OutputEncoding = Utf8NoBom
+            OutputEncoding = Utf8NoBom,
+            Ownership = new CliProcessOwnershipRegistration { ProviderName = Name }
         };
 
         var poolSettings = ResolvePoolSettings(options);
@@ -157,27 +158,33 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
         lockAcquired = true;
         try
         {
-            await lease.Entry.Resource.SendAsync(CreatePromptMessage(prompt, options), cancellationToken).ConfigureAwait(false);
-
-            await foreach (var message in lease.Entry.Resource.ReceiveAsync(cancellationToken).ConfigureAwait(false))
+            await foreach (var message in ProviderErrorAutoRetryCoordinator.ExecuteAsync(
+                               prompt,
+                               options.ProviderErrorAutoRetry,
+                               retryPrompt => ExecutePooledAttemptAsync(
+                                   retryPrompt,
+                                   options,
+                                   lease.Entry.Resource,
+                                   new ClaudeCodeDebugContext(
+                                       request.LogicalSessionKey,
+                                       request.LogicalSessionKey,
+                                       runtimeFingerprint,
+                                       poolFingerprint,
+                                       resumeMode,
+                                       DateTime.UtcNow),
+                                   cancellationToken),
+                               () => CanRetryInSameContext(options),
+                               DelayAsync,
+                               IsRetryableTerminalFailure,
+                               cancellationToken).ConfigureAwait(false))
             {
-                var enrichedMessage = EnrichMessageWithDebugMetadata(
-                    message,
-                    new ClaudeCodeDebugContext(
-                        request.LogicalSessionKey,
-                        request.LogicalSessionKey,
-                        runtimeFingerprint,
-                        poolFingerprint,
-                        resumeMode,
-                        DateTime.UtcNow));
-
                 if (string.Equals(message.Type, "error", StringComparison.OrdinalIgnoreCase))
                 {
                     faulted = true;
                 }
 
-                yield return enrichedMessage;
-                if (string.Equals(message.Type, "result", StringComparison.OrdinalIgnoreCase))
+                yield return message;
+                if (IsTerminalMessageType(message.Type))
                 {
                     break;
                 }
@@ -400,6 +407,11 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
         return new SubprocessTransport(_processManager, startContext);
     }
 
+    protected virtual Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken)
+    {
+        return Task.Delay(delay, cancellationToken);
+    }
+
     /// <summary>
     /// Waits for the pooled execution lock.
     /// </summary>
@@ -429,7 +441,56 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
                ?? ArgumentValueNormalizer.NormalizeOptionalValue(options.Resume);
     }
 
+    private static string? ResolveContinuationTarget(ClaudeCodeOptions options)
+    {
+        return ArgumentValueNormalizer.NormalizeOptionalValue(options.Resume)
+               ?? ArgumentValueNormalizer.NormalizeOptionalValue(options.SessionId);
+    }
+
+    private static bool CanRetryInSameContext(ClaudeCodeOptions options)
+    {
+        return !string.IsNullOrWhiteSpace(ResolveContinuationTarget(options));
+    }
+
+    private static bool IsRetryableTerminalFailure(CliMessage message)
+    {
+        return string.Equals(message.Type, "error", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsTerminalMessageType(string? messageType)
+    {
+        return string.Equals(messageType, "result", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(messageType, "error", StringComparison.OrdinalIgnoreCase);
+    }
+
     private async IAsyncEnumerable<CliMessage> ExecuteOneShotAsync(
+        string prompt,
+        ClaudeCodeOptions options,
+        ProcessStartContext startContext,
+        ClaudeCodeDebugContext debugContext,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var continuationTarget = ResolveContinuationTarget(options);
+
+        await foreach (var message in ProviderErrorAutoRetryCoordinator.ExecuteAsync(
+                           prompt,
+                           options.ProviderErrorAutoRetry,
+                           retryPrompt => ExecuteOneShotAttemptAsync(
+                               retryPrompt,
+                               options,
+                               startContext,
+                               debugContext,
+                               cancellationToken),
+                           () => !string.IsNullOrWhiteSpace(continuationTarget),
+                           DelayAsync,
+                           IsRetryableTerminalFailure,
+                           cancellationToken).ConfigureAwait(false))
+        {
+            yield return message;
+        }
+    }
+
+    private async IAsyncEnumerable<CliMessage> ExecuteOneShotAttemptAsync(
         string prompt,
         ClaudeCodeOptions options,
         ProcessStartContext startContext,
@@ -443,7 +504,26 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
         await foreach (var message in transport.ReceiveAsync(cancellationToken).ConfigureAwait(false))
         {
             yield return EnrichMessageWithDebugMetadata(message, debugContext);
-            if (string.Equals(message.Type, "result", StringComparison.OrdinalIgnoreCase))
+            if (IsTerminalMessageType(message.Type))
+            {
+                yield break;
+            }
+        }
+    }
+
+    private async IAsyncEnumerable<CliMessage> ExecutePooledAttemptAsync(
+        string prompt,
+        ClaudeCodeOptions options,
+        ICliTransport transport,
+        ClaudeCodeDebugContext debugContext,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        await transport.SendAsync(CreatePromptMessage(prompt, options), cancellationToken).ConfigureAwait(false);
+
+        await foreach (var message in transport.ReceiveAsync(cancellationToken).ConfigureAwait(false))
+        {
+            yield return EnrichMessageWithDebugMetadata(message, debugContext);
+            if (IsTerminalMessageType(message.Type))
             {
                 yield break;
             }
