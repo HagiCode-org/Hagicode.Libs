@@ -1,5 +1,8 @@
 using System.Text;
+using System.Text.Json;
+using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Process;
+using Microsoft.Extensions.Options;
 using Shouldly;
 
 namespace HagiCode.Libs.Core.Tests.Process;
@@ -132,6 +135,118 @@ public sealed class CliProcessManagerTests
         startInfo.ArgumentList.ShouldBe(["--output-format", "stream-json"]);
     }
 
+    [Fact]
+    public async Task StartAsync_persists_owned_process_and_stop_async_removes_record()
+    {
+        using var tempDirectory = new TempDirectory();
+        var statePath = Path.Combine(tempDirectory.Path, "cli-owned-processes.json");
+        var manager = CreateOwnershipManager(statePath);
+
+        var handle = await manager.StartAsync(CreateOwnershipShellContext("sleep 30", "codex"));
+        var stopped = false;
+
+        try
+        {
+            var states = await new CliOwnedProcessRegistry().ReadAsync(statePath);
+            states.Count.ShouldBe(1);
+            states[0].ProviderName.ShouldBe("codex");
+            states[0].Pid.ShouldBe(handle.Process.Id);
+
+            await manager.StopAsync(handle);
+            stopped = true;
+
+            File.Exists(statePath).ShouldBeFalse();
+        }
+        finally
+        {
+            if (!stopped)
+            {
+                await manager.StopAsync(handle);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task DisposeAsync_removes_owned_process_record_after_process_exit()
+    {
+        using var tempDirectory = new TempDirectory();
+        var statePath = Path.Combine(tempDirectory.Path, "cli-owned-processes.json");
+        var manager = CreateOwnershipManager(statePath);
+
+        var handle = await manager.StartAsync(CreateOwnershipShellContext("true", "claude-code"));
+
+        await handle.Process.WaitForExitAsync();
+        File.Exists(statePath).ShouldBeTrue();
+
+        await handle.DisposeAsync();
+
+        File.Exists(statePath).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task RecoverOwnedProcessesAsync_deletes_corrupted_state_file()
+    {
+        using var tempDirectory = new TempDirectory();
+        var statePath = Path.Combine(tempDirectory.Path, "cli-owned-processes.json");
+        await File.WriteAllTextAsync(statePath, "{not-json");
+        var manager = CreateOwnershipManager(statePath);
+
+        var recovered = await manager.RecoverOwnedProcessesAsync();
+
+        recovered.ShouldBe(0);
+        File.Exists(statePath).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task RecoverOwnedProcessesAsync_skips_start_time_mismatch_and_removes_record()
+    {
+        using var tempDirectory = new TempDirectory();
+        var statePath = Path.Combine(tempDirectory.Path, "cli-owned-processes.json");
+        var manager = CreateOwnershipManager(statePath);
+        var registry = new CliOwnedProcessRegistry();
+        var handle = await manager.StartAsync(CreateOwnershipShellContext("sleep 30", "kimi"));
+
+        try
+        {
+            var state = (await registry.ReadAsync(statePath)).Single();
+            var mismatchedState = state with { StartedAtUtc = state.StartedAtUtc.AddSeconds(-5) };
+            await WriteOwnedProcessStatesAsync(statePath, mismatchedState);
+
+            var recovered = await manager.RecoverOwnedProcessesAsync();
+
+            recovered.ShouldBe(0);
+            handle.Process.HasExited.ShouldBeFalse();
+            File.Exists(statePath).ShouldBeFalse();
+        }
+        finally
+        {
+            await manager.StopAsync(handle);
+        }
+    }
+
+    [Fact]
+    public async Task RecoverOwnedProcessesAsync_kills_matching_owned_process_and_removes_record()
+    {
+        using var tempDirectory = new TempDirectory();
+        var statePath = Path.Combine(tempDirectory.Path, "cli-owned-processes.json");
+        var manager = CreateOwnershipManager(statePath);
+        var handle = await manager.StartAsync(CreateOwnershipShellContext("sleep 30", "hermes"));
+
+        try
+        {
+            var recovered = await manager.RecoverOwnedProcessesAsync();
+
+            recovered.ShouldBe(1);
+            await handle.Process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            handle.Process.HasExited.ShouldBeTrue();
+            File.Exists(statePath).ShouldBeFalse();
+        }
+        finally
+        {
+            await manager.StopAsync(handle);
+        }
+    }
+
     private static ProcessStartContext CreateShellContext(string command)
     {
         return new ProcessStartContext
@@ -139,6 +254,46 @@ public sealed class CliProcessManagerTests
             ExecutablePath = "/bin/sh",
             Arguments = ["-lc", command]
         };
+    }
+
+    private static ProcessStartContext CreateOwnershipShellContext(string command, string providerName)
+    {
+        return new ProcessStartContext
+        {
+            ExecutablePath = "/bin/sh",
+            Arguments = ["-lc", command],
+            Ownership = new CliProcessOwnershipRegistration { ProviderName = providerName }
+        };
+    }
+
+    private static CliProcessManager CreateOwnershipManager(string statePath)
+    {
+        return new CliProcessManager(
+            new CliExecutableResolver(),
+            Options.Create(new CliProcessOwnershipOptions
+            {
+                Enabled = true,
+                StateFilePath = statePath
+            }),
+            new CliOwnedProcessRegistry());
+    }
+
+    private static async Task WriteOwnedProcessStatesAsync(string statePath, params CliOwnedProcessState[] states)
+    {
+        var directory = Path.GetDirectoryName(statePath);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        await File.WriteAllTextAsync(
+            statePath,
+            JsonSerializer.Serialize(
+                new Dictionary<string, object?>
+                {
+                    ["processes"] = states
+                },
+                new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true }));
     }
 
     private sealed class TestCliProcessManager(string resolvedExecutablePath, bool isWindows = true) : CliProcessManager
@@ -150,5 +305,32 @@ public sealed class CliProcessManagerTests
 
         protected override Encoding ResolveWindowsBatchStandardErrorEncoding(Encoding fallbackEncoding)
             => Encoding.Unicode;
+    }
+
+    private sealed class TempDirectory : IDisposable
+    {
+        public TempDirectory()
+        {
+            Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"cli-process-manager-tests-{Guid.NewGuid():N}");
+            Directory.CreateDirectory(Path);
+        }
+
+        public string Path { get; }
+
+        public void Dispose()
+        {
+            if (!Directory.Exists(Path))
+            {
+                return;
+            }
+
+            try
+            {
+                Directory.Delete(Path, recursive: true);
+            }
+            catch
+            {
+            }
+        }
     }
 }

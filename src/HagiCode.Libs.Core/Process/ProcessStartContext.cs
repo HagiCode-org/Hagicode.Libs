@@ -42,4 +42,9 @@ public sealed record ProcessStartContext
     /// Gets or sets the maximum execution duration for one-shot commands.
     /// </summary>
     public TimeSpan? Timeout { get; init; }
+
+    /// <summary>
+    /// Gets or sets provider ownership metadata for managed subprocess persistence.
+    /// </summary>
+    public CliProcessOwnershipRegistration? Ownership { get; init; }
 }

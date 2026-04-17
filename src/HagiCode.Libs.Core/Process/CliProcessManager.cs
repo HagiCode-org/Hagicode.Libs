@@ -2,7 +2,11 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Json;
 using HagiCode.Libs.Core.Discovery;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace HagiCode.Libs.Core.Process;
 
@@ -15,20 +19,64 @@ public class CliProcessManager
     private static readonly TimeSpan StopWaitTimeout = TimeSpan.FromSeconds(5);
 
     private readonly CliExecutableResolver _executableResolver;
+    private readonly CliOwnedProcessRegistry _ownedProcessRegistry;
+    private readonly CliProcessOwnershipOptions _ownershipOptions;
     private readonly TimeProvider _timeProvider;
+    private readonly ILogger<CliProcessManager> _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="CliProcessManager" /> class.
     /// </summary>
     public CliProcessManager()
-        : this(new CliExecutableResolver(), TimeProvider.System)
+        : this(
+            new CliExecutableResolver(),
+            new CliOwnedProcessRegistry(),
+            new CliProcessOwnershipOptions(),
+            TimeProvider.System,
+            NullLogger<CliProcessManager>.Instance)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="CliProcessManager" /> class with dependency injection support.
+    /// </summary>
+    public CliProcessManager(
+        CliExecutableResolver executableResolver,
+        IOptions<CliProcessOwnershipOptions>? ownershipOptions = null,
+        CliOwnedProcessRegistry? ownedProcessRegistry = null,
+        TimeProvider? timeProvider = null,
+        ILogger<CliProcessManager>? logger = null)
+        : this(
+            executableResolver,
+            ownedProcessRegistry ?? new CliOwnedProcessRegistry(),
+            ownershipOptions?.Value ?? new CliProcessOwnershipOptions(),
+            timeProvider ?? TimeProvider.System,
+            logger ?? NullLogger<CliProcessManager>.Instance)
     {
     }
 
     internal CliProcessManager(CliExecutableResolver executableResolver, TimeProvider timeProvider)
+        : this(
+            executableResolver,
+            new CliOwnedProcessRegistry(),
+            new CliProcessOwnershipOptions(),
+            timeProvider,
+            NullLogger<CliProcessManager>.Instance)
+    {
+    }
+
+    internal CliProcessManager(
+        CliExecutableResolver executableResolver,
+        CliOwnedProcessRegistry ownedProcessRegistry,
+        CliProcessOwnershipOptions ownershipOptions,
+        TimeProvider timeProvider,
+        ILogger<CliProcessManager> logger)
     {
         _executableResolver = executableResolver ?? throw new ArgumentNullException(nameof(executableResolver));
+        _ownedProcessRegistry = ownedProcessRegistry ?? throw new ArgumentNullException(nameof(ownedProcessRegistry));
+        _ownershipOptions = ownershipOptions ?? throw new ArgumentNullException(nameof(ownershipOptions));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     /// <summary>
@@ -70,12 +118,13 @@ public class CliProcessManager
     /// <param name="context">The process start context.</param>
     /// <param name="cancellationToken">Cancels the start operation.</param>
     /// <returns>A handle for the running subprocess.</returns>
-    public virtual ValueTask<CliProcessHandle> StartAsync(ProcessStartContext context, CancellationToken cancellationToken = default)
+    public virtual async ValueTask<CliProcessHandle> StartAsync(ProcessStartContext context, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(context);
 
         var process = new System.Diagnostics.Process { StartInfo = CreateStartInfo(context) };
+        CliOwnedProcessState? ownedProcessState = null;
         try
         {
             if (!process.Start())
@@ -83,14 +132,19 @@ public class CliProcessManager
                 throw new InvalidOperationException($"Failed to start process '{context.ExecutablePath}'.");
             }
 
-            return ValueTask.FromResult(new CliProcessHandle(
+            ownedProcessState = await RegisterOwnedProcessAsync(process, context, cancellationToken).ConfigureAwait(false);
+            return new CliProcessHandle(
                 process,
                 process.StandardInput,
                 process.StandardOutput,
-                process.StandardError));
+                process.StandardError,
+                ownedProcessState,
+                RemoveOwnedProcessRecordAsync);
         }
         catch
         {
+            await RemoveOwnedProcessRecordAsync(ownedProcessState).ConfigureAwait(false);
+            TryKill(process);
             process.Dispose();
             throw;
         }
@@ -107,7 +161,7 @@ public class CliProcessManager
         ArgumentNullException.ThrowIfNull(context);
 
         var startedAtUtc = _timeProvider.GetUtcNow();
-        await using var handle = await StartAsync(context, cancellationToken);
+        await using var handle = await StartAsync(context, cancellationToken).ConfigureAwait(false);
 
         var standardOutput = new StringBuilder();
         var standardError = new StringBuilder();
@@ -125,20 +179,20 @@ public class CliProcessManager
 
         try
         {
-            await handle.Process.WaitForExitAsync(linkedCts.Token);
+            await handle.Process.WaitForExitAsync(linkedCts.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && context.Timeout is not null)
         {
             timedOut = true;
-            await StopProcessAsync(handle, disposeHandle: false, CancellationToken.None);
+            await StopProcessAsync(handle, disposeHandle: false, CancellationToken.None).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
-            await StopProcessAsync(handle, disposeHandle: false, CancellationToken.None);
+            await StopProcessAsync(handle, disposeHandle: false, CancellationToken.None).ConfigureAwait(false);
             throw;
         }
 
-        await Task.WhenAll(stdoutTask, stderrTask);
+        await Task.WhenAll(stdoutTask, stderrTask).ConfigureAwait(false);
 
         var completedAtUtc = _timeProvider.GetUtcNow();
         return new ProcessResult(
@@ -163,7 +217,7 @@ public class CliProcessManager
     public virtual async Task InterruptAsync(CliProcessHandle handle, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(handle);
-        await TryInterruptAsync(handle, cancellationToken);
+        await TryInterruptAsync(handle, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -185,6 +239,71 @@ public class CliProcessManager
     {
         ArgumentNullException.ThrowIfNull(handle);
         return StopProcessAsync(handle, disposeHandle: false, cancellationToken);
+    }
+
+    /// <summary>
+    /// Recovers and cleans up persisted owned subprocess records during host startup.
+    /// </summary>
+    public virtual async Task<int> RecoverOwnedProcessesAsync(CancellationToken cancellationToken = default)
+    {
+        if (!IsOwnershipPersistenceEnabled())
+        {
+            return 0;
+        }
+
+        var stateFilePath = _ownershipOptions.StateFilePath!;
+        IReadOnlyList<CliOwnedProcessState> states;
+        try
+        {
+            states = await _ownedProcessRegistry.ReadAsync(stateFilePath, cancellationToken).ConfigureAwait(false);
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "Deleting corrupted owned-process state file at {StateFilePath}.", stateFilePath);
+            await _ownedProcessRegistry.DeleteIfExistsAsync(stateFilePath, CancellationToken.None).ConfigureAwait(false);
+            return 0;
+        }
+
+        var recoveredCount = 0;
+        foreach (var state in states)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            using var process = TryGetProcessById(state.Pid);
+            try
+            {
+                if (process is null)
+                {
+                    continue;
+                }
+
+                if (!MatchesOwnedProcessIdentity(process, state))
+                {
+                    continue;
+                }
+
+                _logger.LogInformation(
+                    "Terminating recovered owned CLI process {Pid} for provider {ProviderName}.",
+                    state.Pid,
+                    state.ProviderName);
+                process.Kill(entireProcessTree: true);
+                process.WaitForExit((int)StopWaitTimeout.TotalMilliseconds);
+                recoveredCount++;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Failed to terminate recovered owned CLI process {Pid} for provider {ProviderName}.",
+                    state.Pid,
+                    state.ProviderName);
+            }
+            finally
+            {
+                await RemoveOwnedProcessRecordAsync(state).ConfigureAwait(false);
+            }
+        }
+
+        return recoveredCount;
     }
 
     /// <summary>
@@ -252,14 +371,14 @@ public class CliProcessManager
         {
             if (!handle.Process.HasExited)
             {
-                await TryInterruptAsync(handle, cancellationToken);
+                await TryInterruptAsync(handle, cancellationToken).ConfigureAwait(false);
                 TryCloseInput(handle);
 
                 using var gracefulWaitCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 gracefulWaitCts.CancelAfter(GracefulStopTimeout);
                 try
                 {
-                    await handle.Process.WaitForExitAsync(gracefulWaitCts.Token);
+                    await handle.Process.WaitForExitAsync(gracefulWaitCts.Token).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
@@ -281,7 +400,7 @@ public class CliProcessManager
             waitCts.CancelAfter(StopWaitTimeout);
             if (!handle.Process.HasExited)
             {
-                await handle.Process.WaitForExitAsync(waitCts.Token);
+                await handle.Process.WaitForExitAsync(waitCts.Token).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)
@@ -289,9 +408,11 @@ public class CliProcessManager
         }
         finally
         {
+            var ownedProcessState = handle.DetachOwnedProcessState();
+            await RemoveOwnedProcessRecordAsync(ownedProcessState).ConfigureAwait(false);
             if (disposeHandle)
             {
-                await handle.DisposeAsync();
+                await handle.DisposeAsync().ConfigureAwait(false);
             }
         }
     }
@@ -303,10 +424,10 @@ public class CliProcessManager
             return false;
         }
 
-        var wroteControlCharacter = await TryWriteControlCharacterAsync(handle, cancellationToken);
+        var wroteControlCharacter = await TryWriteControlCharacterAsync(handle, cancellationToken).ConfigureAwait(false);
         if (!IsWindows())
         {
-            var sentSignal = await TrySendInterruptSignalAsync(handle.Process.Id, cancellationToken);
+            var sentSignal = await TrySendInterruptSignalAsync(handle.Process.Id, cancellationToken).ConfigureAwait(false);
             return wroteControlCharacter || sentSignal;
         }
 
@@ -317,8 +438,8 @@ public class CliProcessManager
     {
         try
         {
-            await handle.StandardInput.WriteAsync("\u0003".AsMemory(), cancellationToken);
-            await handle.StandardInput.FlushAsync(cancellationToken);
+            await handle.StandardInput.WriteAsync("\u0003".AsMemory(), cancellationToken).ConfigureAwait(false);
+            await handle.StandardInput.FlushAsync(cancellationToken).ConfigureAwait(false);
             return true;
         }
         catch (ObjectDisposedException)
@@ -367,7 +488,7 @@ public class CliProcessManager
                 return false;
             }
 
-            await signalProcess.WaitForExitAsync(cancellationToken);
+            await signalProcess.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
             return signalProcess.ExitCode == 0;
         }
         catch
@@ -386,7 +507,7 @@ public class CliProcessManager
         var buffer = new char[1024];
         while (true)
         {
-            var read = await reader.ReadAsync(buffer.AsMemory(), cancellationToken);
+            var read = await reader.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false);
             if (read <= 0)
             {
                 break;
@@ -418,6 +539,120 @@ public class CliProcessManager
         var extension = Path.GetExtension(executablePath);
         return extension.Equals(".cmd", StringComparison.OrdinalIgnoreCase)
                || extension.Equals(".bat", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async ValueTask<CliOwnedProcessState?> RegisterOwnedProcessAsync(
+        System.Diagnostics.Process process,
+        ProcessStartContext context,
+        CancellationToken cancellationToken)
+    {
+        if (!IsOwnershipPersistenceEnabled() || context.Ownership is null)
+        {
+            return null;
+        }
+
+        if (!TryGetProcessStartTimeUtc(process, out var startedAtUtc))
+        {
+            throw new InvalidOperationException(
+                $"Failed to read process start time for provider '{context.Ownership.ProviderName}' ownership persistence.");
+        }
+
+        var state = new CliOwnedProcessState(
+            process.Id,
+            startedAtUtc,
+            process.StartInfo.FileName,
+            context.WorkingDirectory,
+            context.Ownership.ProviderName,
+            _timeProvider.GetUtcNow());
+        await _ownedProcessRegistry.AddOrUpdateAsync(_ownershipOptions.StateFilePath!, state, cancellationToken).ConfigureAwait(false);
+        return state;
+    }
+
+    private async ValueTask RemoveOwnedProcessRecordAsync(CliOwnedProcessState? state)
+    {
+        if (state is null || !IsOwnershipPersistenceEnabled())
+        {
+            return;
+        }
+
+        try
+        {
+            await _ownedProcessRegistry.RemoveAsync(_ownershipOptions.StateFilePath!, state).ConfigureAwait(false);
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "Deleting corrupted owned-process state file at {StateFilePath}.", _ownershipOptions.StateFilePath);
+            await _ownedProcessRegistry.DeleteIfExistsAsync(_ownershipOptions.StateFilePath!, CancellationToken.None).ConfigureAwait(false);
+        }
+    }
+
+    private bool MatchesOwnedProcessIdentity(System.Diagnostics.Process process, CliOwnedProcessState state)
+    {
+        if (process.HasExited)
+        {
+            return false;
+        }
+
+        if (!TryGetProcessStartTimeUtc(process, out var actualStartedAtUtc))
+        {
+            _logger.LogWarning(
+                "Skipping owned-process recovery for provider {ProviderName} because process {Pid} start time could not be read.",
+                state.ProviderName,
+                state.Pid);
+            return false;
+        }
+
+        return (actualStartedAtUtc - state.StartedAtUtc).Duration() <= _ownershipOptions.StartTimeTolerance;
+    }
+
+    private bool IsOwnershipPersistenceEnabled()
+    {
+        return _ownershipOptions.Enabled && !string.IsNullOrWhiteSpace(_ownershipOptions.StateFilePath);
+    }
+
+    private static System.Diagnostics.Process? TryGetProcessById(int pid)
+    {
+        try
+        {
+            return System.Diagnostics.Process.GetProcessById(pid);
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    private static bool TryGetProcessStartTimeUtc(System.Diagnostics.Process process, out DateTimeOffset startedAtUtc)
+    {
+        try
+        {
+            startedAtUtc = new DateTimeOffset(process.StartTime.ToUniversalTime(), TimeSpan.Zero);
+            return true;
+        }
+        catch
+        {
+            startedAtUtc = default;
+            return false;
+        }
+    }
+
+    private static void TryKill(System.Diagnostics.Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                process.WaitForExit((int)StopWaitTimeout.TotalMilliseconds);
+            }
+        }
+        catch (InvalidOperationException)
+        {
+        }
     }
 
     private static Encoding? TryResolveWindowsBatchStandardErrorEncoding()

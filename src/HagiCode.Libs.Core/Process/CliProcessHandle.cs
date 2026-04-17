@@ -6,13 +6,23 @@ namespace HagiCode.Libs.Core.Process;
 public sealed class CliProcessHandle : IAsyncDisposable
 {
     private bool _disposed;
+    private CliOwnedProcessState? _ownedProcessState;
+    private readonly Func<CliOwnedProcessState, ValueTask>? _ownedProcessCleanup;
 
-    internal CliProcessHandle(System.Diagnostics.Process process, StreamWriter standardInput, StreamReader standardOutput, StreamReader standardError)
+    internal CliProcessHandle(
+        System.Diagnostics.Process process,
+        StreamWriter standardInput,
+        StreamReader standardOutput,
+        StreamReader standardError,
+        CliOwnedProcessState? ownedProcessState = null,
+        Func<CliOwnedProcessState, ValueTask>? ownedProcessCleanup = null)
     {
         Process = process;
         StandardInput = standardInput;
         StandardOutput = standardOutput;
         StandardError = standardError;
+        _ownedProcessState = ownedProcessState;
+        _ownedProcessCleanup = ownedProcessCleanup;
     }
 
     /// <summary>
@@ -40,20 +50,36 @@ public sealed class CliProcessHandle : IAsyncDisposable
     /// </summary>
     public bool IsRunning => !Process.HasExited;
 
+    /// <summary>
+    /// Gets the persisted ownership record associated with the subprocess, when tracking is enabled.
+    /// </summary>
+    public CliOwnedProcessState? OwnedProcessState => _ownedProcessState;
+
     /// <inheritdoc />
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         if (_disposed)
         {
-            return ValueTask.CompletedTask;
+            return;
         }
 
         _disposed = true;
+        var ownedProcessState = DetachOwnedProcessState();
         TryDispose(StandardInput);
         TryDispose(StandardOutput);
         TryDispose(StandardError);
         Process.Dispose();
-        return ValueTask.CompletedTask;
+        if (ownedProcessState is not null && _ownedProcessCleanup is not null)
+        {
+            await _ownedProcessCleanup(ownedProcessState).ConfigureAwait(false);
+        }
+    }
+
+    internal CliOwnedProcessState? DetachOwnedProcessState()
+    {
+        var state = _ownedProcessState;
+        _ownedProcessState = null;
+        return state;
     }
 
     private static void TryDispose(IDisposable disposable)

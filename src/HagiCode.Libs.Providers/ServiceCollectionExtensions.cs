@@ -33,7 +33,9 @@ public static class ServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
+        services.AddOptions<CliProcessOwnershipOptions>();
         services.AddSingleton<CliExecutableResolver>();
+        services.AddSingleton<CliOwnedProcessRegistry>();
         services.AddSingleton<CliProcessManager>();
         services.AddSingleton<IShellCommandRunner, ProcessShellCommandRunner>();
         services.AddSingleton<IRuntimeEnvironmentResolver, RuntimeEnvironmentResolver>();
