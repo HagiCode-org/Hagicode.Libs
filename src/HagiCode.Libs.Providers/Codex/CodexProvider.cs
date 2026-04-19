@@ -188,20 +188,13 @@ public class CodexProvider : ICliProvider<CodexOptions>
         var executionStopwatch = Stopwatch.StartNew();
         try
         {
-            await foreach (var message in ProviderErrorAutoRetryCoordinator.ExecuteAsync(
+            await foreach (var message in ExecuteCodexAttemptAsync(
+                               effectiveOptions,
                                prompt,
-                               options.ProviderErrorAutoRetry,
-                               retryPrompt => ExecuteCodexAttemptAsync(
-                                   effectiveOptions,
-                                   retryPrompt,
-                                   executablePath,
-                                   runtimeEnvironment,
-                                   logicalSessionKey,
-                                   lease,
-                                   cancellationToken),
-                               () => !string.IsNullOrWhiteSpace(lease.Entry.Resource.ThreadId ?? resolvedThreadId),
-                               DelayAsync,
-                               IsRetryableTerminalFailure,
+                               executablePath,
+                               runtimeEnvironment,
+                               logicalSessionKey,
+                               lease,
                                cancellationToken).ConfigureAwait(false))
             {
                 if (string.Equals(message.Type, "turn.failed", StringComparison.OrdinalIgnoreCase) ||
@@ -610,12 +603,9 @@ public class CodexProvider : ICliProvider<CodexOptions>
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var currentThreadId = ArgumentValueNormalizer.NormalizeOptionalValue(options.ThreadId);
-        await foreach (var message in ProviderErrorAutoRetryCoordinator.ExecuteAsync(
-                           prompt,
-                           options.ProviderErrorAutoRetry,
-                           retryPrompt => ExecuteOneShotAttemptAsync(
+        await foreach (var message in ExecuteOneShotAttemptAsync(
                            options,
-                           retryPrompt,
+                           prompt,
                            executablePath,
                            runtimeEnvironment,
                            currentThreadId,
@@ -624,10 +614,6 @@ public class CodexProvider : ICliProvider<CodexOptions>
                                currentThreadId = threadId;
                                return Task.CompletedTask;
                            },
-                           cancellationToken),
-                           () => !string.IsNullOrWhiteSpace(currentThreadId),
-                           DelayAsync,
-                           IsRetryableTerminalFailure,
                            cancellationToken).ConfigureAwait(false))
         {
             yield return message;

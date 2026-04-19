@@ -100,11 +100,6 @@ public sealed record ClaudeCodeOptions
     public string? McpServersPath { get; init; }
 
     /// <summary>
-    /// Gets or sets provider-level terminal error auto-retry behavior.
-    /// </summary>
-    public ProviderErrorAutoRetrySettings? ProviderErrorAutoRetry { get; init; }
-
-    /// <summary>
     /// Gets or sets provider-level pooling overrides.
     /// </summary>
     public CliPoolSettings? PoolSettings { get; init; }

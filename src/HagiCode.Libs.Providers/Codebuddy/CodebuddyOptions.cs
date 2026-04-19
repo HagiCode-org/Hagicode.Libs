@@ -55,11 +55,6 @@ public sealed record CodebuddyOptions
     public IReadOnlyList<string> ExtraArguments { get; init; } = [];
 
     /// <summary>
-    /// Gets or sets the execution-local terminal failure auto-retry settings.
-    /// </summary>
-    public ProviderErrorAutoRetrySettings? ProviderErrorAutoRetry { get; init; }
-
-    /// <summary>
     /// Gets or sets provider-level pooling overrides.
     /// </summary>
     public CliPoolSettings? PoolSettings { get; init; }

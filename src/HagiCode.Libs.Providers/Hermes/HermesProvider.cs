@@ -127,17 +127,10 @@ public class HermesProvider : ICliProvider<HermesOptions>
         {
             yield return lifecycleMessage;
 
-            await foreach (var message in ProviderErrorAutoRetryCoordinator.ExecuteAsync(
+            await foreach (var message in StreamPromptAttemptAsync(
+                               lease.Entry.SessionClient,
+                               lease.Entry.SessionId,
                                prompt,
-                               options.ProviderErrorAutoRetry,
-                               retryPrompt => StreamPromptAttemptAsync(
-                                   lease.Entry.SessionClient,
-                                   lease.Entry.SessionId,
-                                   retryPrompt,
-                                   cancellationToken),
-                               () => !string.IsNullOrWhiteSpace(lease.Entry.SessionId),
-                               DelayAsync,
-                               retryableTerminalType: "terminal.failed",
                                cancellationToken).ConfigureAwait(false))
             {
                 if (string.Equals(message.Type, "terminal.failed", StringComparison.OrdinalIgnoreCase))
@@ -340,17 +333,10 @@ public class HermesProvider : ICliProvider<HermesOptions>
 
         yield return HermesAcpMessageMapper.CreateSessionLifecycleMessage(sessionHandle);
 
-        await foreach (var message in ProviderErrorAutoRetryCoordinator.ExecuteAsync(
+        await foreach (var message in StreamPromptAttemptAsync(
+                           sessionClient,
+                           sessionHandle.SessionId,
                            prompt,
-                           options.ProviderErrorAutoRetry,
-                           retryPrompt => StreamPromptAttemptAsync(
-                               sessionClient,
-                               sessionHandle.SessionId,
-                               retryPrompt,
-                               cancellationToken),
-                           () => !string.IsNullOrWhiteSpace(sessionHandle.SessionId),
-                           DelayAsync,
-                           retryableTerminalType: "terminal.failed",
                            cancellationToken).ConfigureAwait(false))
         {
             yield return message;

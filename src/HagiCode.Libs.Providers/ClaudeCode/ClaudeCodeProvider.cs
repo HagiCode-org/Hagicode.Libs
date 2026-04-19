@@ -158,24 +158,17 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
         lockAcquired = true;
         try
         {
-            await foreach (var message in ProviderErrorAutoRetryCoordinator.ExecuteAsync(
+            await foreach (var message in ExecutePooledAttemptAsync(
                                prompt,
-                               options.ProviderErrorAutoRetry,
-                               retryPrompt => ExecutePooledAttemptAsync(
-                                   retryPrompt,
-                                   options,
-                                   lease.Entry.Resource,
-                                   new ClaudeCodeDebugContext(
-                                       request.LogicalSessionKey,
-                                       request.LogicalSessionKey,
-                                       runtimeFingerprint,
-                                       poolFingerprint,
-                                       resumeMode,
-                                       DateTime.UtcNow),
-                                   cancellationToken),
-                               () => CanRetryInSameContext(options),
-                               DelayAsync,
-                               IsRetryableTerminalFailure,
+                               options,
+                               lease.Entry.Resource,
+                               new ClaudeCodeDebugContext(
+                                   request.LogicalSessionKey,
+                                   request.LogicalSessionKey,
+                                   runtimeFingerprint,
+                                   poolFingerprint,
+                                   resumeMode,
+                                   DateTime.UtcNow),
                                cancellationToken).ConfigureAwait(false))
             {
                 if (string.Equals(message.Type, "error", StringComparison.OrdinalIgnoreCase))
@@ -470,20 +463,11 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
         ClaudeCodeDebugContext debugContext,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var continuationTarget = ResolveContinuationTarget(options);
-
-        await foreach (var message in ProviderErrorAutoRetryCoordinator.ExecuteAsync(
+        await foreach (var message in ExecuteOneShotAttemptAsync(
                            prompt,
-                           options.ProviderErrorAutoRetry,
-                           retryPrompt => ExecuteOneShotAttemptAsync(
-                               retryPrompt,
-                               options,
-                               startContext,
-                               debugContext,
-                               cancellationToken),
-                           () => !string.IsNullOrWhiteSpace(continuationTarget),
-                           DelayAsync,
-                           IsRetryableTerminalFailure,
+                           options,
+                           startContext,
+                           debugContext,
                            cancellationToken).ConfigureAwait(false))
         {
             yield return message;

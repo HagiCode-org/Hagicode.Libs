@@ -125,18 +125,11 @@ public class GeminiProvider : ICliProvider<GeminiOptions>
         await lease.Entry.ExecutionLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await foreach (var message in ProviderErrorAutoRetryCoordinator.ExecuteAsync(
+            await foreach (var message in StreamPromptAttemptAsync(
+                               lease.Entry.SessionClient,
+                               lease.Entry.SessionId,
+                               lease.IsWarmLease || lifecycleHandle.IsResumed,
                                prompt,
-                               options.ProviderErrorAutoRetry,
-                               retryPrompt => StreamPromptAttemptAsync(
-                                   lease.Entry.SessionClient,
-                                   lease.Entry.SessionId,
-                                   lease.IsWarmLease || lifecycleHandle.IsResumed,
-                                   retryPrompt,
-                                   cancellationToken),
-                               () => !string.IsNullOrWhiteSpace(lease.Entry.SessionId),
-                               DelayAsync,
-                               retryableTerminalType: "terminal.failed",
                                cancellationToken).ConfigureAwait(false))
             {
                 if (string.Equals(message.Type, "terminal.failed", StringComparison.OrdinalIgnoreCase))
@@ -360,18 +353,11 @@ public class GeminiProvider : ICliProvider<GeminiOptions>
 
         yield return GeminiAcpMessageMapper.CreateSessionLifecycleMessage(sessionHandle);
 
-        await foreach (var message in ProviderErrorAutoRetryCoordinator.ExecuteAsync(
+        await foreach (var message in StreamPromptAttemptAsync(
+                           sessionClient,
+                           sessionHandle.SessionId,
+                           sessionHandle.IsResumed,
                            prompt,
-                           options.ProviderErrorAutoRetry,
-                           retryPrompt => StreamPromptAttemptAsync(
-                               sessionClient,
-                               sessionHandle.SessionId,
-                               sessionHandle.IsResumed,
-                               retryPrompt,
-                               cancellationToken),
-                           () => !string.IsNullOrWhiteSpace(sessionHandle.SessionId),
-                           DelayAsync,
-                           retryableTerminalType: "terminal.failed",
                            cancellationToken).ConfigureAwait(false))
         {
             yield return message;
