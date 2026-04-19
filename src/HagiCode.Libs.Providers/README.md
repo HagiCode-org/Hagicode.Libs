@@ -10,6 +10,7 @@
 - A provider registry for resolving providers by name or alias
 - Registration of the shared `ICliExecutionFacade` for provider-side probes or adapters
 - Registration of the shared `CliProviderPoolCoordinator`, provider-scoped pool defaults, and ACP/runtime reuse backends
+- Single-attempt provider primitives that preserve native thread or session context for upstream retry orchestration
 
 ## Install
 
@@ -63,6 +64,7 @@ var poolDefaults = serviceProvider.GetRequiredService<CliProviderPoolConfigurati
 - `Claude Code` 继续保留 raw stream / resume 语义，但真实执行与 warm transport reuse 统一落在 `ClaudeCodeProvider`
 - `CodeBuddy` 的 ACP session reuse、tool update 归一化与 permission-mode 映射统一落在 `CodebuddyProvider`
 - `Hermes` 的 ACP session reuse、fallback 文本聚合与 lifecycle 诊断统一落在 `HermesProvider`
+- 自动重试调度属于 `hagicode-core` 的 backend wrapper；`HagiCode.Libs.Providers` 只负责单次执行并保留可恢复上下文
 
 `ProviderRegistry` 的规范名称与兼容别名也已统一：
 

@@ -343,15 +343,12 @@ public sealed class ClaudeCodeProviderTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_retries_error_with_continuation_prompt_when_session_context_is_available()
+    public async Task ExecuteAsync_surfaces_error_once_without_local_retry_when_session_context_is_available()
     {
         var provider = CreateProvider(messageBatches:
         [
             [
                 new CliMessage("error", JsonSerializer.SerializeToElement(new { type = "error", message = "stream dropped" }))
-            ],
-            [
-                new CliMessage("result", JsonSerializer.SerializeToElement(new { type = "result", done = true }))
             ]
         ]);
         var messages = new List<CliMessage>();
@@ -360,29 +357,22 @@ public sealed class ClaudeCodeProviderTests
                            new ClaudeCodeOptions
                            {
                                SessionId = "session-retry",
-                               WorkingDirectory = "/tmp/project",
-                               ProviderErrorAutoRetry = new ProviderErrorAutoRetrySettings
-                               {
-                                   Enabled = true,
-                                   Strategy = ProviderErrorAutoRetrySettings.DefaultStrategy
-                               }
+                               WorkingDirectory = "/tmp/project"
                            },
                            "continue the task"))
         {
             messages.Add(message);
         }
 
-        messages.Select(static message => message.Type).ShouldBe(["result"]);
+        messages.Select(static message => message.Type).ShouldBe(["error"]);
         provider.CreatedTransportCount.ShouldBe(1);
-        provider.RecordedDelays.ShouldBe([TimeSpan.FromSeconds(10)]);
-        provider.SentMessages.Count.ShouldBe(2);
+        provider.RecordedDelays.ShouldBeEmpty();
+        provider.SentMessages.Count.ShouldBe(1);
         provider.SentMessages[0].Content.GetProperty("message").GetProperty("content").GetString().ShouldBe("continue the task");
-        provider.SentMessages[1].Content.GetProperty("message").GetProperty("content").GetString()
-            .ShouldBe(ProviderErrorAutoRetrySettings.ContinuationPrompt);
     }
 
     [Fact]
-    public async Task ExecuteAsync_does_not_retry_error_when_session_context_is_missing()
+    public async Task ExecuteAsync_surfaces_error_once_when_session_context_is_missing()
     {
         var provider = CreateProvider(messageBatches:
         [
@@ -395,12 +385,7 @@ public sealed class ClaudeCodeProviderTests
         await foreach (var message in provider.ExecuteAsync(
                            new ClaudeCodeOptions
                            {
-                               WorkingDirectory = "/tmp/project",
-                               ProviderErrorAutoRetry = new ProviderErrorAutoRetrySettings
-                               {
-                                   Enabled = true,
-                                   Strategy = ProviderErrorAutoRetrySettings.DefaultStrategy
-                               }
+                               WorkingDirectory = "/tmp/project"
                            },
                            "no context"))
         {

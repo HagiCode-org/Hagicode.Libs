@@ -44,7 +44,7 @@ public sealed class CodexProviderTests
             AddDirectories = ["/tmp/project", "/tmp/shared"],
             ConfigOverrides =
             [
-                "model_reasoning_effort=\"high\"",
+                "model_reasoning_effort=\"xhigh\"",
                 "sandbox_workspace_write.network_access=true",
                 "web_search=\"live\""
             ],
@@ -76,12 +76,37 @@ public sealed class CodexProviderTests
             "resume",
             "thread-123",
             "--config",
-            "model_reasoning_effort=\"high\"",
+            "model_reasoning_effort=\"xhigh\"",
             "--config",
             "sandbox_workspace_write.network_access=true",
             "--config",
             "web_search=\"live\"",
             "--full-auto"
+        ]);
+    }
+
+    [Fact]
+    public void BuildCommandArguments_keeps_xhigh_as_a_discrete_config_override()
+    {
+        var provider = CreateProvider();
+
+        var arguments = provider.BuildCommandArguments(new CodexOptions
+        {
+            ConfigOverrides =
+            [
+                "model_reasoning_effort=\"xhigh\"",
+                "web_search=\"disabled\""
+            ]
+        });
+
+        arguments.ShouldBe(
+        [
+            "exec",
+            "--experimental-json",
+            "--config",
+            "model_reasoning_effort=\"xhigh\"",
+            "--config",
+            "web_search=\"disabled\""
         ]);
     }
 
@@ -399,12 +424,7 @@ public sealed class CodexProviderTests
             new CodexOptions
             {
                 WorkingDirectory = "/tmp/project",
-                LogicalSessionKey = "session-retry",
-                ProviderErrorAutoRetry = new ProviderErrorAutoRetrySettings
-                {
-                    Enabled = false,
-                    Strategy = ProviderErrorAutoRetrySettings.DefaultStrategy
-                }
+                LogicalSessionKey = "session-retry"
             },
             "first"));
 
@@ -439,12 +459,7 @@ public sealed class CodexProviderTests
         await DrainCliMessagesAsync(provider.ExecuteAsync(
             new CodexOptions
             {
-                WorkingDirectory = "/tmp/project",
-                ProviderErrorAutoRetry = new ProviderErrorAutoRetrySettings
-                {
-                    Enabled = false,
-                    Strategy = ProviderErrorAutoRetrySettings.DefaultStrategy
-                }
+                WorkingDirectory = "/tmp/project"
             },
             "first"));
 
@@ -460,16 +475,13 @@ public sealed class CodexProviderTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_retries_turn_failed_with_continuation_prompt_and_same_thread_context()
+    public async Task ExecuteAsync_surfaces_turn_failed_once_without_local_retry_even_when_thread_context_exists()
     {
         var provider = CreateRetryAwareProvider(
         [
             [
                 new CliMessage("thread.started", JsonSerializer.SerializeToElement(new { type = "thread.started", thread_id = "thread-retry" })),
                 new CliMessage("turn.failed", JsonSerializer.SerializeToElement(new { type = "turn.failed", error = new { message = RetryableServerErrorDisconnectMessage } }))
-            ],
-            [
-                new CliMessage("turn.completed", JsonSerializer.SerializeToElement(new { type = "turn.completed" }))
             ]
         ]);
         var messages = new List<CliMessage>();
@@ -478,40 +490,29 @@ public sealed class CodexProviderTests
                            new CodexOptions
                            {
                                WorkingDirectory = "/tmp/project",
-                               LogicalSessionKey = "session-retry",
-                               ProviderErrorAutoRetry = new ProviderErrorAutoRetrySettings
-                               {
-                                   Enabled = true,
-                                   Strategy = ProviderErrorAutoRetrySettings.DefaultStrategy
-                               }
+                               LogicalSessionKey = "session-retry"
                            },
                            "finish the job"))
         {
             messages.Add(message);
         }
 
-        messages.Select(static message => message.Type).ShouldBe(["thread.started", "turn.completed"]);
-        provider.RecordedDelays.ShouldBe([TimeSpan.FromSeconds(10)]);
-        provider.StartContexts.Count.ShouldBe(2);
-        provider.StartContexts[1].Arguments.ShouldContain("resume");
-        provider.StartContexts[1].Arguments.ShouldContain("thread-retry");
-        provider.SentMessages.Count.ShouldBe(2);
+        messages.Select(static message => message.Type).ShouldBe(["thread.started", "turn.failed"]);
+        messages.Last().Content.GetProperty("error").GetProperty("message").GetString().ShouldBe(RetryableServerErrorDisconnectMessage);
+        provider.RecordedDelays.ShouldBeEmpty();
+        provider.StartContexts.Count.ShouldBe(1);
+        provider.SentMessages.Count.ShouldBe(1);
         provider.SentMessages[0].Content.GetProperty("input").GetString().ShouldBe("finish the job");
-        provider.SentMessages[1].Content.GetProperty("input").GetString()
-            .ShouldBe(ProviderErrorAutoRetrySettings.ContinuationPrompt);
     }
 
     [Fact]
-    public async Task ExecuteAsync_retries_retryable_error_envelope_with_continuation_prompt_and_same_thread_context()
+    public async Task ExecuteAsync_surfaces_error_once_without_local_retry_even_when_thread_context_exists()
     {
         var provider = CreateRetryAwareProvider(
         [
             [
                 new CliMessage("thread.started", JsonSerializer.SerializeToElement(new { type = "thread.started", thread_id = "thread-error-retry" })),
                 new CliMessage("error", JsonSerializer.SerializeToElement(new { type = "error", message = RetryableSseIdleTimeoutMessage }))
-            ],
-            [
-                new CliMessage("turn.completed", JsonSerializer.SerializeToElement(new { type = "turn.completed" }))
             ]
         ]);
         var messages = new List<CliMessage>();
@@ -520,35 +521,26 @@ public sealed class CodexProviderTests
                            new CodexOptions
                            {
                                WorkingDirectory = "/tmp/project",
-                               LogicalSessionKey = "session-error-retry",
-                               ProviderErrorAutoRetry = new ProviderErrorAutoRetrySettings
-                               {
-                                   Enabled = true,
-                                   Strategy = ProviderErrorAutoRetrySettings.DefaultStrategy
-                               }
+                               LogicalSessionKey = "session-error-retry"
                            },
                            "recover the stream"))
         {
             messages.Add(message);
         }
 
-        messages.Select(static message => message.Type).ShouldBe(["thread.started", "turn.completed"]);
-        provider.RecordedDelays.ShouldBe([TimeSpan.FromSeconds(10)]);
-        provider.StartContexts.Count.ShouldBe(2);
-        provider.StartContexts[1].Arguments.ShouldContain("resume");
-        provider.StartContexts[1].Arguments.ShouldContain("thread-error-retry");
-        provider.SentMessages.Count.ShouldBe(2);
-        provider.SentMessages[1].Content.GetProperty("input").GetString()
-            .ShouldBe(ProviderErrorAutoRetrySettings.ContinuationPrompt);
+        messages.Select(static message => message.Type).ShouldBe(["thread.started", "error"]);
+        messages.Last().Content.GetProperty("message").GetString().ShouldBe(RetryableSseIdleTimeoutMessage);
+        provider.RecordedDelays.ShouldBeEmpty();
+        provider.StartContexts.Count.ShouldBe(1);
+        provider.SentMessages.ShouldHaveSingleItem();
     }
 
     [Fact]
-    public async Task ExecuteAsync_does_not_retry_turn_failed_when_auto_retry_is_disabled()
+    public async Task ExecuteAsync_surfaces_turn_failed_once_when_thread_context_is_missing()
     {
         var provider = CreateRetryAwareProvider(
         [
             [
-                new CliMessage("thread.started", JsonSerializer.SerializeToElement(new { type = "thread.started", thread_id = "thread-no-retry" })),
                 new CliMessage("turn.failed", JsonSerializer.SerializeToElement(new { type = "turn.failed", error = new { message = RetryableTransportDisconnectMessage } }))
             ]
         ]);
@@ -557,19 +549,14 @@ public sealed class CodexProviderTests
         await foreach (var message in provider.ExecuteAsync(
                            new CodexOptions
                            {
-                               WorkingDirectory = "/tmp/project",
-                               ProviderErrorAutoRetry = new ProviderErrorAutoRetrySettings
-                               {
-                                   Enabled = false,
-                                   Strategy = ProviderErrorAutoRetrySettings.DefaultStrategy
-                               }
+                               WorkingDirectory = "/tmp/project"
                            },
                            "do not retry"))
         {
             messages.Add(message);
         }
 
-        messages.Select(static message => message.Type).ShouldBe(["thread.started", "turn.failed"]);
+        messages.Select(static message => message.Type).ShouldBe(["turn.failed"]);
         provider.RecordedDelays.ShouldBeEmpty();
         provider.StartContexts.Count.ShouldBe(1);
         provider.SentMessages.ShouldHaveSingleItem();
@@ -605,7 +592,7 @@ public sealed class CodexProviderTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_retries_generic_error_envelope_when_thread_context_is_available()
+    public async Task ExecuteAsync_surfaces_generic_error_once_without_local_retry_when_thread_context_is_available()
     {
         const string terminalErrorMessage = "authentication failed";
         var provider = CreateRetryAwareProvider(
@@ -613,9 +600,6 @@ public sealed class CodexProviderTests
             [
                 new CliMessage("thread.started", JsonSerializer.SerializeToElement(new { type = "thread.started", thread_id = "thread-auth-error" })),
                 new CliMessage("error", JsonSerializer.SerializeToElement(new { type = "error", message = terminalErrorMessage }))
-            ],
-            [
-                new CliMessage("turn.completed", JsonSerializer.SerializeToElement(new { type = "turn.completed" }))
             ]
         ]);
         var messages = new List<CliMessage>();
@@ -631,18 +615,15 @@ public sealed class CodexProviderTests
             messages.Add(message);
         }
 
-        messages.Select(static message => message.Type).ShouldBe(["thread.started", "turn.completed"]);
-        provider.RecordedDelays.ShouldBe([TimeSpan.FromSeconds(10)]);
-        provider.StartContexts.Count.ShouldBe(2);
-        provider.StartContexts[1].Arguments.ShouldContain("resume");
-        provider.StartContexts[1].Arguments.ShouldContain("thread-auth-error");
-        provider.SentMessages.Count.ShouldBe(2);
-        provider.SentMessages[1].Content.GetProperty("input").GetString()
-            .ShouldBe(ProviderErrorAutoRetrySettings.ContinuationPrompt);
+        messages.Select(static message => message.Type).ShouldBe(["thread.started", "error"]);
+        messages.Last().Content.GetProperty("message").GetString().ShouldBe(terminalErrorMessage);
+        provider.RecordedDelays.ShouldBeEmpty();
+        provider.StartContexts.Count.ShouldBe(1);
+        provider.SentMessages.ShouldHaveSingleItem();
     }
 
     [Fact]
-    public async Task ExecuteAsync_emits_terminal_failure_after_retry_schedule_is_exhausted()
+    public async Task ExecuteAsync_does_not_start_hidden_retry_schedule_after_turn_failed()
     {
         var provider = CreateRetryAwareProvider(
         [
@@ -674,19 +655,10 @@ public sealed class CodexProviderTests
         }
 
         messages.Select(static message => message.Type).ShouldBe(["thread.started", "turn.failed"]);
-        messages.Last().Content.GetProperty("error").GetProperty("message").GetString().ShouldBe(RetryableGenericRefusalMessage);
-        provider.RecordedDelays.ShouldBe(
-        [
-            TimeSpan.FromSeconds(10),
-            TimeSpan.FromSeconds(20),
-            TimeSpan.FromSeconds(60)
-        ]);
-        provider.StartContexts.Count.ShouldBe(4);
-        provider.StartContexts[1].Arguments.ShouldContain("thread-exhausted");
-        provider.SentMessages.Count.ShouldBe(4);
-        provider.SentMessages.Skip(1)
-            .Select(message => message.Content.GetProperty("input").GetString())
-            .ShouldAllBe(prompt => prompt == ProviderErrorAutoRetrySettings.ContinuationPrompt);
+        messages.Last().Content.GetProperty("error").GetProperty("message").GetString().ShouldBe(RetryableTransportDisconnectMessage);
+        provider.RecordedDelays.ShouldBeEmpty();
+        provider.StartContexts.Count.ShouldBe(1);
+        provider.SentMessages.ShouldHaveSingleItem();
     }
 
     [Fact]
