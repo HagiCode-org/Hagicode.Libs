@@ -547,6 +547,8 @@ public class HermesProvider : ICliProvider<HermesOptions>
         JsonElement promptResult,
         bool sawAssistantText)
     {
+        // Failure terminals must stay failure-only even when the prompt result carries
+        // a readable diagnostic string; otherwise the UI sees a fake success turn.
         if (!sawAssistantText &&
             HermesAcpMessageMapper.TryExtractPromptResultText(promptResult, out var fallbackText) &&
             !HermesAcpMessageMapper.IsFailurePromptResult(promptResult))

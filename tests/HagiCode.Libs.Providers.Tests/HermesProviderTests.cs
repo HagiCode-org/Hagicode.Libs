@@ -247,6 +247,61 @@ public sealed class HermesProviderTests
     }
 
     [Fact]
+    public void NormalizeNotification_maps_error_like_update_to_terminal_failed_with_actionable_message()
+    {
+        var notification = new AcpNotification(
+            "session/update",
+            JsonSerializer.SerializeToElement(new
+            {
+                sessionId = "session-403",
+                update = new
+                {
+                    sessionUpdate = "request_error",
+                    error = new
+                    {
+                        message = "Hermes remote request failed: HTTP 403 Forbidden. Permission denied by upstream service."
+                    }
+                }
+            }));
+
+        var messages = HermesAcpMessageMapper.NormalizeNotification(notification);
+
+        messages.ShouldHaveSingleItem();
+        messages[0].Type.ShouldBe("terminal.failed");
+        messages[0].Content.GetProperty("message").GetString().ShouldContain("HTTP 403 Forbidden");
+        messages[0].Content.GetProperty("text").GetString().ShouldContain("Permission denied");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_emits_terminal_failed_for_forbidden_prompt_result_without_success_fallback()
+    {
+        var provider = CreateProvider(sessionClientFactory: _ => new FakeAcpSessionClient(
+            emitNotifications: false,
+            promptResultOverride: JsonSerializer.SerializeToElement(new
+            {
+                sessionId = "session-1",
+                stopReason = "completed",
+                result = new
+                {
+                    error = new
+                    {
+                        message = "Hermes remote request failed: HTTP 403 Forbidden. Permission denied by upstream service."
+                    }
+                }
+            })));
+        var messages = new List<CliMessage>();
+
+        await foreach (var message in provider.ExecuteAsync(new HermesOptions(), "hello"))
+        {
+            messages.Add(message);
+        }
+
+        messages.Select(static message => message.Type).ShouldBe(["session.started", "terminal.failed"]);
+        messages[1].Content.GetProperty("message").GetString().ShouldContain("HTTP 403 Forbidden");
+        messages[1].Content.GetProperty("text").GetString().ShouldContain("Permission denied");
+    }
+
+    [Fact]
     public void NormalizeNotification_preserves_chunk_boundaries_without_inserting_spaces()
     {
         var notification = new AcpNotification(
@@ -416,7 +471,9 @@ public sealed class HermesProviderTests
     private sealed class FakeAcpSessionClient(
         bool emitNotifications = true,
         string? promptStopReason = "end_turn",
-        string? promptOutputText = null) : IAcpSessionClient
+        string? promptOutputText = null,
+        JsonElement? promptResultOverride = null,
+        IReadOnlyList<AcpNotification>? scriptedNotifications = null) : IAcpSessionClient
     {
         private readonly Dictionary<string, string> _sessionSecrets = [];
 
@@ -494,6 +551,11 @@ public sealed class HermesProviderTests
         public Task<JsonElement> SendPromptAsync(string sessionId, string prompt, CancellationToken cancellationToken = default)
         {
             PromptCalls++;
+            if (promptResultOverride is { } overrideResult)
+            {
+                return Task.FromResult(overrideResult);
+            }
+
             var outputText = promptOutputText ?? BuildPromptResult(sessionId, prompt);
             return Task.FromResult(JsonSerializer.SerializeToElement(new
             {
@@ -505,7 +567,15 @@ public sealed class HermesProviderTests
 
         public async IAsyncEnumerable<AcpNotification> ReceiveNotificationsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            if (emitNotifications)
+            if (scriptedNotifications != null)
+            {
+                foreach (var notification in scriptedNotifications)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    yield return notification;
+                }
+            }
+            else if (emitNotifications)
             {
                 yield return new AcpNotification(
                     "session/update",
