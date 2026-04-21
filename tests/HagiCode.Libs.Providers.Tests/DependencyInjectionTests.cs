@@ -48,7 +48,7 @@ public sealed class DependencyInjectionTests
         executionFacade.ShouldNotBeNull();
         acpPool.ShouldNotBeNull();
         poolCoordinator.ShouldNotBeNull();
-        poolConfiguration.GetSettings("claude-code").IdleTimeout.ShouldBe(TimeSpan.FromMinutes(5));
+        poolConfiguration.HasSettings("claude-code").ShouldBeFalse();
         poolConfiguration.GetSettings("codebuddy").IdleTimeout.ShouldBe(TimeSpan.FromMinutes(10));
         poolConfiguration.GetSettings("copilot").IdleTimeout.ShouldBe(TimeSpan.FromMinutes(10));
         poolConfiguration.GetSettings("codex").IdleTimeout.ShouldBe(TimeSpan.FromMinutes(10));

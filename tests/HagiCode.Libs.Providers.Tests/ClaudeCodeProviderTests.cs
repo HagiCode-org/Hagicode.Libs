@@ -151,7 +151,7 @@ public sealed class ClaudeCodeProviderTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_reuses_warm_transport_for_same_session_key_when_pooling_is_enabled()
+    public async Task ExecuteAsync_creates_fresh_transport_for_each_invocation_even_when_session_id_matches()
     {
         var provider = CreateProvider();
 
@@ -175,50 +175,17 @@ public sealed class ClaudeCodeProviderTests
         {
         }
 
-        provider.CreatedTransportCount.ShouldBe(1);
+        provider.CreatedTransportCount.ShouldBe(2);
+        provider.DisposedTransportCount.ShouldBe(2);
         provider.SentMessages.Count.ShouldBe(2);
     }
 
     [Fact]
-    public async Task ExecuteAsync_restarts_transport_when_runtime_inputs_change_but_session_key_matches()
+    public async Task ExecuteAsync_emits_one_shot_debug_metadata_without_pooling_fields()
     {
         var provider = CreateProvider();
-        var restartedMessages = new List<CliMessage>();
+        var messages = new List<CliMessage>();
 
-        await foreach (var _ in provider.ExecuteAsync(
-                           new ClaudeCodeOptions
-                           {
-                               SessionId = "session-1",
-                               WorkingDirectory = "/tmp/project-a",
-                               Model = "claude-sonnet"
-                           },
-                           "hello"))
-        {
-        }
-
-        await foreach (var message in provider.ExecuteAsync(
-                           new ClaudeCodeOptions
-                           {
-                               SessionId = "session-1",
-                               WorkingDirectory = "/tmp/project-b",
-                               Model = "claude-opus"
-                           },
-                           "follow up"))
-        {
-            restartedMessages.Add(message);
-        }
-
-        provider.CreatedTransportCount.ShouldBe(2);
-        provider.SentMessages.Count.ShouldBe(2);
-        restartedMessages[0].Content.GetProperty("resume_mode").GetString().ShouldBe("restarted");
-    }
-
-    [Fact]
-    public async Task ExecuteAsync_emits_debug_metadata_for_pooled_messages()
-    {
-        var provider = CreateProvider();
-
-        var initialMessages = new List<CliMessage>();
         await foreach (var message in provider.ExecuteAsync(
                            new ClaudeCodeOptions
                            {
@@ -227,119 +194,15 @@ public sealed class ClaudeCodeProviderTests
                            },
                            "hello"))
         {
-            initialMessages.Add(message);
+            messages.Add(message);
         }
 
-        var resumedMessages = new List<CliMessage>();
-        await foreach (var message in provider.ExecuteAsync(
-                           new ClaudeCodeOptions
-                           {
-                               SessionId = "session-1",
-                               WorkingDirectory = "/tmp/project"
-                           },
-                           "follow up"))
-        {
-            resumedMessages.Add(message);
-        }
-
-        initialMessages[0].Content.GetProperty("requested_session_id").GetString().ShouldBe("session-1");
-        initialMessages[0].Content.GetProperty("binding_key").GetString().ShouldBe("session-1");
-        initialMessages[0].Content.GetProperty("runtime_fingerprint").GetString().ShouldNotBeNullOrWhiteSpace();
-        initialMessages[0].Content.GetProperty("pool_fingerprint").GetString().ShouldBe("session-1");
-        initialMessages[0].Content.GetProperty("resume_mode").GetString().ShouldBe("started");
-        initialMessages[0].Content.GetProperty("event_timestamp").GetString().ShouldNotBeNullOrWhiteSpace();
-
-        resumedMessages[0].Content.GetProperty("resume_mode").GetString().ShouldBe("resumed");
-        resumedMessages[1].Content.GetProperty("pool_fingerprint").GetString().ShouldBe("session-1");
-    }
-
-    [Fact]
-    public async Task ExecuteAsync_does_not_release_lock_when_wait_is_cancelled_before_acquire()
-    {
-        using var executionLock = new SemaphoreSlim(1, 1);
-        await executionLock.WaitAsync();
-        using var cancellationTokenSource = new CancellationTokenSource();
-        cancellationTokenSource.Cancel();
-
-        var provider = CreateProvider();
-        provider.OverrideExecutionLock = executionLock;
-
-        await Should.ThrowAsync<OperationCanceledException>(async () =>
-        {
-            await foreach (var _ in provider.ExecuteAsync(
-                               new ClaudeCodeOptions
-                               {
-                                   SessionId = "session-1",
-                                   WorkingDirectory = "/tmp/project"
-                               },
-                               "hello",
-                               cancellationTokenSource.Token))
-            {
-            }
-        });
-
-        executionLock.Wait(0).ShouldBeFalse();
-        provider.ReleaseExecutionLockCallCount.ShouldBe(0);
-    }
-
-    [Fact]
-    public async Task ExecuteAsync_marks_lease_faulted_when_lock_release_hits_disposed_lock()
-    {
-        var provider = CreateProvider();
-        provider.ThrowOnReleaseCount = 1;
-
-        await foreach (var _ in provider.ExecuteAsync(
-                           new ClaudeCodeOptions
-                           {
-                               SessionId = "session-1",
-                               WorkingDirectory = "/tmp/project"
-                           },
-                           "hello"))
-        {
-        }
-
-        await foreach (var _ in provider.ExecuteAsync(
-                           new ClaudeCodeOptions
-                           {
-                               SessionId = "session-1",
-                               WorkingDirectory = "/tmp/project"
-                           },
-                           "follow up"))
-        {
-        }
-
-        provider.CreatedTransportCount.ShouldBe(2);
-        provider.ReleaseExecutionLockCallCount.ShouldBe(2);
-    }
-
-    [Fact]
-    public async Task ExecuteAsync_uses_one_shot_transport_when_pooling_is_disabled()
-    {
-        var provider = CreateProvider();
-
-        await foreach (var _ in provider.ExecuteAsync(
-                           new ClaudeCodeOptions
-                           {
-                               SessionId = "session-1",
-                               WorkingDirectory = "/tmp/project",
-                               PoolSettings = new HagiCode.Libs.Core.Acp.CliPoolSettings { Enabled = false }
-                           },
-                           "hello"))
-        {
-        }
-
-        await foreach (var _ in provider.ExecuteAsync(
-                           new ClaudeCodeOptions
-                           {
-                               SessionId = "session-1",
-                               WorkingDirectory = "/tmp/project",
-                               PoolSettings = new HagiCode.Libs.Core.Acp.CliPoolSettings { Enabled = false }
-                           },
-                           "follow up"))
-        {
-        }
-
-        provider.CreatedTransportCount.ShouldBe(2);
+        messages[0].Content.GetProperty("requested_session_id").GetString().ShouldBe("session-1");
+        messages[0].Content.GetProperty("runtime_fingerprint").GetString().ShouldNotBeNullOrWhiteSpace();
+        messages[0].Content.GetProperty("event_timestamp").GetString().ShouldNotBeNullOrWhiteSpace();
+        messages[0].Content.TryGetProperty("binding_key", out _).ShouldBeFalse();
+        messages[0].Content.TryGetProperty("pool_fingerprint", out _).ShouldBeFalse();
+        messages[0].Content.TryGetProperty("resume_mode", out _).ShouldBeFalse();
     }
 
     [Fact]
@@ -366,7 +229,7 @@ public sealed class ClaudeCodeProviderTests
 
         messages.Select(static message => message.Type).ShouldBe(["error"]);
         provider.CreatedTransportCount.ShouldBe(1);
-        provider.RecordedDelays.ShouldBeEmpty();
+        provider.DisposedTransportCount.ShouldBe(1);
         provider.SentMessages.Count.ShouldBe(1);
         provider.SentMessages[0].Content.GetProperty("message").GetProperty("content").GetString().ShouldBe("continue the task");
     }
@@ -393,7 +256,7 @@ public sealed class ClaudeCodeProviderTests
         }
 
         messages.Select(static message => message.Type).ShouldBe(["error"]);
-        provider.RecordedDelays.ShouldBeEmpty();
+        provider.DisposedTransportCount.ShouldBe(1);
         provider.SentMessages.ShouldHaveSingleItem();
     }
 
@@ -446,11 +309,7 @@ public sealed class ClaudeCodeProviderTests
                            new ClaudeCodeOptions
                            {
                                WorkingDirectory = fixture.WorkingDirectory,
-                               SessionId = "windows-session",
-                               PoolSettings = new CliPoolSettings
-                               {
-                                   Enabled = false
-                               }
+                               SessionId = "windows-session"
                            },
                            prompt))
         {
@@ -480,11 +339,7 @@ public sealed class ClaudeCodeProviderTests
             {
                 WorkingDirectory = sandbox.WorkingDirectory,
                 AddDirectories = [sandbox.WorkingDirectory],
-                PermissionMode = "plan",
-                PoolSettings = new CliPoolSettings
-                {
-                    Enabled = false
-                }
+                PermissionMode = "plan"
             },
             "Reply with exactly the word 'pong'.",
             TimeSpan.FromSeconds(45));
@@ -523,11 +378,7 @@ public sealed class ClaudeCodeProviderTests
                 ExecutablePath = shimSandbox.WrapperPath,
                 WorkingDirectory = sandbox.WorkingDirectory,
                 AddDirectories = [sandbox.WorkingDirectory],
-                PermissionMode = "plan",
-                PoolSettings = new CliPoolSettings
-                {
-                    Enabled = false
-                }
+                PermissionMode = "plan"
             },
             "请只回复 pong。",
             TimeSpan.FromSeconds(45));
@@ -599,42 +450,14 @@ public sealed class ClaudeCodeProviderTests
 
         public ProcessStartContext? LastStartContext { get; private set; }
         public List<CliMessage> SentMessages { get; } = [];
-        public List<TimeSpan> RecordedDelays { get; } = [];
         public int CreatedTransportCount { get; private set; }
-        public SemaphoreSlim? OverrideExecutionLock { get; set; }
-        public int ReleaseExecutionLockCallCount { get; private set; }
-        public int ThrowOnReleaseCount { get; set; }
+        public int DisposedTransportCount { get; private set; }
 
         protected override ICliTransport CreateTransport(ProcessStartContext startContext)
         {
             LastStartContext = startContext;
             CreatedTransportCount++;
-            return new StubTransport(SentMessages, GetNextMessageBatch);
-        }
-
-        protected override Task AcquireExecutionLockAsync(
-            SemaphoreSlim executionLock,
-            CancellationToken cancellationToken)
-        {
-            return (OverrideExecutionLock ?? executionLock).WaitAsync(cancellationToken);
-        }
-
-        protected override void ReleaseExecutionLock(SemaphoreSlim executionLock)
-        {
-            ReleaseExecutionLockCallCount++;
-            if (ThrowOnReleaseCount > 0)
-            {
-                ThrowOnReleaseCount--;
-                throw new ObjectDisposedException(nameof(SemaphoreSlim));
-            }
-
-            (OverrideExecutionLock ?? executionLock).Release();
-        }
-
-        protected override Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken)
-        {
-            RecordedDelays.Add(delay);
-            return Task.CompletedTask;
+            return new StubTransport(SentMessages, GetNextMessageBatch, () => DisposedTransportCount++);
         }
 
         private IReadOnlyList<CliMessage> GetNextMessageBatch()
@@ -647,7 +470,8 @@ public sealed class ClaudeCodeProviderTests
 
     private sealed class StubTransport(
         List<CliMessage> sentMessages,
-        Func<IReadOnlyList<CliMessage>> getNextMessageBatch) : ICliTransport
+        Func<IReadOnlyList<CliMessage>> getNextMessageBatch,
+        Action onDispose) : ICliTransport
     {
         public bool IsConnected { get; private set; }
 
@@ -657,7 +481,12 @@ public sealed class ClaudeCodeProviderTests
             return Task.CompletedTask;
         }
 
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        public ValueTask DisposeAsync()
+        {
+            onDispose();
+            IsConnected = false;
+            return ValueTask.CompletedTask;
+        }
 
         public Task DisconnectAsync(CancellationToken cancellationToken = default)
         {
