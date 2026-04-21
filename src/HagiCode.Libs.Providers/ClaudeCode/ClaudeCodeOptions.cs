@@ -1,6 +1,5 @@
 namespace HagiCode.Libs.Providers.ClaudeCode;
 
-using HagiCode.Libs.Core.Acp;
 using HagiCode.Libs.Providers;
 
 /// <summary>
@@ -99,8 +98,4 @@ public sealed record ClaudeCodeOptions
     /// </summary>
     public string? McpServersPath { get; init; }
 
-    /// <summary>
-    /// Gets or sets provider-level pooling overrides.
-    /// </summary>
-    public CliPoolSettings? PoolSettings { get; init; }
 }

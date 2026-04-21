@@ -47,7 +47,6 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(static _ =>
         {
             var registry = new CliProviderPoolConfigurationRegistry();
-            registry.Register("claude-code", new CliPoolSettings { MaxActiveSessions = 50, IdleTimeout = TimeSpan.FromMinutes(5) });
             registry.Register("codebuddy", new CliPoolSettings { MaxActiveSessions = 50, IdleTimeout = TimeSpan.FromMinutes(10) });
             registry.Register("copilot", new CliPoolSettings { MaxActiveSessions = 50, IdleTimeout = TimeSpan.FromMinutes(10) });
             registry.Register("codex", new CliPoolSettings { MaxActiveSessions = 50, IdleTimeout = TimeSpan.FromMinutes(10) });

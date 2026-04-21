@@ -8,7 +8,6 @@ using HagiCode.Libs.Core.Environment;
 using HagiCode.Libs.Core.Process;
 using HagiCode.Libs.Core.Transport;
 using HagiCode.Libs.Core.Acp;
-using HagiCode.Libs.Providers.Pooling;
 
 namespace HagiCode.Libs.Providers.ClaudeCode;
 
@@ -22,8 +21,6 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
     private readonly CliExecutableResolver _executableResolver;
     private readonly CliProcessManager _processManager;
     private readonly IRuntimeEnvironmentResolver? _runtimeEnvironmentResolver;
-    private readonly CliProviderPoolCoordinator _poolCoordinator;
-    private readonly CliProviderPoolConfigurationRegistry _poolConfiguration;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ClaudeCodeProvider" /> class.
@@ -34,15 +31,11 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
     public ClaudeCodeProvider(
         CliExecutableResolver executableResolver,
         CliProcessManager processManager,
-        IRuntimeEnvironmentResolver? runtimeEnvironmentResolver = null,
-        CliProviderPoolCoordinator? poolCoordinator = null,
-        CliProviderPoolConfigurationRegistry? poolConfiguration = null)
+        IRuntimeEnvironmentResolver? runtimeEnvironmentResolver = null)
     {
         _executableResolver = executableResolver ?? throw new ArgumentNullException(nameof(executableResolver));
         _processManager = processManager ?? throw new ArgumentNullException(nameof(processManager));
         _runtimeEnvironmentResolver = runtimeEnvironmentResolver;
-        _poolCoordinator = poolCoordinator ?? new CliProviderPoolCoordinator();
-        _poolConfiguration = poolConfiguration ?? new CliProviderPoolConfigurationRegistry();
     }
 
     /// <inheritdoc />
@@ -75,130 +68,10 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
             Ownership = new CliProcessOwnershipRegistration { ProviderName = Name }
         };
 
-        var poolSettings = ResolvePoolSettings(options);
-        if (!poolSettings.Enabled)
+        var debugContext = CreateDebugContext(options, startContext);
+        await foreach (var message in ExecuteOneShotAsync(prompt, options, startContext, debugContext, cancellationToken).ConfigureAwait(false))
         {
-            var debugContext = CreateDebugContext(
-                ResolveLogicalSessionKey(options),
-                CliPoolFingerprintBuilder.Build(
-                    executablePath,
-                    options.WorkingDirectory,
-                    options.Model,
-                    options.MaxTurns,
-                    options.SystemPrompt,
-                    options.AppendSystemPrompt,
-                    options.AllowedTools,
-                    options.DisallowedTools,
-                    options.PermissionMode,
-                    options.ContinueConversation,
-                    options.Resume,
-                    options.SessionId,
-                    options.AddDirectories,
-                    options.ExtraArgs,
-                    options.McpServersPath,
-                    options.McpServers,
-                    startContext.EnvironmentVariables),
-                leaseIsWarm: false);
-
-            await foreach (var message in ExecuteOneShotAsync(prompt, options, startContext, debugContext, cancellationToken).ConfigureAwait(false))
-            {
-                yield return message;
-            }
-
-            yield break;
-        }
-
-        var request = new CliRuntimePoolRequest(
-            Name,
-            ResolveLogicalSessionKey(options),
-            CliPoolFingerprintBuilder.Build(
-                executablePath,
-                options.WorkingDirectory,
-                options.Model,
-                options.MaxTurns,
-                options.SystemPrompt,
-                options.AppendSystemPrompt,
-                options.AllowedTools,
-                options.DisallowedTools,
-                options.PermissionMode,
-                options.ContinueConversation,
-                options.Resume,
-                options.SessionId,
-                options.AddDirectories,
-                options.ExtraArgs,
-                options.McpServersPath,
-                options.McpServers,
-                startContext.EnvironmentVariables),
-            poolSettings);
-        var runtimeFingerprint = BuildCompactFingerprint(request.CompatibilityFingerprint);
-        var poolFingerprint = BuildPoolFingerprint(request.LogicalSessionKey);
-
-        await using var lease = await _poolCoordinator.AcquireTransportAsync(
-            request,
-            async ct =>
-            {
-                var transport = CreateTransport(startContext);
-                await transport.ConnectAsync(ct).ConfigureAwait(false);
-                var entry = new CliRuntimePoolEntry<ICliTransport>(Name, transport, request.CompatibilityFingerprint, request.Settings);
-                entry.RegisterKey(request.LogicalSessionKey);
-                return entry;
-            },
-            cancellationToken).ConfigureAwait(false);
-
-        var resumeMode = lease.Kind switch
-        {
-            CliRuntimePoolLeaseKind.WarmReuse => "resumed",
-            CliRuntimePoolLeaseKind.CompatibilityReplacement => "restarted",
-            _ => "started"
-        };
-        var shouldEvictAnonymous = request.LogicalSessionKey is null && !poolSettings.KeepAnonymousSessions;
-        var faulted = false;
-        var lockAcquired = false;
-        await AcquireExecutionLockAsync(lease.Entry.ExecutionLock, cancellationToken).ConfigureAwait(false);
-        lockAcquired = true;
-        try
-        {
-            await foreach (var message in ExecutePooledAttemptAsync(
-                               prompt,
-                               options,
-                               lease.Entry.Resource,
-                               new ClaudeCodeDebugContext(
-                                   request.LogicalSessionKey,
-                                   request.LogicalSessionKey,
-                                   runtimeFingerprint,
-                                   poolFingerprint,
-                                   resumeMode,
-                                   DateTime.UtcNow),
-                               cancellationToken).ConfigureAwait(false))
-            {
-                if (string.Equals(message.Type, "error", StringComparison.OrdinalIgnoreCase))
-                {
-                    faulted = true;
-                }
-
-                yield return message;
-                if (IsTerminalMessageType(message.Type))
-                {
-                    break;
-                }
-            }
-        }
-        finally
-        {
-            var shouldFaultLease = faulted || shouldEvictAnonymous;
-            if (lockAcquired)
-            {
-                try
-                {
-                    ReleaseExecutionLock(lease.Entry.ExecutionLock);
-                }
-                catch (ObjectDisposedException)
-                {
-                    shouldFaultLease = true;
-                }
-            }
-
-            lease.IsFaulted = shouldFaultLease;
+            yield return message;
         }
     }
 
@@ -249,10 +122,7 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
     }
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
-    {
-        await _poolCoordinator.DisposeTransportProviderAsync(Name).ConfigureAwait(false);
-    }
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
     internal virtual IReadOnlyList<string> BuildCommandArguments(ClaudeCodeOptions options)
     {
@@ -400,56 +270,6 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
         return new SubprocessTransport(_processManager, startContext);
     }
 
-    protected virtual Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken)
-    {
-        return Task.Delay(delay, cancellationToken);
-    }
-
-    /// <summary>
-    /// Waits for the pooled execution lock.
-    /// </summary>
-    protected virtual Task AcquireExecutionLockAsync(SemaphoreSlim executionLock, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(executionLock);
-        return executionLock.WaitAsync(cancellationToken);
-    }
-
-    /// <summary>
-    /// Releases the pooled execution lock.
-    /// </summary>
-    protected virtual void ReleaseExecutionLock(SemaphoreSlim executionLock)
-    {
-        ArgumentNullException.ThrowIfNull(executionLock);
-        executionLock.Release();
-    }
-
-    private CliPoolSettings ResolvePoolSettings(ClaudeCodeOptions options)
-    {
-        return CliPoolSettings.Merge(_poolConfiguration.GetSettings(Name), options.PoolSettings);
-    }
-
-    private static string? ResolveLogicalSessionKey(ClaudeCodeOptions options)
-    {
-        return ArgumentValueNormalizer.NormalizeOptionalValue(options.SessionId)
-               ?? ArgumentValueNormalizer.NormalizeOptionalValue(options.Resume);
-    }
-
-    private static string? ResolveContinuationTarget(ClaudeCodeOptions options)
-    {
-        return ArgumentValueNormalizer.NormalizeOptionalValue(options.Resume)
-               ?? ArgumentValueNormalizer.NormalizeOptionalValue(options.SessionId);
-    }
-
-    private static bool CanRetryInSameContext(ClaudeCodeOptions options)
-    {
-        return !string.IsNullOrWhiteSpace(ResolveContinuationTarget(options));
-    }
-
-    private static bool IsRetryableTerminalFailure(CliMessage message)
-    {
-        return string.Equals(message.Type, "error", StringComparison.OrdinalIgnoreCase);
-    }
-
     private static bool IsTerminalMessageType(string? messageType)
     {
         return string.Equals(messageType, "result", StringComparison.OrdinalIgnoreCase)
@@ -483,25 +303,6 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
     {
         await using var transport = CreateTransport(startContext);
         await transport.ConnectAsync(cancellationToken).ConfigureAwait(false);
-        await transport.SendAsync(CreatePromptMessage(prompt, options), cancellationToken).ConfigureAwait(false);
-
-        await foreach (var message in transport.ReceiveAsync(cancellationToken).ConfigureAwait(false))
-        {
-            yield return EnrichMessageWithDebugMetadata(message, debugContext);
-            if (IsTerminalMessageType(message.Type))
-            {
-                yield break;
-            }
-        }
-    }
-
-    private async IAsyncEnumerable<CliMessage> ExecutePooledAttemptAsync(
-        string prompt,
-        ClaudeCodeOptions options,
-        ICliTransport transport,
-        ClaudeCodeDebugContext debugContext,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
-    {
         await transport.SendAsync(CreatePromptMessage(prompt, options), cancellationToken).ConfigureAwait(false);
 
         await foreach (var message in transport.ReceiveAsync(cancellationToken).ConfigureAwait(false))
@@ -551,17 +352,12 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
     }
 
     private static ClaudeCodeDebugContext CreateDebugContext(
-        string? logicalSessionKey,
-        string compatibilityFingerprint,
-        bool leaseIsWarm)
+        ClaudeCodeOptions options,
+        ProcessStartContext startContext)
     {
-        var runtimeFingerprint = BuildCompactFingerprint(compatibilityFingerprint);
         return new ClaudeCodeDebugContext(
-            logicalSessionKey,
-            logicalSessionKey,
-            runtimeFingerprint,
-            BuildPoolFingerprint(logicalSessionKey),
-            leaseIsWarm ? "resumed" : "started",
+            ResolveRequestedSessionId(options),
+            BuildRuntimeFingerprint(startContext),
             DateTime.UtcNow);
     }
 
@@ -579,10 +375,7 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
         }
 
         UpsertString(rootNode, "requested_session_id", debugContext.RequestedSessionId);
-        UpsertString(rootNode, "binding_key", debugContext.BindingKey);
         UpsertString(rootNode, "runtime_fingerprint", debugContext.RuntimeFingerprint);
-        UpsertString(rootNode, "pool_fingerprint", debugContext.PoolFingerprint);
-        UpsertString(rootNode, "resume_mode", debugContext.ResumeMode);
         UpsertString(rootNode, "event_timestamp", debugContext.EventTimestampUtc.ToString("O"));
 
         return message with
@@ -598,9 +391,32 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
         return Convert.ToHexString(hash[..6]).ToLowerInvariant();
     }
 
-    private static string BuildPoolFingerprint(string? logicalSessionKey)
+    private static string BuildRuntimeFingerprint(ProcessStartContext startContext)
     {
-        return string.IsNullOrWhiteSpace(logicalSessionKey) ? "anonymous" : logicalSessionKey.Trim();
+        var serializedEnvironment = startContext.EnvironmentVariables is null
+            ? string.Empty
+            : string.Join(
+                "\n",
+                startContext.EnvironmentVariables
+                    .OrderBy(static pair => pair.Key, StringComparer.Ordinal)
+                    .Select(static pair => $"{pair.Key}={pair.Value ?? string.Empty}"));
+        var fingerprintMaterial = string.Join(
+            "\n",
+            new[]
+            {
+                startContext.ExecutablePath,
+                startContext.WorkingDirectory ?? string.Empty,
+                string.Join('\u001f', startContext.Arguments),
+                serializedEnvironment
+            });
+
+        return BuildCompactFingerprint(fingerprintMaterial);
+    }
+
+    private static string? ResolveRequestedSessionId(ClaudeCodeOptions options)
+    {
+        return ArgumentValueNormalizer.NormalizeOptionalValue(options.SessionId)
+               ?? ArgumentValueNormalizer.NormalizeOptionalValue(options.Resume);
     }
 
     private static void UpsertString(JsonObject rootNode, string propertyName, string? value)
@@ -613,9 +429,6 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
 
     private sealed record ClaudeCodeDebugContext(
         string? RequestedSessionId,
-        string? BindingKey,
         string RuntimeFingerprint,
-        string PoolFingerprint,
-        string ResumeMode,
         DateTime EventTimestampUtc);
 }
