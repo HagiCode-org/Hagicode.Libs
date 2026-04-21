@@ -61,7 +61,7 @@ var poolDefaults = serviceProvider.GetRequiredService<CliProviderPoolConfigurati
 
 `Claude Code`、`CodeBuddy`、`Hermes` 现在与 `hagicode-core` 的对应 provider 薄适配层共享同一套 libs-backed 实现。重点是：
 
-- `Claude Code` 继续保留 raw stream / resume 语义，但真实执行与 warm transport reuse 统一落在 `ClaudeCodeProvider`
+- `Claude Code` 继续保留 raw stream / resume 语义，但 `ClaudeCodeProvider` 现在固定按次启动并回收本地 CLI 进程，不再做 warm transport reuse
 - `CodeBuddy` 的 ACP session reuse、tool update 归一化与 permission-mode 映射统一落在 `CodebuddyProvider`
 - `Hermes` 的 ACP session reuse、fallback 文本聚合与 lifecycle 诊断统一落在 `HermesProvider`
 - 自动重试调度属于 `hagicode-core` 的 backend wrapper；`HagiCode.Libs.Providers` 只负责单次执行并保留可恢复上下文
@@ -208,7 +208,7 @@ await foreach (var message in kiro.ExecuteAsync(kiroOptions, "Reply with exactly
 
 ## Pool controls
 
-Every built-in provider option record now exposes `PoolSettings`:
+ACP-backed and pooled runtime providers expose `PoolSettings`. `ClaudeCodeOptions` 则只保留真实 Claude CLI 参数，因为 Claude Code 现在始终按 one-shot 生命周期执行：
 
 ```csharp
 var qoderOptions = new QoderCliOptions
@@ -229,11 +229,11 @@ Practical boundaries:
 
 - `CodeBuddy`, `Gemini`, `Hermes`, `Kimi`, `Kiro`, and `QoderCLI` pool live ACP sessions.
 - `DeepAgents` pools live ACP sessions, treats `DeepAgentsOptions.ModeId` as the authoritative typed session-mode signal, re-applies it before prompt execution, and evicts faulted entries so later acquires can cold-start a fresh session.
-- `Claude Code` pools warm stdio transports keyed by stable session identity plus a compatibility fingerprint built from the effective startup shape.
+- `Claude Code` keeps `SessionId` / `Resume` as Claude-native continuity controls, but every `ExecuteAsync` invocation starts a fresh local transport and disposes it after the terminal message.
 - `Codex` keeps logical session identity stable, but rebuilds pooled entries when the compatibility fingerprint changes before reusing a previous thread binding.
 - `Copilot` only treats explicit `SessionId` as the logical reuse key; permissions and runtime flags stay in the compatibility fingerprint so config changes cold-start a replacement runtime under the same session identity.
 - `CodeBuddy` and `Hermes` now include `ModeId` in their reuse fingerprint and re-apply it after `session/new` or warm reuse.
-- Pooling can be disabled per provider call, which falls back to the original one-shot behavior without changing message semantics.
+- Providers that expose `PoolSettings` can still disable pooling per call, which falls back to the original one-shot behavior without changing message semantics.
 - Idle eviction is lazy and deterministic; if a lease faults, the coordinator disposes that entry immediately rather than returning it to the warm set.
 
 ## Adoption boundaries
