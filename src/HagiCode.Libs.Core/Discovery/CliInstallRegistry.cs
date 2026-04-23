@@ -77,7 +77,7 @@ public static class CliInstallRegistry
             ProviderName: "Kiro",
             NpmPackage: string.Empty,
             PinnedVersion: string.Empty,
-            ExecutableCandidates: ["kiro", "kiro-cli"],
+            ExecutableCandidates: ["kiro-cli"],
             IsPubliclyInstallable: false),
         new CliInstallDescriptor(
             ProviderName: "QoderCLI",
