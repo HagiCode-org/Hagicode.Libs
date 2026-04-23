@@ -7,9 +7,9 @@ public static class KiroConsoleDefinition
     public static ProviderConsoleDefinition Instance { get; } = new(
         consoleName: "HagiCode.Libs.Kiro.Console",
         providerDisplayName: "Kiro",
-        defaultProviderName: "kiro",
+        defaultProviderName: "kiro-cli",
         helpDescription: "Dedicated provider validation for the Kiro CLI.",
-        aliases: ["kiro-cli"],
+        aliases: [],
         optionLines:
         [
             "--repo <path>              Include the repository summary scenario in the suite",

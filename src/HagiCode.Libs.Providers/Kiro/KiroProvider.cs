@@ -15,7 +15,8 @@ namespace HagiCode.Libs.Providers.Kiro;
 /// </summary>
 public class KiroProvider : ICliProvider<KiroOptions>
 {
-    private static readonly string[] DefaultExecutableCandidates = ["kiro", "kiro-cli"];
+    private static readonly string[] DefaultExecutableCandidates = ["kiro-cli"];
+    private static readonly string[] GuardedFallbackExecutableCandidates = ["kiro"];
     private const string DefaultBootstrapMethod = "authenticate";
     private static readonly TimeSpan DefaultStartupTimeout = TimeSpan.FromSeconds(15);
 
@@ -46,10 +47,10 @@ public class KiroProvider : ICliProvider<KiroOptions>
     }
 
     /// <inheritdoc />
-    public string Name => "kiro";
+    public string Name => "kiro-cli";
 
     /// <inheritdoc />
-    public bool IsAvailable => _executableResolver.ResolveFirstAvailablePath(DefaultExecutableCandidates) is not null;
+    public bool IsAvailable => ResolveImplicitExecutablePath() is not null;
 
     /// <inheritdoc />
     public async IAsyncEnumerable<CliMessage> ExecuteAsync(
@@ -61,9 +62,9 @@ public class KiroProvider : ICliProvider<KiroOptions>
         ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
 
         var runtimeEnvironment = await ResolveRuntimeEnvironmentAsync(cancellationToken).ConfigureAwait(false);
-        var executablePath = ResolveExecutablePath(options, runtimeEnvironment)
-            ?? throw new FileNotFoundException(
-                "Unable to locate the Kiro executable. Set KiroOptions.ExecutablePath or ensure 'kiro' or 'kiro-cli' is on PATH.");
+        var executableResolution = ResolveExecutable(options, runtimeEnvironment);
+        var executablePath = executableResolution.ExecutablePath
+            ?? throw executableResolution.CreateException();
 
         var workingDirectory = ResolveWorkingDirectory(options.WorkingDirectory);
         var startContext = new ProcessStartContext
@@ -155,20 +156,20 @@ public class KiroProvider : ICliProvider<KiroOptions>
         try
         {
             var runtimeEnvironment = await ResolveRuntimeEnvironmentAsync(cancellationToken).ConfigureAwait(false);
-            var executablePath = _executableResolver.ResolveFirstAvailablePath(DefaultExecutableCandidates, runtimeEnvironment);
-            if (executablePath is null)
+            var executableResolution = ResolveExecutable(options: null, runtimeEnvironment);
+            if (executableResolution.ExecutablePath is null)
             {
                 return new CliProviderTestResult
                 {
                     ProviderName = Name,
                     Success = false,
-                    ErrorMessage = "Kiro executable was not found. Install Kiro or ensure 'kiro'/'kiro-cli' is on PATH."
+                    ErrorMessage = executableResolution.ErrorMessage
                 };
             }
 
             var startContext = new ProcessStartContext
             {
-                ExecutablePath = executablePath,
+                ExecutablePath = executableResolution.ExecutablePath,
                 Arguments = ["acp"],
                 WorkingDirectory = Directory.GetCurrentDirectory(),
                 EnvironmentVariables = runtimeEnvironment,
@@ -630,14 +631,56 @@ public class KiroProvider : ICliProvider<KiroOptions>
         return false;
     }
 
-    private string? ResolveExecutablePath(KiroOptions options, IReadOnlyDictionary<string, string?> runtimeEnvironment)
+    private ExecutableResolutionResult ResolveExecutable(
+        KiroOptions? options,
+        IReadOnlyDictionary<string, string?> runtimeEnvironment)
     {
-        if (!string.IsNullOrWhiteSpace(options.ExecutablePath))
+        var explicitExecutablePath = options is null
+            ? null
+            : ArgumentValueNormalizer.NormalizeOptionalValue(options.ExecutablePath);
+        if (explicitExecutablePath is not null)
         {
-            return _executableResolver.ResolveExecutablePath(options.ExecutablePath, runtimeEnvironment);
+            var resolvedExplicitExecutablePath = _executableResolver.ResolveExecutablePath(explicitExecutablePath, runtimeEnvironment);
+            if (resolvedExplicitExecutablePath is not null)
+            {
+                if (!IsSupportedExecutablePath(resolvedExplicitExecutablePath))
+                {
+                    return ExecutableResolutionResult.CreateUnsupportedConfiguredPath(explicitExecutablePath, resolvedExplicitExecutablePath);
+                }
+
+                return ExecutableResolutionResult.CreateSuccess(resolvedExplicitExecutablePath);
+            }
+
+            return ExecutableResolutionResult.CreateMissingConfiguredPath(explicitExecutablePath);
         }
 
+        var resolvedImplicitExecutablePath = ResolveImplicitExecutablePath(runtimeEnvironment);
+        if (resolvedImplicitExecutablePath is not null)
+        {
+            return ExecutableResolutionResult.CreateSuccess(resolvedImplicitExecutablePath);
+        }
+
+        var blockedFallbackExecutablePath = _executableResolver.ResolveFirstAvailablePath(
+            GuardedFallbackExecutableCandidates,
+            runtimeEnvironment);
+        if (blockedFallbackExecutablePath is not null)
+        {
+            return ExecutableResolutionResult.CreateGuardedFallback(blockedFallbackExecutablePath);
+        }
+
+        return ExecutableResolutionResult.CreateImplicitMissing();
+    }
+
+    private string? ResolveImplicitExecutablePath(IReadOnlyDictionary<string, string?>? runtimeEnvironment = null)
+    {
         return _executableResolver.ResolveFirstAvailablePath(DefaultExecutableCandidates, runtimeEnvironment);
+    }
+
+    private static bool IsSupportedExecutablePath(string executablePath)
+    {
+        var executableName = Path.GetFileNameWithoutExtension(executablePath);
+        return !string.IsNullOrWhiteSpace(executableName) &&
+               executableName.StartsWith("kiro-cli", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string ResolveWorkingDirectory(string? workingDirectory)
@@ -916,6 +959,58 @@ public class KiroProvider : ICliProvider<KiroOptions>
         }
         catch (ObjectDisposedException)
         {
+        }
+    }
+
+    private sealed record ExecutableResolutionResult(string? ExecutablePath, string? ErrorMessage, bool IsGuardedFallback)
+    {
+        public Exception CreateException()
+        {
+            if (string.IsNullOrWhiteSpace(ErrorMessage))
+            {
+                return new InvalidOperationException("Kiro executable resolution failed without a diagnostic message.");
+            }
+
+            return IsGuardedFallback
+                ? new InvalidOperationException(ErrorMessage)
+                : new FileNotFoundException(ErrorMessage);
+        }
+
+        public static ExecutableResolutionResult CreateSuccess(string executablePath)
+        {
+            return new ExecutableResolutionResult(executablePath, null, false);
+        }
+
+        public static ExecutableResolutionResult CreateMissingConfiguredPath(string configuredExecutablePath)
+        {
+            return new ExecutableResolutionResult(
+                null,
+                $"Unable to locate the configured Kiro executable '{configuredExecutablePath}'. Verify KiroOptions.ExecutablePath or point it to a supported 'kiro-cli' binary.",
+                false);
+        }
+
+        public static ExecutableResolutionResult CreateUnsupportedConfiguredPath(string configuredExecutablePath, string resolvedExecutablePath)
+        {
+            return new ExecutableResolutionResult(
+                null,
+                $"Configured Kiro executable '{configuredExecutablePath}' resolved to '{resolvedExecutablePath}', but only 'kiro-cli' executables are supported. Update KiroOptions.ExecutablePath to a 'kiro-cli' binary.",
+                true);
+        }
+
+        public static ExecutableResolutionResult CreateGuardedFallback(string blockedExecutablePath)
+        {
+            return new ExecutableResolutionResult(
+                null,
+                $"Found unsupported generic 'kiro' launcher at '{blockedExecutablePath}'. Only 'kiro-cli' executables are supported, so implicit fallback was blocked to avoid starting the desktop app unexpectedly.",
+                true);
+        }
+
+        public static ExecutableResolutionResult CreateImplicitMissing()
+        {
+            return new ExecutableResolutionResult(
+                null,
+                "Supported Kiro CLI executable was not found. Set KiroOptions.ExecutablePath to a 'kiro-cli' binary or ensure 'kiro-cli' is on PATH.",
+                false);
         }
     }
 

@@ -54,7 +54,7 @@ public static class ServiceCollectionExtensions
             registry.Register("gemini", new CliPoolSettings { MaxActiveSessions = 50, IdleTimeout = TimeSpan.FromMinutes(10) });
             registry.Register("hermes", new CliPoolSettings { MaxActiveSessions = 500, IdleTimeout = TimeSpan.FromHours(24) });
             registry.Register("kimi", new CliPoolSettings { MaxActiveSessions = 50, IdleTimeout = TimeSpan.FromMinutes(10) });
-            registry.Register("kiro", new CliPoolSettings { MaxActiveSessions = 50, IdleTimeout = TimeSpan.FromMinutes(10) });
+            registry.Register("kiro-cli", new CliPoolSettings { MaxActiveSessions = 50, IdleTimeout = TimeSpan.FromMinutes(10) });
             registry.Register("qodercli", new CliPoolSettings { MaxActiveSessions = 50, IdleTimeout = TimeSpan.FromMinutes(10) });
             return registry;
         });
@@ -140,7 +140,7 @@ public static class ServiceCollectionExtensions
 
                 if (provider is KiroProvider)
                 {
-                    registry.Register(provider.Name, provider, ["kiro-cli"]);
+                    registry.Register(provider.Name, provider);
                     continue;
                 }
 
