@@ -57,7 +57,7 @@ public sealed class DependencyInjectionTests
         poolConfiguration.GetSettings("hermes").Enabled.ShouldBeTrue();
         poolConfiguration.GetSettings("hermes").IdleTimeout.ShouldBe(TimeSpan.FromHours(24));
         poolConfiguration.GetSettings("kimi").IdleTimeout.ShouldBe(TimeSpan.FromMinutes(10));
-        poolConfiguration.GetSettings("kiro").IdleTimeout.ShouldBe(TimeSpan.FromMinutes(10));
+        poolConfiguration.GetSettings("kiro-cli").IdleTimeout.ShouldBe(TimeSpan.FromMinutes(10));
         poolConfiguration.GetSettings("qodercli").IdleTimeout.ShouldBe(TimeSpan.FromMinutes(10));
         poolConfiguration.HasSettings("opencode").ShouldBeFalse();
         registry.GetProvider("claude-code").ShouldNotBeNull();
@@ -77,7 +77,6 @@ public sealed class DependencyInjectionTests
         registry.GetProvider("hermes-cli").ShouldNotBeNull();
         registry.GetProvider("kimi").ShouldNotBeNull();
         registry.GetProvider("kimi-cli").ShouldNotBeNull();
-        registry.GetProvider("kiro").ShouldNotBeNull();
         registry.GetProvider("kiro-cli").ShouldNotBeNull();
         registry.GetProvider("opencode").ShouldNotBeNull();
         registry.GetProvider("open-code").ShouldNotBeNull();
@@ -114,12 +113,11 @@ public sealed class DependencyInjectionTests
         registry.GetProvider<HermesOptions>("hermes-cli").ShouldBeOfType<HermesProvider>();
         registry.GetProvider<KimiOptions>("kimi").ShouldBeOfType<KimiProvider>();
         registry.GetProvider<KimiOptions>("kimi-cli").ShouldBeOfType<KimiProvider>();
-        registry.GetProvider<KiroOptions>("kiro").ShouldBeOfType<KiroProvider>();
         registry.GetProvider<KiroOptions>("kiro-cli").ShouldBeOfType<KiroProvider>();
         registry.GetProvider<OpenCodeOptions>("opencode").ShouldBeOfType<OpenCodeProvider>();
         registry.GetProvider<OpenCodeOptions>("open-code").ShouldBeOfType<OpenCodeProvider>();
         registry.GetProvider<OpenCodeOptions>("opencode-cli").ShouldBeOfType<OpenCodeProvider>();
         registry.GetProvider<QoderCliOptions>("qodercli").ShouldBeOfType<QoderCliProvider>();
-        registry.GetAllProviders().Select(static provider => provider.Name).ShouldBe(["claude-code", "codebuddy", "copilot", "codex", "deepagents", "gemini", "hermes", "kimi", "kiro", "opencode", "qodercli"], ignoreOrder: true);
+        registry.GetAllProviders().Select(static provider => provider.Name).ShouldBe(["claude-code", "codebuddy", "copilot", "codex", "deepagents", "gemini", "hermes", "kimi", "kiro-cli", "opencode", "qodercli"], ignoreOrder: true);
     }
 }

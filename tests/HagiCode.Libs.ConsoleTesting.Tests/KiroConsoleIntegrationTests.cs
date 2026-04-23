@@ -114,7 +114,7 @@ public sealed class KiroConsoleIntegrationTests
                 [
                     "--test-provider-full",
                     "--model", "kiro-default",
-                    "--executable", "/custom/kiro",
+                    "--executable", "/custom/kiro-cli-dev",
                     "--auth-method", "token",
                     "--auth-token", "secret",
                     "--bootstrap-method", "authenticate",
@@ -129,7 +129,7 @@ public sealed class KiroConsoleIntegrationTests
             exitCode.ShouldBe(0);
             provider.ReceivedOptions.Count.ShouldBe(5);
             provider.ReceivedOptions[0].Model.ShouldBe("kiro-default");
-            provider.ReceivedOptions[0].ExecutablePath.ShouldBe("/custom/kiro");
+            provider.ReceivedOptions[0].ExecutablePath.ShouldBe("/custom/kiro-cli-dev");
             provider.ReceivedOptions[0].AuthenticationMethod.ShouldBe("token");
             provider.ReceivedOptions[0].AuthenticationToken.ShouldBe("secret");
             provider.ReceivedOptions[0].BootstrapMethod.ShouldBe("authenticate");
@@ -201,7 +201,7 @@ public sealed class KiroConsoleIntegrationTests
     {
         private readonly Dictionary<string, string> _sessionSecrets = [];
 
-        public string Name => "kiro";
+        public string Name => "kiro-cli";
 
         public bool IsAvailable => true;
 

@@ -56,7 +56,7 @@ public sealed class CliInstallRegistryTests
 
         descriptor.NpmPackage.ShouldBeEmpty();
         descriptor.PinnedVersion.ShouldBeEmpty();
-        descriptor.ExecutableCandidates.ShouldBe(["kiro", "kiro-cli"]);
+        descriptor.ExecutableCandidates.ShouldBe(["kiro-cli"]);
         descriptor.IsPubliclyInstallable.ShouldBeFalse();
     }
 

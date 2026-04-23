@@ -13,7 +13,7 @@ namespace HagiCode.Libs.Providers.Tests;
 public sealed class KiroProviderTests
 {
     private const string RealCliTestsEnvironmentVariable = "HAGICODE_REAL_CLI_TESTS";
-    private static readonly string[] KiroExecutableCandidates = ["kiro", "kiro-cli"];
+    private static readonly string[] KiroExecutableCandidates = ["kiro-cli"];
 
     [Fact]
     public void BuildCommandArguments_includes_acp_and_appends_extra_arguments_once()
@@ -50,7 +50,7 @@ public sealed class KiroProviderTests
         await foreach (var message in provider.ExecuteAsync(
                            new KiroOptions
                            {
-                               ExecutablePath = "/custom/kiro",
+                               ExecutablePath = "/custom/kiro-cli-dev",
                                WorkingDirectory = "/tmp/project",
                                Model = "kiro-default",
                                EnvironmentVariables = new Dictionary<string, string?>
@@ -63,7 +63,7 @@ public sealed class KiroProviderTests
             messages.Add(message);
         }
 
-        provider.LastStartContext!.ExecutablePath.ShouldBe("/custom/kiro");
+        provider.LastStartContext!.ExecutablePath.ShouldBe("/custom/kiro-cli-dev");
         provider.LastStartContext.WorkingDirectory.ShouldBe("/tmp/project");
         provider.LastStartContext.EnvironmentVariables!["KIRO_TOKEN"].ShouldBe("token");
         provider.SessionClient!.ConnectCalls.ShouldBe(1);
@@ -331,6 +331,105 @@ public sealed class KiroProviderTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_prefers_kiro_cli_when_both_candidates_are_resolvable()
+    {
+        var executableResolver = new SelectiveExecutableResolver(new Dictionary<string, string?>(StringComparer.Ordinal)
+        {
+            ["kiro-cli"] = "/resolved/kiro-cli",
+            ["kiro"] = "/resolved/kiro"
+        });
+        var provider = CreateProvider(executableResolver: executableResolver);
+
+        await foreach (var _ in provider.ExecuteAsync(new KiroOptions(), "hello"))
+        {
+        }
+
+        provider.LastStartContext.ShouldNotBeNull();
+        provider.LastStartContext.ExecutablePath.ShouldBe("/resolved/kiro-cli");
+        executableResolver.ResolutionAttempts.ShouldContain("kiro-cli");
+        executableResolver.ResolutionAttempts.ShouldNotContain("kiro");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_fails_with_guarded_fallback_diagnostic_when_only_generic_kiro_is_resolvable()
+    {
+        var executableResolver = new SelectiveExecutableResolver(new Dictionary<string, string?>(StringComparer.Ordinal)
+        {
+            ["kiro"] = "/resolved/kiro"
+        });
+        var provider = CreateProvider(executableResolver: executableResolver);
+
+        var exception = await Should.ThrowAsync<InvalidOperationException>(async () =>
+        {
+            await foreach (var _ in provider.ExecuteAsync(new KiroOptions(), "hello"))
+            {
+            }
+        });
+
+        exception.Message.ShouldContain("fallback");
+        exception.Message.ShouldContain("ExecutablePath");
+        exception.Message.ShouldContain("/resolved/kiro");
+        executableResolver.ResolutionAttempts.ShouldBe(["kiro-cli", "kiro"]);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_rejects_explicit_generic_kiro_path()
+    {
+        var executableResolver = new SelectiveExecutableResolver(new Dictionary<string, string?>(StringComparer.Ordinal)
+        {
+            ["/resolved/kiro"] = "/resolved/kiro"
+        });
+        var provider = CreateProvider(executableResolver: executableResolver);
+
+        var exception = await Should.ThrowAsync<InvalidOperationException>(async () =>
+        {
+            await foreach (var _ in provider.ExecuteAsync(
+                               new KiroOptions
+                               {
+                                   ExecutablePath = "/resolved/kiro"
+                               },
+                               "hello"))
+            {
+            }
+        });
+
+        exception.Message.ShouldContain("only 'kiro-cli' executables are supported");
+        exception.Message.ShouldContain("/resolved/kiro");
+    }
+
+    [Fact]
+    public async Task PingAsync_returns_guarded_fallback_diagnostic_when_only_generic_kiro_is_resolvable()
+    {
+        var executableResolver = new SelectiveExecutableResolver(new Dictionary<string, string?>(StringComparer.Ordinal)
+        {
+            ["kiro"] = "/resolved/kiro"
+        });
+        var provider = CreateProvider(executableResolver: executableResolver);
+
+        var result = await provider.PingAsync();
+
+        result.Success.ShouldBeFalse();
+        result.ErrorMessage.ShouldNotBeNull();
+        result.ErrorMessage.ShouldContain("blocked");
+        result.ErrorMessage.ShouldContain("ExecutablePath");
+        result.ErrorMessage.ShouldContain("/resolved/kiro");
+        provider.SessionClient.ShouldBeNull();
+    }
+
+    [Fact]
+    public void IsAvailable_returns_false_when_only_generic_kiro_is_resolvable()
+    {
+        var executableResolver = new SelectiveExecutableResolver(new Dictionary<string, string?>(StringComparer.Ordinal)
+        {
+            ["kiro"] = "/resolved/kiro"
+        });
+        var provider = CreateProvider(executableResolver: executableResolver);
+
+        provider.IsAvailable.ShouldBeFalse();
+        executableResolver.ResolutionAttempts.ShouldBe(["kiro-cli"]);
+    }
+
+    [Fact]
     public async Task PingAsync_returns_actionable_failure_when_authentication_is_required()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(
@@ -470,7 +569,7 @@ public sealed class KiroProviderTests
 
         var executableName = Path.GetFileNameWithoutExtension(executablePath);
         executableName.ShouldNotBeNullOrWhiteSpace();
-        executableName.ShouldBeOneOf("kiro", "kiro-cli");
+        executableName.ShouldBe("kiro-cli");
 
         var provider = new KiroProvider(resolver, new CliProcessManager(), null);
 
@@ -478,7 +577,7 @@ public sealed class KiroProviderTests
 
         var result = await provider.PingAsync();
 
-        result.ProviderName.ShouldBe("kiro");
+        result.ProviderName.ShouldBe("kiro-cli");
         result.Success.ShouldBeTrue();
         result.Version.ShouldNotBeNullOrWhiteSpace();
         result.ErrorMessage.ShouldBeNullOrWhiteSpace();
@@ -686,6 +785,38 @@ public sealed class KiroProviderTests
 
         public override string? ResolveFirstAvailablePath(IEnumerable<string> executableNames, IReadOnlyDictionary<string, string?>? environmentVariables = null)
             => null;
+    }
+
+    private sealed class SelectiveExecutableResolver(IReadOnlyDictionary<string, string?> resolvedPaths) : CliExecutableResolver
+    {
+        public List<string> ResolutionAttempts { get; } = [];
+
+        public override string? ResolveExecutablePath(string? executableName, IReadOnlyDictionary<string, string?>? environmentVariables = null)
+        {
+            if (string.IsNullOrWhiteSpace(executableName))
+            {
+                return null;
+            }
+
+            ResolutionAttempts.Add(executableName);
+            return resolvedPaths.TryGetValue(executableName, out var resolvedPath)
+                ? resolvedPath
+                : null;
+        }
+
+        public override string? ResolveFirstAvailablePath(IEnumerable<string> executableNames, IReadOnlyDictionary<string, string?>? environmentVariables = null)
+        {
+            foreach (var executableName in executableNames)
+            {
+                var resolvedPath = ResolveExecutablePath(executableName, environmentVariables);
+                if (!string.IsNullOrWhiteSpace(resolvedPath))
+                {
+                    return resolvedPath;
+                }
+            }
+
+            return null;
+        }
     }
 
     private sealed class StubRuntimeEnvironmentResolver : IRuntimeEnvironmentResolver
