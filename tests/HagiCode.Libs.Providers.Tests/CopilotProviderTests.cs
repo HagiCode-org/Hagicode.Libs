@@ -15,6 +15,8 @@ public sealed class CopilotProviderTests
     private const string RealCliTestsEnvironmentVariable = "HAGICODE_REAL_CLI_TESTS";
     private const string RealCopilotSessionTestsEnvironmentVariable = "HAGICODE_REAL_CLI_COPILOT_SESSION_TESTS";
     private static readonly string[] CopilotExecutableCandidates = ["copilot"];
+    private static readonly TimeSpan RealCopilotRequestTimeout = TimeSpan.FromSeconds(45);
+    private static readonly TimeSpan RealCopilotStartupTimeout = TimeSpan.FromSeconds(20);
 
     [Fact]
     public void BuildSdkRequest_includes_typed_runtime_fields_and_filtered_args()
@@ -259,13 +261,14 @@ public sealed class CopilotProviderTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_reuses_warm_copilot_runtime_for_same_explicit_session_id()
+    public async Task ExecuteAsync_creates_fresh_runtime_for_each_explicit_session_attempt()
     {
         var gateway = new StubCopilotSdkGateway(
         [
             new CopilotSdkStreamEvent(CopilotSdkStreamEventType.TextDelta, Content: "pong"),
             new CopilotSdkStreamEvent(CopilotSdkStreamEventType.Completed)
         ],
+        lifecycleType: CopilotSdkStreamEventType.SessionResumed,
         sessionId: "session-key");
         var provider = CreateProvider(gateway: gateway);
         var firstMessages = new List<CliMessage>();
@@ -281,16 +284,46 @@ public sealed class CopilotProviderTests
             secondMessages.Add(message);
         }
 
-        gateway.CreatedRuntimeCount.ShouldBe(1);
+        gateway.CreatedRuntimeCount.ShouldBe(2);
         gateway.SendPromptCallCount.ShouldBe(2);
-        firstMessages.First().Type.ShouldBe("session.started");
-        secondMessages.First().Type.ShouldBe("session.reused");
+        firstMessages.First().Type.ShouldBe("session.resumed");
+        secondMessages.First().Type.ShouldBe("session.resumed");
+        firstMessages.First().Content.GetProperty("session_id").GetString().ShouldBe("session-key");
         secondMessages.First().Content.GetProperty("session_id").GetString().ShouldBe("session-key");
         secondMessages.First().Content.GetProperty("requested_session_id").GetString().ShouldBe("session-key");
     }
 
     [Fact]
-    public async Task ExecuteAsync_restarts_runtime_when_same_session_id_changes_permissions()
+    public async Task ExecuteAsync_uses_fresh_runtime_when_resuming_an_observed_session_id()
+    {
+        var gateway = new StubCopilotSdkGateway(
+        [
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.TextDelta, Content: "pong"),
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.Completed)
+        ],
+        lifecycleType: CopilotSdkStreamEventType.SessionResumed,
+        sessionId: "session-key");
+        var provider = CreateProvider(gateway: gateway);
+        var secondMessages = new List<CliMessage>();
+
+        await foreach (var _ in provider.ExecuteAsync(new CopilotOptions(), "first"))
+        {
+        }
+
+        await foreach (var message in provider.ExecuteAsync(new CopilotOptions { SessionId = "session-key" }, "second"))
+        {
+            secondMessages.Add(message);
+        }
+
+        gateway.CreatedRuntimeCount.ShouldBe(2);
+        gateway.SendPromptCallCount.ShouldBe(2);
+        secondMessages.First().Type.ShouldBe("session.resumed");
+        secondMessages.First().Content.GetProperty("session_id").GetString().ShouldBe("session-key");
+        secondMessages.First().Content.GetProperty("requested_session_id").GetString().ShouldBe("session-key");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_creates_fresh_runtime_when_same_session_id_changes_permissions()
     {
         var gateway = new StubCopilotSdkGateway(
         [
@@ -357,7 +390,7 @@ public sealed class CopilotProviderTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_uses_one_shot_copilot_path_when_pooling_is_disabled()
+    public async Task ExecuteAsync_ignores_legacy_pool_settings_and_stays_on_the_one_shot_path()
     {
         var gateway = new StubCopilotSdkGateway(
         [
@@ -406,6 +439,26 @@ public sealed class CopilotProviderTests
 
         messages.Select(static message => message.Type).ShouldBe(["error"]);
         messages[0].Content.GetProperty("message").GetString().ShouldBe("startup failed");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_preserves_terminal_error_after_tool_lifecycle_events()
+    {
+        var provider = CreateProvider(gateway: new StubCopilotSdkGateway(
+        [
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.ToolExecutionStart, ToolName: "Edit", ToolCallId: "tool-1"),
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.Error, ErrorMessage: "[permission_denied] auto-approval mismatch")
+        ]));
+        var messages = new List<CliMessage>();
+
+        await foreach (var message in provider.ExecuteAsync(new CopilotOptions { ExecutablePath = "/custom/copilot" }, "hello"))
+        {
+            messages.Add(message);
+        }
+
+        messages.Select(static message => message.Type).ShouldBe(["session.started", "tool.started", "error"]);
+        messages[1].Content.GetProperty("tool_name").GetString().ShouldBe("Edit");
+        messages[2].Content.GetProperty("message").GetString().ShouldBe("[permission_denied] auto-approval mismatch");
     }
 
     [Fact]
@@ -523,7 +576,9 @@ public sealed class CopilotProviderTests
             new CopilotOptions
             {
                 ExecutablePath = executablePath,
-                WorkingDirectory = workingDirectory
+                WorkingDirectory = workingDirectory,
+                Timeout = RealCopilotRequestTimeout,
+                StartupTimeout = RealCopilotStartupTimeout
             },
             $"Remember this exact token for the next turn: {rememberedToken}. Reply with exactly ACK.");
 
@@ -536,11 +591,65 @@ public sealed class CopilotProviderTests
             {
                 ExecutablePath = executablePath,
                 WorkingDirectory = workingDirectory,
-                SessionId = firstResult.SessionId
+                SessionId = firstResult.SessionId,
+                Timeout = RealCopilotRequestTimeout,
+                StartupTimeout = RealCopilotStartupTimeout
             },
             "What exact token did I ask you to remember in the previous turn? Reply with just the token.");
 
         secondResult.AssistantText.ShouldContain(rememberedToken);
+    }
+
+    [Fact]
+    [Trait("Category", "RealCli")]
+    public async Task ExecuteAsync_real_cli_can_complete_a_read_tool_turn_when_opted_in()
+    {
+        if (!IsRealCliTestsEnabled() || !IsRealCopilotSessionTestsEnabled())
+        {
+            return;
+        }
+
+        var resolver = new CliExecutableResolver();
+        var executablePath = resolver.ResolveFirstAvailablePath(CopilotExecutableCandidates);
+        if (executablePath is null)
+        {
+            throw new InvalidOperationException("Copilot CLI was not found on PATH even though the real CLI validation path was enabled.");
+        }
+
+        var provider = new CopilotProvider(resolver, new CliProcessManager(), runtimeEnvironmentResolver: null);
+        var workingDirectory = Directory.GetCurrentDirectory();
+        var messages = await ReadExecutionMessagesAsync(
+            provider,
+            new CopilotOptions
+            {
+                ExecutablePath = executablePath,
+                WorkingDirectory = workingDirectory,
+                Timeout = RealCopilotRequestTimeout,
+                StartupTimeout = RealCopilotStartupTimeout,
+                Permissions = new CopilotPermissionOptions
+                {
+                    AllowedPaths = [workingDirectory],
+                    AllowedTools = ["Read"]
+                }
+            },
+            "Do not answer from memory. Use the Read tool to inspect src/HagiCode.Libs.Providers/README.md in the current working directory, then reply with exactly the heading text from the first line.");
+
+        messages.ShouldContain(message => message.Type == "tool.started");
+        messages.ShouldContain(message => message.Type == "tool.completed");
+        messages.ShouldContain(message => message.Type == "result");
+
+        var assistantText = string.Concat(
+            messages
+                .Where(static message => message.Type == "assistant")
+                .Select(static message =>
+                    message.Content.ValueKind == JsonValueKind.Object &&
+                    message.Content.TryGetProperty("text", out var textElement) &&
+                    textElement.ValueKind == JsonValueKind.String
+                        ? textElement.GetString()
+                        : null)
+                .Where(static text => !string.IsNullOrWhiteSpace(text)));
+
+        assistantText.ShouldContain("HagiCode.Libs.Providers", Case.Insensitive);
     }
 
     private static TestCopilotProvider CreateProvider(
@@ -598,6 +707,22 @@ public sealed class CopilotProviderTests
         }
 
         return (string.Concat(assistantText), sessionId);
+    }
+
+    private static async Task<List<CliMessage>> ReadExecutionMessagesAsync(
+        ICliProvider<CopilotOptions> provider,
+        CopilotOptions options,
+        string prompt,
+        CancellationToken cancellationToken = default)
+    {
+        var messages = new List<CliMessage>();
+
+        await foreach (var message in provider.ExecuteAsync(options, prompt, cancellationToken))
+        {
+            messages.Add(message);
+        }
+
+        return messages;
     }
 
     private sealed class TestCopilotProvider(
