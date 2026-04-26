@@ -297,7 +297,7 @@ Built-in providers now participate in a shared pooling architecture:
 - ACP providers (`CodeBuddy`, `Gemini`, `Hermes`, `Kimi`, `Kiro`, `QoderCLI`) lease warm ACP sessions from the shared `CliProviderPoolCoordinator`.
 - `Claude Code` keeps native `SessionId` / `Resume` continuity but always starts a fresh local CLI transport for each invocation and disposes it after the terminal message.
 - `Codex` keeps thread-resume state in the shared pool for an explicit `LogicalSessionKey` or a stable `ThreadId`; a shared working directory alone never becomes the pool identity.
-- `Copilot` reuses SDK-backed runtimes only for an explicit `SessionId`; `WorkingDirectory` remains part of the compatibility fingerprint, not the pool identity.
+- `Copilot` does not participate in the shared runtime pool. Each invocation creates a fresh SDK runtime, and continuity depends only on provider-native `SessionId` resume semantics.
 
 Providers that actually participate in pooling expose `PoolSettings` so callers can disable pooling or tune provider-level behavior. `ClaudeCodeOptions` intentionally does not expose provider-level pool controls anymore:
 
@@ -321,9 +321,9 @@ Operational notes:
 - Warm reuse only occurs when the logical session key and compatibility fingerprint still match.
 - Each pooled entry executes one prompt at a time through an execution lock.
 - Idle entries are reaped before capacity failures are reported; if a provider is still full after TTL cleanup, the oldest idle entry is evicted next.
-- Faulted transports, broken ACP sessions, and failed Copilot runtimes are removed immediately instead of being returned to the pool.
+- Faulted transports and broken ACP sessions are removed immediately instead of being returned to the pool.
 - `CliAcpSessionPool.GetDiagnosticsSnapshot()` now reports global plus provider-scoped hit/miss/evict/fault counters, along with the latest eviction/fault reason; the pool also emits structured logs and `System.Diagnostics.Metrics` counters for monitoring hooks.
-- Default ACP idle TTL baselines remain provider-specific: `codebuddy/copilot/codex/deepagents/gemini/kimi/kiro/qodercli=10m` and `hermes=24h`. `claude-code` no longer registers a shared pool TTL because it does not participate in local pooling, and `opencode` still does not add an explicit provider registry TTL entry.
+- Default ACP idle TTL baselines remain provider-specific: `codebuddy/codex/deepagents/gemini/kimi/kiro/qodercli=10m` and `hermes=24h`. `claude-code`, `copilot`, and `opencode` do not register shared local-runtime TTL entries.
 - Hosts can enable `CliProcessOwnershipOptions` to persist managed subprocess PID ownership. `hagicode-core` now defaults this to `DataDir/cli-owned-processes.json` and reaps matching orphaned CLI processes during startup recovery.
 
 CodeBuddy execution options cover the ACP-specific runtime settings without forcing raw command lines:
@@ -371,7 +371,7 @@ await foreach (var message in copilot.ExecuteAsync(options, "Reply with exactly 
 }
 ```
 
-Set `SessionId` when you want provider-native Copilot resume semantics. The provider first attempts SDK resume for that id, falls back to creating a new session pinned to the requested id when nothing persisted yet, and emits `session.started`, `session.resumed`, or `session.reused` messages accordingly. Requests without `SessionId` stay anonymous, so the same `WorkingDirectory` alone does not trigger warm reuse.
+Set `SessionId` when you want provider-native Copilot resume semantics. The provider first attempts SDK resume for that id, falls back to creating a new session pinned to the requested id when nothing persisted yet, and emits `session.started` or `session.resumed` messages accordingly. Requests without `SessionId` stay anonymous and still create a fresh SDK runtime on every attempt. Legacy `PoolSettings` values are ignored for compatibility.
 
 Codex execution options cover the common CLI settings without forcing raw command lines:
 

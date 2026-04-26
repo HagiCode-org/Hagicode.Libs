@@ -128,6 +128,9 @@ await foreach (var message in copilot.ExecuteAsync(copilotOptions, "Reply with e
     Console.WriteLine($"{message.Type}: {message.Content}");
 }
 
+// Copilot tool-call turns always terminate with either a "result" or "error"
+// message so upstream Orleans/session UIs can leave the running state deterministically.
+
 // Reuse a persisted provider-native Copilot conversation on the next call.
 var resumedOptions = copilotOptions with { SessionId = "copilot-session-123" };
 
