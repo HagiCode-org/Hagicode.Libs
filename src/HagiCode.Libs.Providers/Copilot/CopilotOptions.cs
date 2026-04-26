@@ -88,8 +88,12 @@ public sealed record CopilotOptions
     public bool NoAskUser { get; init; } = true;
 
     /// <summary>
-    /// Gets or sets provider-level pooling overrides.
+    /// Gets or sets legacy Copilot pool settings.
     /// </summary>
+    /// <remarks>
+    /// Copilot now executes each request on a fresh SDK runtime, so this property is ignored and only
+    /// remains as an inert compatibility surface for older callers.
+    /// </remarks>
     public CliPoolSettings? PoolSettings { get; init; }
 }
 

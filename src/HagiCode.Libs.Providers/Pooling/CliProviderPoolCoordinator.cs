@@ -12,7 +12,6 @@ public sealed class CliProviderPoolCoordinator : IAsyncDisposable
 {
     private readonly ICliAcpSessionPool _acpPool;
     private readonly CliRuntimePool<ICliTransport> _transportPool = new();
-    private readonly CliRuntimePool<ICopilotSdkRuntime> _copilotRuntimePool = new();
     private readonly CliRuntimePool<CodexPooledThreadState> _codexThreadPool = new();
 
     public CliProviderPoolCoordinator(ICliAcpSessionPool? acpPool = null)
@@ -44,18 +43,6 @@ public sealed class CliProviderPoolCoordinator : IAsyncDisposable
     internal Task DisposeTransportProviderAsync(string providerName, CancellationToken cancellationToken = default)
         => _transportPool.DisposeProviderEntriesAsync(providerName, cancellationToken);
 
-    internal Task<CliRuntimePoolLease<ICopilotSdkRuntime>> AcquireCopilotRuntimeAsync(
-        CliRuntimePoolRequest request,
-        Func<CancellationToken, Task<CliRuntimePoolEntry<ICopilotSdkRuntime>>> entryFactory,
-        CancellationToken cancellationToken = default)
-        => _copilotRuntimePool.AcquireAsync(request, entryFactory, cancellationToken);
-
-    internal Task<int> ReapCopilotRuntimeEntriesAsync(string? providerName = null, CancellationToken cancellationToken = default)
-        => _copilotRuntimePool.ReapIdleEntriesAsync(providerName, cancellationToken);
-
-    internal Task DisposeCopilotProviderAsync(string providerName, CancellationToken cancellationToken = default)
-        => _copilotRuntimePool.DisposeProviderEntriesAsync(providerName, cancellationToken);
-
     internal Task<CliRuntimePoolLease<CodexPooledThreadState>> AcquireCodexThreadAsync(
         CliRuntimePoolRequest request,
         Func<CancellationToken, Task<CliRuntimePoolEntry<CodexPooledThreadState>>> entryFactory,
@@ -72,7 +59,6 @@ public sealed class CliProviderPoolCoordinator : IAsyncDisposable
     {
         await _acpPool.DisposeAsync().ConfigureAwait(false);
         await _transportPool.DisposeAsync().ConfigureAwait(false);
-        await _copilotRuntimePool.DisposeAsync().ConfigureAwait(false);
         await _codexThreadPool.DisposeAsync().ConfigureAwait(false);
     }
 }

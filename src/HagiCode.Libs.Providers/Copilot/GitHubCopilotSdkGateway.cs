@@ -397,6 +397,8 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
                 {
                     if (!terminalEventWritten)
                     {
+                        // Tool-call turns must always terminate so upstream Orleans and UI layers
+                        // do not remain stuck in a running state after the SDK returns.
                         writer.TryWrite(new CopilotSdkStreamEvent(
                             CopilotSdkStreamEventType.Completed,
                             SessionId: SessionId));

@@ -4,8 +4,6 @@ using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Environment;
 using HagiCode.Libs.Core.Process;
 using HagiCode.Libs.Core.Transport;
-using HagiCode.Libs.Core.Acp;
-using HagiCode.Libs.Providers.Pooling;
 
 namespace HagiCode.Libs.Providers.Copilot;
 
@@ -20,8 +18,6 @@ public class CopilotProvider : ICliProvider<CopilotOptions>
     private readonly CliProcessManager _processManager;
     private readonly ICopilotSdkGateway _gateway;
     private readonly IRuntimeEnvironmentResolver? _runtimeEnvironmentResolver;
-    private readonly CliProviderPoolCoordinator _poolCoordinator;
-    private readonly CliProviderPoolConfigurationRegistry _poolConfiguration;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="CopilotProvider" /> class.
@@ -32,10 +28,8 @@ public class CopilotProvider : ICliProvider<CopilotOptions>
     public CopilotProvider(
         CliExecutableResolver executableResolver,
         CliProcessManager processManager,
-        IRuntimeEnvironmentResolver? runtimeEnvironmentResolver = null,
-        CliProviderPoolCoordinator? poolCoordinator = null,
-        CliProviderPoolConfigurationRegistry? poolConfiguration = null)
-        : this(executableResolver, processManager, new GitHubCopilotSdkGateway(), runtimeEnvironmentResolver, poolCoordinator, poolConfiguration)
+        IRuntimeEnvironmentResolver? runtimeEnvironmentResolver = null)
+        : this(executableResolver, processManager, new GitHubCopilotSdkGateway(), runtimeEnvironmentResolver)
     {
     }
 
@@ -43,16 +37,12 @@ public class CopilotProvider : ICliProvider<CopilotOptions>
         CliExecutableResolver executableResolver,
         CliProcessManager processManager,
         ICopilotSdkGateway gateway,
-        IRuntimeEnvironmentResolver? runtimeEnvironmentResolver = null,
-        CliProviderPoolCoordinator? poolCoordinator = null,
-        CliProviderPoolConfigurationRegistry? poolConfiguration = null)
+        IRuntimeEnvironmentResolver? runtimeEnvironmentResolver = null)
     {
         _executableResolver = executableResolver ?? throw new ArgumentNullException(nameof(executableResolver));
         _processManager = processManager ?? throw new ArgumentNullException(nameof(processManager));
         _gateway = gateway ?? throw new ArgumentNullException(nameof(gateway));
         _runtimeEnvironmentResolver = runtimeEnvironmentResolver;
-        _poolCoordinator = poolCoordinator ?? new CliProviderPoolCoordinator();
-        _poolConfiguration = poolConfiguration ?? new CliProviderPoolConfigurationRegistry();
     }
 
     /// <inheritdoc />
@@ -74,101 +64,25 @@ public class CopilotProvider : ICliProvider<CopilotOptions>
         var executablePath = ResolveExecutablePath(options, runtimeEnvironment)
             ?? throw new FileNotFoundException("Unable to locate a Copilot executable. Install @github/copilot and ensure the CLI or a VS Code Copilot Chat shim is on PATH.");
         var sdkRequest = BuildSdkRequest(options, prompt, executablePath, runtimeEnvironment);
-        var poolSettings = ResolvePoolSettings(options);
 
         foreach (var diagnostic in CopilotCliCompatibility.BuildCliArgs(options).Diagnostics)
         {
             yield return CreateDiagnosticMessage(diagnostic);
         }
 
-        if (!poolSettings.Enabled)
+        await foreach (var eventData in _gateway.SendPromptAsync(sdkRequest, cancellationToken).ConfigureAwait(false))
         {
-            await foreach (var eventData in _gateway.SendPromptAsync(sdkRequest, cancellationToken).ConfigureAwait(false))
+            var mappedMessage = MapEvent(eventData);
+            if (mappedMessage is null)
             {
-                var mappedMessage = MapEvent(eventData);
-                if (mappedMessage is null)
-                {
-                    continue;
-                }
-
-                yield return mappedMessage;
-                if (IsTerminalMessage(mappedMessage.Type))
-                {
-                    yield break;
-                }
+                continue;
             }
 
-            yield break;
-        }
-
-        var request = new CliRuntimePoolRequest(
-            Name,
-            ResolveLogicalSessionKey(options),
-            CliPoolFingerprintBuilder.Build(
-                executablePath,
-                options.WorkingDirectory,
-                options.Model,
-                options.AuthSource,
-                options.CliUrl,
-                options.Permissions,
-                options.AdditionalArgs,
-                options.NoAskUser,
-                runtimeEnvironment,
-                options.EnvironmentVariables),
-            poolSettings);
-
-        await using var lease = await _poolCoordinator.AcquireCopilotRuntimeAsync(
-            request,
-            async ct =>
+            yield return mappedMessage;
+            if (IsTerminalMessage(mappedMessage.Type))
             {
-                var runtime = await _gateway.CreateRuntimeAsync(sdkRequest, ct).ConfigureAwait(false);
-                var entry = new CliRuntimePoolEntry<ICopilotSdkRuntime>(Name, runtime, request.CompatibilityFingerprint, request.Settings);
-                entry.RegisterKey(request.LogicalSessionKey);
-                return entry;
-            },
-            cancellationToken).ConfigureAwait(false);
-
-        var shouldEvictAnonymous = request.LogicalSessionKey is null && !poolSettings.KeepAnonymousSessions;
-        var faulted = false;
-        await lease.Entry.ExecutionLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            if (lease.IsWarmLease)
-            {
-                var reusedMessage = MapEvent(new CopilotSdkStreamEvent(
-                    CopilotSdkStreamEventType.SessionReused,
-                    SessionId: lease.Entry.Resource.SessionId,
-                    RequestedSessionId: sdkRequest.SessionId));
-                if (reusedMessage is not null)
-                {
-                    yield return reusedMessage;
-                }
+                yield break;
             }
-
-            await foreach (var eventData in lease.Entry.Resource.SendPromptAsync(sdkRequest, cancellationToken).ConfigureAwait(false))
-            {
-                var mappedMessage = MapEvent(eventData);
-                if (mappedMessage is null)
-                {
-                    continue;
-                }
-
-                if (string.Equals(mappedMessage.Type, "error", StringComparison.OrdinalIgnoreCase))
-                {
-                    faulted = true;
-                }
-
-                yield return mappedMessage;
-                if (IsTerminalMessage(mappedMessage.Type))
-                {
-                    break;
-                }
-            }
-        }
-        finally
-        {
-            lease.Entry.ExecutionLock.Release();
-            lease.IsFaulted = faulted || shouldEvictAnonymous;
         }
     }
 
@@ -221,7 +135,7 @@ public class CopilotProvider : ICliProvider<CopilotOptions>
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
-        await _poolCoordinator.DisposeCopilotProviderAsync(Name).ConfigureAwait(false);
+        await ValueTask.CompletedTask.ConfigureAwait(false);
     }
 
     internal virtual CopilotSdkRequest BuildSdkRequest(
@@ -472,22 +386,6 @@ public class CopilotProvider : ICliProvider<CopilotOptions>
             ["text"] = content,
             ["is_authoritative_snapshot"] = isAuthoritativeSnapshot
         });
-    }
-
-    private CliPoolSettings ResolvePoolSettings(CopilotOptions options)
-    {
-        return CliPoolSettings.Merge(_poolConfiguration.GetSettings(Name), options.PoolSettings);
-    }
-
-    private static string? ResolveLogicalSessionKey(CopilotOptions options)
-    {
-        var sessionId = ArgumentValueNormalizer.NormalizeOptionalValue(options.SessionId);
-        if (sessionId is not null)
-        {
-            return $"copilot-session:{sessionId}";
-        }
-
-        return null;
     }
 
     private static CliMessage CreateDiagnosticMessage(string message)

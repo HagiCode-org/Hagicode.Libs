@@ -48,7 +48,6 @@ public static class ServiceCollectionExtensions
         {
             var registry = new CliProviderPoolConfigurationRegistry();
             registry.Register("codebuddy", new CliPoolSettings { MaxActiveSessions = 50, IdleTimeout = TimeSpan.FromMinutes(10) });
-            registry.Register("copilot", new CliPoolSettings { MaxActiveSessions = 50, IdleTimeout = TimeSpan.FromMinutes(10) });
             registry.Register("codex", new CliPoolSettings { MaxActiveSessions = 50, IdleTimeout = TimeSpan.FromMinutes(10) });
             registry.Register("deepagents", new CliPoolSettings { MaxActiveSessions = 50, IdleTimeout = TimeSpan.FromMinutes(10) });
             registry.Register("gemini", new CliPoolSettings { MaxActiveSessions = 50, IdleTimeout = TimeSpan.FromMinutes(10) });
