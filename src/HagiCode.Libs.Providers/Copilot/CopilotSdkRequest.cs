@@ -10,6 +10,7 @@ internal sealed record CopilotSdkRequest(
     string? GitHubToken,
     bool UseLoggedInUser,
     TimeSpan Timeout,
+    TimeSpan IdleTimeout,
     TimeSpan StartupTimeout,
     IReadOnlyList<string> CliArgs,
     IReadOnlyDictionary<string, string?> EnvironmentVariables);

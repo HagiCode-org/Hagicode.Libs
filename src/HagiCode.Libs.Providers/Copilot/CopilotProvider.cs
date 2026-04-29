@@ -162,6 +162,7 @@ public class CopilotProvider : ICliProvider<CopilotOptions>
             GitHubToken: options.AuthSource == CopilotAuthSource.GitHubToken ? options.GitHubToken : null,
             UseLoggedInUser: options.AuthSource != CopilotAuthSource.GitHubToken,
             Timeout: options.Timeout,
+            IdleTimeout: options.IdleTimeout,
             StartupTimeout: options.StartupTimeout,
             CliArgs: cliArgResult.CliArgs,
             EnvironmentVariables: BuildEnvironmentVariables(options, runtimeEnvironment));
@@ -224,6 +225,11 @@ public class CopilotProvider : ICliProvider<CopilotOptions>
         if (options.StartupTimeout <= TimeSpan.Zero)
         {
             throw new InvalidOperationException("CopilotOptions.StartupTimeout must be greater than zero.");
+        }
+
+        if (options.IdleTimeout <= TimeSpan.Zero)
+        {
+            throw new InvalidOperationException("CopilotOptions.IdleTimeout must be greater than zero.");
         }
     }
 
@@ -310,7 +316,15 @@ public class CopilotProvider : ICliProvider<CopilotOptions>
                 {
                     ["type"] = "reasoning",
                     ["session_id"] = sessionId,
-                    ["text"] = eventData.Content
+                    ["text"] = eventData.Content,
+                    ["reasoning_id"] = eventData.ReasoningId
+                }),
+            CopilotSdkStreamEventType.StreamingDelta when eventData.TotalResponseSizeBytes.HasValue =>
+                CreateMessage("streaming.delta", new Dictionary<string, object?>
+                {
+                    ["type"] = "streaming.delta",
+                    ["session_id"] = sessionId,
+                    ["total_response_size_bytes"] = eventData.TotalResponseSizeBytes.Value
                 }),
             CopilotSdkStreamEventType.ToolExecutionStart =>
                 CreateMessage("tool.started", new Dictionary<string, object?>

@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using GitHub.Copilot.SDK;
 using HagiCode.Libs.Core.Acp;
 using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Environment;
@@ -30,6 +31,7 @@ public sealed class CopilotProviderTests
                 WorkingDirectory = "/tmp/project",
                 SessionId = "copilot-session-123",
                 Timeout = TimeSpan.FromMinutes(3),
+                IdleTimeout = TimeSpan.FromSeconds(45),
                 StartupTimeout = TimeSpan.FromSeconds(15),
                 AuthSource = CopilotAuthSource.GitHubToken,
                 GitHubToken = "ghu_test",
@@ -59,6 +61,7 @@ public sealed class CopilotProviderTests
         request.WorkingDirectory.ShouldBe("/tmp/project");
         request.SessionId.ShouldBe("copilot-session-123");
         request.Timeout.ShouldBe(TimeSpan.FromMinutes(3));
+        request.IdleTimeout.ShouldBe(TimeSpan.FromSeconds(45));
         request.StartupTimeout.ShouldBe(TimeSpan.FromSeconds(15));
         request.GitHubToken.ShouldBe("ghu_test");
         request.UseLoggedInUser.ShouldBeFalse();
@@ -109,7 +112,8 @@ public sealed class CopilotProviderTests
         var provider = CreateProvider(gateway: new StubCopilotSdkGateway(
         [
             new CopilotSdkStreamEvent(CopilotSdkStreamEventType.TextDelta, Content: "pong"),
-            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.ReasoningDelta, Content: "thinking"),
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.ReasoningDelta, Content: "thinking", ReasoningId: "reasoning-1"),
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.StreamingDelta, TotalResponseSizeBytes: 2048d),
             new CopilotSdkStreamEvent(CopilotSdkStreamEventType.ToolExecutionStart, ToolName: "grep", ToolCallId: "tool-1"),
             new CopilotSdkStreamEvent(CopilotSdkStreamEventType.ToolExecutionEnd, Content: "completed successfully", ToolName: "grep", ToolCallId: "tool-1"),
             new CopilotSdkStreamEvent(CopilotSdkStreamEventType.Completed)
@@ -132,6 +136,7 @@ public sealed class CopilotProviderTests
             "session.started",
             "assistant",
             "reasoning",
+            "streaming.delta",
             "tool.started",
             "tool.completed",
             "result"
@@ -142,11 +147,71 @@ public sealed class CopilotProviderTests
         messages[2].Content.GetProperty("is_authoritative_snapshot").GetBoolean().ShouldBeFalse();
         messages[2].Content.GetProperty("session_id").GetString().ShouldBe("copilot-session-1");
         messages[3].Content.GetProperty("text").GetString().ShouldBe("thinking");
-        messages[4].Content.GetProperty("tool_name").GetString().ShouldBe("grep");
-        messages[4].Content.GetProperty("session_id").GetString().ShouldBe("copilot-session-1");
-        messages[5].Content.GetProperty("failed").GetBoolean().ShouldBeFalse();
-        messages[6].Content.GetProperty("status").GetString().ShouldBe("completed");
-        messages[6].Content.GetProperty("session_id").GetString().ShouldBe("copilot-session-1");
+        messages[3].Content.GetProperty("reasoning_id").GetString().ShouldBe("reasoning-1");
+        messages[4].Content.GetProperty("total_response_size_bytes").GetDouble().ShouldBe(2048d);
+        messages[5].Content.GetProperty("tool_name").GetString().ShouldBe("grep");
+        messages[5].Content.GetProperty("session_id").GetString().ShouldBe("copilot-session-1");
+        messages[6].Content.GetProperty("failed").GetBoolean().ShouldBeFalse();
+        messages[7].Content.GetProperty("status").GetString().ShouldBe("completed");
+        messages[7].Content.GetProperty("session_id").GetString().ShouldBe("copilot-session-1");
+    }
+
+    [Fact]
+    public void DispatchSessionEvent_normalizes_reasoning_delta_before_raw_fallback()
+    {
+        var result = GitHubCopilotSdkGateway.DispatchSessionEvent(
+            new AssistantReasoningDeltaEvent
+            {
+                Data = new AssistantReasoningDeltaData
+                {
+                    DeltaContent = "think",
+                    ReasoningId = "reasoning-42"
+                }
+            },
+            sawDelta: false);
+
+        result.Events.ShouldHaveSingleItem();
+        result.Events[0].Type.ShouldBe(CopilotSdkStreamEventType.ReasoningDelta);
+        result.Events[0].Content.ShouldBe("think");
+        result.Events[0].ReasoningId.ShouldBe("reasoning-42");
+        result.Events[0].Type.ShouldNotBe(CopilotSdkStreamEventType.RawEvent);
+    }
+
+    [Fact]
+    public void DispatchSessionEvent_normalizes_streaming_delta_before_raw_fallback()
+    {
+        var result = GitHubCopilotSdkGateway.DispatchSessionEvent(
+            new AssistantStreamingDeltaEvent
+            {
+                Data = new AssistantStreamingDeltaData
+                {
+                    TotalResponseSizeBytes = 4096d
+                }
+            },
+            sawDelta: false);
+
+        result.Events.ShouldHaveSingleItem();
+        result.Events[0].Type.ShouldBe(CopilotSdkStreamEventType.StreamingDelta);
+        result.Events[0].TotalResponseSizeBytes.ShouldBe(4096d);
+        result.Events[0].Type.ShouldNotBe(CopilotSdkStreamEventType.RawEvent);
+    }
+
+    [Fact]
+    public void DispatchSessionEvent_keeps_unknown_sdk_events_on_raw_fallback()
+    {
+        var result = GitHubCopilotSdkGateway.DispatchSessionEvent(
+            new AbortEvent
+            {
+                Data = new AbortData
+                {
+                    Reason = "user_cancelled"
+                }
+            },
+            sawDelta: false);
+
+        result.Events.ShouldHaveSingleItem();
+        result.Events[0].Type.ShouldBe(CopilotSdkStreamEventType.RawEvent);
+        result.Events[0].RawEventType.ShouldBe(nameof(AbortEvent));
     }
 
     [Fact]
@@ -197,6 +262,36 @@ public sealed class CopilotProviderTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_preserves_replayed_paragraph_snapshots_with_authoritative_contract_metadata()
+    {
+        const string paragraph = "## Impacted Repos\n\n- repos/hagicode-core";
+        const string transcript = $"Intro\n\n{paragraph}";
+        var provider = CreateProvider(gateway: new StubCopilotSdkGateway(
+        [
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.TextDelta, Content: transcript),
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.AssistantSnapshot, Content: paragraph),
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.AssistantSnapshot, Content: $"{transcript}\n\n## Fix Plan"),
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.Completed)
+        ]));
+        var messages = new List<CliMessage>();
+
+        await foreach (var message in provider.ExecuteAsync(new CopilotOptions(), "hello"))
+        {
+            messages.Add(message);
+        }
+
+        var assistantMessages = messages.Where(static message => message.Type == "assistant").ToArray();
+        assistantMessages.Length.ShouldBe(3);
+        assistantMessages[0].Content.GetProperty("text").GetString().ShouldBe(transcript);
+        assistantMessages[0].Content.GetProperty("is_authoritative_snapshot").GetBoolean().ShouldBeFalse();
+        assistantMessages[1].Content.GetProperty("text").GetString().ShouldBe(paragraph);
+        assistantMessages[1].Content.GetProperty("is_authoritative_snapshot").GetBoolean().ShouldBeTrue();
+        assistantMessages[2].Content.GetProperty("text").GetString().ShouldBe($"{transcript}\n\n## Fix Plan");
+        assistantMessages[2].Content.GetProperty("is_authoritative_snapshot").GetBoolean().ShouldBeTrue();
+        assistantMessages.All(static message => message.Content.GetProperty("session_id").GetString() == "copilot-session-1").ShouldBeTrue();
+    }
+
+    [Fact]
     public async Task ExecuteAsync_preserves_blank_lines_and_markdown_leading_snapshots()
     {
         var provider = CreateProvider(gateway: new StubCopilotSdkGateway(
@@ -228,6 +323,18 @@ public sealed class CopilotProviderTests
 
         message.ShouldContain("[startup_timeout]");
         message.ShouldContain("timed out after 20 seconds");
+    }
+
+    [Fact]
+    public void NormalizeFailureMessage_formats_idle_timeout_with_actionable_marker()
+    {
+        var message = GitHubCopilotSdkGateway.NormalizeFailureMessage(
+            rawMessage: null,
+            idleTimedOut: true,
+            idleTimeout: TimeSpan.FromMinutes(5));
+
+        message.ShouldContain("[idle_timeout]");
+        message.ShouldContain("timed out after 300 seconds");
     }
 
     [Fact]

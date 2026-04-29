@@ -10,7 +10,12 @@ public sealed record CopilotOptions
     /// <summary>
     /// Default request timeout for Copilot prompt execution.
     /// </summary>
-    public static readonly TimeSpan DefaultTimeout = TimeSpan.FromHours(2);
+    public static readonly TimeSpan DefaultTimeout = TimeSpan.FromMinutes(30);
+
+    /// <summary>
+    /// Default idle timeout before a stalled Copilot turn is aborted.
+    /// </summary>
+    public static readonly TimeSpan DefaultIdleTimeout = TimeSpan.FromMinutes(5);
 
     /// <summary>
     /// Default startup timeout used while booting the Copilot SDK session.
@@ -46,6 +51,11 @@ public sealed record CopilotOptions
     /// Gets or sets the request timeout used for one Copilot prompt.
     /// </summary>
     public TimeSpan Timeout { get; init; } = DefaultTimeout;
+
+    /// <summary>
+    /// Gets or sets the idle timeout used for one Copilot prompt when no session events arrive.
+    /// </summary>
+    public TimeSpan IdleTimeout { get; init; } = DefaultIdleTimeout;
 
     /// <summary>
     /// Gets or sets the startup timeout used while creating the SDK session.

@@ -9,10 +9,11 @@ internal enum CopilotSdkStreamEventType
     Error = 4,
     Completed = 5,
     ReasoningDelta = 6,
-    ToolExecutionStart = 7,
-    ToolExecutionEnd = 8,
-    RawEvent = 9,
-    AssistantSnapshot = 10
+    StreamingDelta = 7,
+    ToolExecutionStart = 8,
+    ToolExecutionEnd = 9,
+    RawEvent = 10,
+    AssistantSnapshot = 11
 }
 
 internal sealed record CopilotSdkStreamEvent(
@@ -23,4 +24,6 @@ internal sealed record CopilotSdkStreamEvent(
     string? ErrorMessage = null,
     string? ToolName = null,
     string? ToolCallId = null,
-    string? RawEventType = null);
+    string? RawEventType = null,
+    string? ReasoningId = null,
+    double? TotalResponseSizeBytes = null);

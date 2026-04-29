@@ -8,6 +8,7 @@ namespace HagiCode.Libs.Providers.Copilot;
 internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
 {
     private static readonly SemaphoreSlim EnvironmentMutationLock = new(1, 1);
+    private static readonly TimeSpan IdleCancellationGracePeriod = TimeSpan.FromSeconds(10);
 
     public async Task<ICopilotSdkRuntime> CreateRuntimeAsync(
         CopilotSdkRequest request,
@@ -98,12 +99,20 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
     internal static string NormalizeFailureMessage(
         string? rawMessage,
         bool startupTimedOut = false,
-        TimeSpan? startupTimeout = null)
+        TimeSpan? startupTimeout = null,
+        bool idleTimedOut = false,
+        TimeSpan? idleTimeout = null)
     {
         if (startupTimedOut)
         {
             var timeout = startupTimeout ?? TimeSpan.Zero;
             return $"[startup_timeout] Copilot CLI startup timed out after {timeout.TotalSeconds:0} seconds.";
+        }
+
+        if (idleTimedOut)
+        {
+            var timeout = idleTimeout ?? TimeSpan.Zero;
+            return $"[idle_timeout] Copilot CLI stream timed out after {timeout.TotalSeconds:0} seconds without any session events.";
         }
 
         if (!string.IsNullOrWhiteSpace(rawMessage) && CopilotCliCompatibility.TryExtractRejectedOption(rawMessage) is not null)
@@ -162,7 +171,29 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
                 events.Add(new CopilotSdkStreamEvent(
                     CopilotSdkStreamEventType.ReasoningDelta,
                     SessionId: sessionId,
-                    Content: reasoningEvent.Data.Content));
+                    Content: reasoningEvent.Data.Content,
+                    ReasoningId: reasoningEvent.Data.ReasoningId));
+                break;
+
+            case AssistantReasoningEvent:
+                break;
+
+            case AssistantReasoningDeltaEvent reasoningDeltaEvent when !string.IsNullOrEmpty(reasoningDeltaEvent.Data.DeltaContent):
+                events.Add(new CopilotSdkStreamEvent(
+                    CopilotSdkStreamEventType.ReasoningDelta,
+                    SessionId: sessionId,
+                    Content: reasoningDeltaEvent.Data.DeltaContent,
+                    ReasoningId: reasoningDeltaEvent.Data.ReasoningId));
+                break;
+
+            case AssistantReasoningDeltaEvent:
+                break;
+
+            case AssistantStreamingDeltaEvent streamingDeltaEvent:
+                events.Add(new CopilotSdkStreamEvent(
+                    CopilotSdkStreamEventType.StreamingDelta,
+                    SessionId: sessionId,
+                    TotalResponseSizeBytes: streamingDeltaEvent.Data.TotalResponseSizeBytes));
                 break;
 
             case ToolExecutionStartEvent toolStartEvent:
@@ -334,6 +365,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
         CopilotSdkStreamEvent lifecycleEvent) : ICopilotSdkRuntime
     {
         private bool _lifecycleEventSent;
+        private Task? _shutdownTask;
 
         public string SessionId => session.SessionId;
 
@@ -343,12 +375,37 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
         {
             await foreach (var eventData in StreamProducedEventsAsync(async (writer, streamCancellationToken) =>
             {
-                var terminalEventWritten = false;
+                var terminalEventWritten = 0;
                 var sawDelta = false;
+                var lastEventUtcTicks = DateTimeOffset.UtcNow.UtcTicks;
+                using var requestCancellationTokenSource =
+                    CancellationTokenSource.CreateLinkedTokenSource(streamCancellationToken);
+                using var idleWatchdogCancellationTokenSource =
+                    CancellationTokenSource.CreateLinkedTokenSource(streamCancellationToken);
+                var forcedShutdownSignal = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+                void RecordProgress()
+                {
+                    Interlocked.Exchange(ref lastEventUtcTicks, DateTimeOffset.UtcNow.UtcTicks);
+                }
+
+                bool TryWriteTerminal(CopilotSdkStreamEvent terminalEvent)
+                {
+                    if (Interlocked.Exchange(ref terminalEventWritten, 1) != 0)
+                    {
+                        return false;
+                    }
+
+                    RecordProgress();
+                    writer.TryWrite(terminalEvent);
+                    return true;
+                }
+
                 if (!_lifecycleEventSent)
                 {
                     _lifecycleEventSent = true;
                     writer.TryWrite(lifecycleEvent);
+                    RecordProgress();
                 }
 
                 using var subscription = session.On(evt =>
@@ -368,38 +425,77 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
 
                         if (normalizedEvent.Type == CopilotSdkStreamEventType.Error)
                         {
-                            terminalEventWritten = true;
+                            Interlocked.Exchange(ref terminalEventWritten, 1);
                         }
 
+                        RecordProgress();
                         writer.TryWrite(normalizedEvent);
                     }
                 });
 
+                var sendTask = session.SendAndWaitAsync(
+                    new MessageOptions { Prompt = request.Prompt },
+                    request.Timeout,
+                    requestCancellationTokenSource.Token);
+
+                var idleWatchdogTask = StartIdleWatchdogAsync(
+                    request,
+                    () => new DateTimeOffset(Interlocked.Read(ref lastEventUtcTicks), TimeSpan.Zero),
+                    requestCancellationTokenSource,
+                    sendTask,
+                    forcedShutdownSignal,
+                    TryWriteTerminal,
+                    idleWatchdogCancellationTokenSource.Token);
+
                 try
                 {
-                    await session.SendAndWaitAsync(
-                        new MessageOptions { Prompt = request.Prompt },
-                        request.Timeout,
-                        streamCancellationToken);
+                    var completedTask = await Task.WhenAny(sendTask, forcedShutdownSignal.Task);
+                    if (ReferenceEquals(completedTask, forcedShutdownSignal.Task))
+                    {
+                        return;
+                    }
+
+                    await sendTask;
+                }
+                catch (OperationCanceledException) when (streamCancellationToken.IsCancellationRequested)
+                {
+                    return;
+                }
+                catch (OperationCanceledException) when (requestCancellationTokenSource.IsCancellationRequested)
+                {
+                    TryWriteTerminal(new CopilotSdkStreamEvent(
+                        CopilotSdkStreamEventType.Error,
+                        SessionId: SessionId,
+                        ErrorMessage: NormalizeFailureMessage(
+                            rawMessage: null,
+                            idleTimedOut: true,
+                            idleTimeout: request.IdleTimeout)));
                 }
                 catch (Exception ex)
                 {
-                    if (!terminalEventWritten)
-                    {
-                        terminalEventWritten = true;
-                        writer.TryWrite(new CopilotSdkStreamEvent(
-                            CopilotSdkStreamEventType.Error,
-                            SessionId: SessionId,
-                            ErrorMessage: NormalizeFailureMessage(ex.Message)));
-                    }
+                    TryWriteTerminal(new CopilotSdkStreamEvent(
+                        CopilotSdkStreamEventType.Error,
+                        SessionId: SessionId,
+                        ErrorMessage: NormalizeFailureMessage(ex.Message)));
                 }
                 finally
                 {
-                    if (!terminalEventWritten)
+                    requestCancellationTokenSource.Cancel();
+                    idleWatchdogCancellationTokenSource.Cancel();
+
+                    try
+                    {
+                        await idleWatchdogTask;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                    }
+
+                    if (Interlocked.CompareExchange(ref terminalEventWritten, 0, 0) == 0)
                     {
                         // Tool-call turns must always terminate so upstream Orleans and UI layers
                         // do not remain stuck in a running state after the SDK returns.
-                        writer.TryWrite(new CopilotSdkStreamEvent(
+                        TryWriteTerminal(new CopilotSdkStreamEvent(
                             CopilotSdkStreamEventType.Completed,
                             SessionId: SessionId));
                     }
@@ -412,9 +508,103 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
 
         public async ValueTask DisposeAsync()
         {
-            await session.DisposeAsync();
-            await client.DisposeAsync();
-            await environmentScope.DisposeAsync();
+            await ShutdownTransportAsync();
+        }
+
+        private Task ShutdownTransportAsync()
+        {
+            var existing = Volatile.Read(ref _shutdownTask);
+            if (existing != null)
+            {
+                return existing;
+            }
+
+            var created = ShutdownTransportCoreAsync();
+            var prior = Interlocked.CompareExchange(ref _shutdownTask, created, null);
+            return prior ?? created;
+        }
+
+        private async Task ShutdownTransportCoreAsync()
+        {
+            try
+            {
+                await session.DisposeAsync();
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                await client.DisposeAsync();
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                await environmentScope.DisposeAsync();
+            }
+            catch
+            {
+            }
+        }
+
+        private async Task StartIdleWatchdogAsync(
+            CopilotSdkRequest request,
+            Func<DateTimeOffset> getLastEventUtc,
+            CancellationTokenSource requestCancellationTokenSource,
+            Task sendTask,
+            TaskCompletionSource<bool> forcedShutdownSignal,
+            Func<CopilotSdkStreamEvent, bool> tryWriteTerminal,
+            CancellationToken cancellationToken)
+        {
+            using var watchdogTimer = new PeriodicTimer(TimeSpan.FromSeconds(5));
+
+            try
+            {
+                while (await watchdogTimer.WaitForNextTickAsync(cancellationToken))
+                {
+                    if (sendTask.IsCompleted ||
+                        requestCancellationTokenSource.IsCancellationRequested ||
+                        cancellationToken.IsCancellationRequested)
+                    {
+                        return;
+                    }
+
+                    var idleFor = DateTimeOffset.UtcNow - getLastEventUtc();
+                    if (idleFor < request.IdleTimeout)
+                    {
+                        continue;
+                    }
+
+                    tryWriteTerminal(new CopilotSdkStreamEvent(
+                        CopilotSdkStreamEventType.Error,
+                        SessionId: SessionId,
+                        ErrorMessage: NormalizeFailureMessage(
+                            rawMessage: null,
+                            idleTimedOut: true,
+                            idleTimeout: request.IdleTimeout)));
+
+                    requestCancellationTokenSource.Cancel();
+
+                    var graceCompletedTask = await Task.WhenAny(
+                        sendTask,
+                        Task.Delay(IdleCancellationGracePeriod, cancellationToken));
+
+                    if (!ReferenceEquals(graceCompletedTask, sendTask))
+                    {
+                        await ShutdownTransportAsync();
+                        forcedShutdownSignal.TrySetResult(true);
+                    }
+
+                    return;
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+            }
         }
     }
 
