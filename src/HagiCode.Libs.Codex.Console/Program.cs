@@ -10,7 +10,7 @@ public static class Program
         var definition = CodexConsoleDefinition.Instance;
 
         await using var services = ConsoleHost.BuildServiceProvider();
-        var provider = ConsoleHost.GetProvider<CodexOptions>(services);
+        var provider = ConsoleHost.GetProvider(services);
         var formatter = new ProviderConsoleOutputFormatter();
         var runner = new CodexConsoleRunner(definition, provider, formatter);
 

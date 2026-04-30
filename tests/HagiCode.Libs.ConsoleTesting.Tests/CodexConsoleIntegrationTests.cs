@@ -2,9 +2,12 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using HagiCode.Libs.Codex.Console;
 using HagiCode.Libs.ConsoleTesting;
-using HagiCode.Libs.Core.Transport;
 using HagiCode.Libs.Providers;
 using HagiCode.Libs.Providers.Codex;
+using ManagedCode.CodexSharpSDK.Client;
+using ManagedCode.CodexSharpSDK.Execution;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Shouldly;
 
 namespace HagiCode.Libs.ConsoleTesting.Tests;
@@ -123,12 +126,12 @@ public sealed class CodexConsoleIntegrationTests
 
             exitCode.ShouldBe(0);
             provider.ReceivedOptions.Count.ShouldBe(5);
-            provider.ReceivedOptions[0].Model.ShouldBe("gpt-5-codex");
-            provider.ReceivedOptions[0].SandboxMode.ShouldBe("workspace-write");
-            provider.ReceivedOptions[0].ApprovalPolicy.ShouldBe("never");
+            provider.ReceivedOptions[0].ThreadOptions.Model.ShouldBe("gpt-5-codex");
+            provider.ReceivedOptions[0].ThreadOptions.SandboxMode.ShouldBe(SandboxMode.WorkspaceWrite);
+            provider.ReceivedOptions[0].ThreadOptions.ApprovalPolicy.ShouldBe(ApprovalMode.Never);
             provider.ReceivedOptions[3].ThreadId.ShouldNotBeNullOrWhiteSpace();
-            provider.ReceivedOptions[4].WorkingDirectory.ShouldBe(repositoryPath);
-            provider.ReceivedOptions[4].AddDirectories.ShouldBe([repositoryPath]);
+            provider.ReceivedOptions[4].ThreadOptions.WorkingDirectory.ShouldBe(repositoryPath);
+            provider.ReceivedOptions[4].ThreadOptions.AdditionalDirectories.ShouldBe([repositoryPath]);
             output.ToString().ShouldContain("[PASS] codex / Repository Analysis");
         }
         finally
@@ -167,7 +170,7 @@ public sealed class CodexConsoleIntegrationTests
                || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
     }
 
-    private sealed class FakeCodexProvider : ICliProvider<CodexOptions>
+    private sealed class FakeCodexProvider : ICodexProvider
     {
         private readonly Dictionary<string, string> _threadSecrets = [];
 
@@ -175,7 +178,7 @@ public sealed class CodexConsoleIntegrationTests
 
         public bool IsAvailable => true;
 
-        public List<CodexOptions> ReceivedOptions { get; } = [];
+        public List<CodexSessionOptions> ReceivedOptions { get; } = [];
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
@@ -189,50 +192,49 @@ public sealed class CodexConsoleIntegrationTests
             });
         }
 
-        public async IAsyncEnumerable<CliMessage> ExecuteAsync(
-            CodexOptions options,
-            string prompt,
-            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        public Task<CodexSessionHandle> CreateSessionAsync(CodexSessionOptions options, CancellationToken cancellationToken = default)
         {
             ReceivedOptions.Add(options);
-            var threadId = options.ThreadId ?? $"thread-{ReceivedOptions.Count}";
-            var response = BuildResponse(prompt, options.WorkingDirectory, threadId);
+            return Task.FromResult(CodexSessionFactory.Create(options, invocation => BuildLines(options, invocation)));
+        }
 
-            if (options.ThreadId is null)
+        private IReadOnlyList<string> BuildLines(CodexSessionOptions options, CodexProcessInvocation invocation)
+        {
+            var threadId = options.ThreadId ?? $"thread-{ReceivedOptions.Count}";
+            var response = BuildResponse(invocation.Input, options.ThreadOptions.WorkingDirectory, threadId);
+            var lines = new List<string>();
+
+            if (string.IsNullOrWhiteSpace(options.ThreadId))
             {
-                yield return new CliMessage(
-                    "thread.started",
-                    JsonSerializer.SerializeToElement(new
-                    {
-                        type = "thread.started",
-                        thread_id = threadId
-                    }));
+                lines.Add(CreateEvent(new
+                {
+                    type = "thread.started",
+                    thread_id = threadId
+                }));
             }
 
-            yield return new CliMessage(
-                "item.completed",
-                JsonSerializer.SerializeToElement(new
+            lines.Add(CreateEvent(new
+            {
+                type = "item.completed",
+                item = new
                 {
-                    type = "item.completed",
-                    item = new
-                    {
-                        type = "agent_message",
-                        text = response
-                    }
-                }));
-            yield return new CliMessage(
-                "turn.completed",
-                JsonSerializer.SerializeToElement(new
+                    id = "msg-1",
+                    type = "agent_message",
+                    text = response
+                }
+            }));
+            lines.Add(CreateEvent(new
+            {
+                type = "turn.completed",
+                usage = new
                 {
-                    type = "turn.completed",
-                    usage = new
-                    {
-                        input_tokens = 1,
-                        cached_input_tokens = 0,
-                        output_tokens = 1
-                    }
-                }));
-            await Task.Yield();
+                    input_tokens = 1,
+                    cached_input_tokens = 0,
+                    output_tokens = 1
+                }
+            }));
+
+            return lines;
         }
 
         private string BuildResponse(string prompt, string? workingDirectory, string threadId)
@@ -288,5 +290,58 @@ public sealed class CodexConsoleIntegrationTests
             var value = stopIndex >= 0 ? secretSegment[..stopIndex] : secretSegment;
             return value.Trim();
         }
+    }
+
+    private static class CodexSessionFactory
+    {
+        public static CodexSessionHandle Create(
+            CodexSessionOptions options,
+            Func<CodexProcessInvocation, IReadOnlyList<string>> buildLines)
+        {
+            var sdkOptions = new ManagedCode.CodexSharpSDK.Configuration.CodexOptions
+            {
+                CodexExecutablePath = options.ExecutablePath ?? "codex",
+                ApiKey = options.ApiKey,
+                BaseUrl = options.BaseUrl,
+                Config = options.Config,
+                EnvironmentVariables = options.EnvironmentVariables
+                    .Where(static pair => !string.IsNullOrWhiteSpace(pair.Key) && pair.Value is not null)
+                    .ToDictionary(static pair => pair.Key, static pair => pair.Value!, StringComparer.Ordinal),
+                Logger = NullLogger.Instance
+            };
+
+            var client = new CodexClient(sdkOptions);
+            var exec = new CodexExec(
+                sdkOptions.CodexExecutablePath,
+                sdkOptions.EnvironmentVariables,
+                sdkOptions.Config,
+                new FakeCodexProcessRunner(buildLines),
+                NullLogger.Instance);
+            var thread = new CodexThread(exec, sdkOptions, options.ThreadOptions, options.ThreadId);
+            return new CodexSessionHandle(client, thread);
+        }
+    }
+
+    private sealed class FakeCodexProcessRunner(
+        Func<CodexProcessInvocation, IReadOnlyList<string>> buildLines) : ICodexProcessRunner
+    {
+        public async IAsyncEnumerable<string> RunAsync(
+            CodexProcessInvocation invocation,
+            ILogger logger,
+            [EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            foreach (var line in buildLines(invocation))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                yield return line;
+            }
+
+            await Task.Yield();
+        }
+    }
+
+    private static string CreateEvent(object payload)
+    {
+        return JsonSerializer.Serialize(payload);
     }
 }

@@ -1,39 +1,41 @@
-using System.Text.Json;
-using HagiCode.Libs.Providers;
 using HagiCode.Libs.Providers.Codex;
+using ManagedCode.CodexSharpSDK.Models;
 
 namespace HagiCode.Libs.Codex.Console.Scenarios;
 
 internal static class CodexScenarioMessageReader
 {
     public static async Task<CodexScenarioExecutionResult> ReadExecutionResultAsync(
-        ICliProvider<CodexOptions> provider,
-        CodexOptions options,
+        ICodexProvider provider,
+        CodexSessionOptions options,
         string prompt,
         CancellationToken cancellationToken = default)
     {
         var messages = new List<string>();
         string? threadId = null;
 
-        await foreach (var message in provider.ExecuteAsync(options, prompt, cancellationToken))
+        await using var session = await provider.CreateSessionAsync(options, cancellationToken);
+        var streamedResult = await session.Thread.RunStreamedAsync(prompt);
+
+        await foreach (var threadEvent in streamedResult.Events.WithCancellation(cancellationToken))
         {
-            if (TryGetFailureMessage(message.Content, out var failureMessage))
+            if (TryGetFailureMessage(threadEvent, out var failureMessage))
             {
                 throw new InvalidOperationException(failureMessage);
             }
 
-            if (TryGetThreadId(message.Content, out var resolvedThreadId))
+            if (threadEvent is ThreadStartedEvent startedEvent)
             {
-                threadId ??= resolvedThreadId;
+                threadId ??= startedEvent.ThreadId;
             }
 
-            if (TryExtractAssistantText(message.Content, out var assistantText) &&
+            if (TryExtractAssistantText(threadEvent, out var assistantText) &&
                 !string.IsNullOrWhiteSpace(assistantText))
             {
                 messages.Add(assistantText);
             }
 
-            if (string.Equals(message.Type, "turn.completed", StringComparison.OrdinalIgnoreCase))
+            if (threadEvent is TurnCompletedEvent)
             {
                 break;
             }
@@ -43,8 +45,8 @@ internal static class CodexScenarioMessageReader
     }
 
     public static async Task<IReadOnlyList<string>> ReadAssistantMessagesAsync(
-        ICliProvider<CodexOptions> provider,
-        CodexOptions options,
+        ICodexProvider provider,
+        CodexSessionOptions options,
         string prompt,
         CancellationToken cancellationToken = default)
     {
@@ -52,104 +54,28 @@ internal static class CodexScenarioMessageReader
         return result.Messages;
     }
 
-    private static bool TryExtractAssistantText(JsonElement content, out string? text)
+    private static bool TryExtractAssistantText(ThreadEvent threadEvent, out string? text)
     {
-        text = null;
-
-        if (content.ValueKind != JsonValueKind.Object)
+        text = threadEvent switch
         {
-            return false;
-        }
+            ItemCompletedEvent { Item: AgentMessageItem agentMessageItem } => agentMessageItem.Text,
+            ItemUpdatedEvent { Item: AgentMessageItem agentMessageItem } => agentMessageItem.Text,
+            _ => null
+        };
 
-        if (TryGetAgentMessageText(content, out text))
-        {
-            return true;
-        }
-
-        if (!content.TryGetProperty("item", out var itemElement) || itemElement.ValueKind != JsonValueKind.Object)
-        {
-            return false;
-        }
-
-        return TryGetAgentMessageText(itemElement, out text);
-    }
-
-    private static bool TryGetAgentMessageText(JsonElement element, out string? text)
-    {
-        text = null;
-
-        if (!element.TryGetProperty("type", out var typeElement) ||
-            typeElement.ValueKind != JsonValueKind.String ||
-            !string.Equals(typeElement.GetString(), "agent_message", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        if (!element.TryGetProperty("text", out var textElement) || textElement.ValueKind != JsonValueKind.String)
-        {
-            return false;
-        }
-
-        text = textElement.GetString();
         return !string.IsNullOrWhiteSpace(text);
     }
 
-    private static bool TryGetFailureMessage(JsonElement content, out string? message)
+    private static bool TryGetFailureMessage(ThreadEvent threadEvent, out string? message)
     {
-        message = null;
-        if (content.ValueKind != JsonValueKind.Object)
+        message = threadEvent switch
         {
-            return false;
-        }
+            TurnFailedEvent failedEvent => failedEvent.Error.Message,
+            ThreadErrorEvent errorEvent => errorEvent.Message,
+            _ => null
+        };
 
-        if (content.TryGetProperty("type", out var typeElement) &&
-            typeElement.ValueKind == JsonValueKind.String &&
-            string.Equals(typeElement.GetString(), "turn.failed", StringComparison.OrdinalIgnoreCase) &&
-            content.TryGetProperty("error", out var errorElement) &&
-            errorElement.ValueKind == JsonValueKind.Object &&
-            errorElement.TryGetProperty("message", out var messageElement) &&
-            messageElement.ValueKind == JsonValueKind.String)
-        {
-            message = messageElement.GetString();
-            return !string.IsNullOrWhiteSpace(message);
-        }
-
-        if (content.TryGetProperty("type", out typeElement) &&
-            typeElement.ValueKind == JsonValueKind.String &&
-            string.Equals(typeElement.GetString(), "error", StringComparison.OrdinalIgnoreCase) &&
-            content.TryGetProperty("message", out var directMessageElement) &&
-            directMessageElement.ValueKind == JsonValueKind.String)
-        {
-            message = directMessageElement.GetString();
-            return !string.IsNullOrWhiteSpace(message);
-        }
-
-        return false;
-    }
-
-    private static bool TryGetThreadId(JsonElement content, out string? threadId)
-    {
-        threadId = null;
-        if (content.ValueKind != JsonValueKind.Object)
-        {
-            return false;
-        }
-
-        if (!content.TryGetProperty("type", out var typeElement) ||
-            typeElement.ValueKind != JsonValueKind.String ||
-            !string.Equals(typeElement.GetString(), "thread.started", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        if (!content.TryGetProperty("thread_id", out var threadIdElement) ||
-            threadIdElement.ValueKind != JsonValueKind.String)
-        {
-            return false;
-        }
-
-        threadId = threadIdElement.GetString();
-        return !string.IsNullOrWhiteSpace(threadId);
+        return !string.IsNullOrWhiteSpace(message);
     }
 }
 

@@ -1,23 +1,22 @@
 using HagiCode.Libs.ConsoleTesting;
-using HagiCode.Libs.Providers;
 using HagiCode.Libs.Providers.Codex;
 
 namespace HagiCode.Libs.Codex.Console.Scenarios;
 
 public static class SimplePromptScenario
 {
-    public static ProviderConsoleScenario<ICliProvider<CodexOptions>> Create(CodexConsoleExecutionOptions executionOptions)
+    public static ProviderConsoleScenario<ICodexProvider> Create(CodexConsoleExecutionOptions executionOptions)
     {
         ArgumentNullException.ThrowIfNull(executionOptions);
 
-        return new ProviderConsoleScenario<ICliProvider<CodexOptions>>(
+        return new ProviderConsoleScenario<ICodexProvider>(
             "Simple Prompt",
             "Send a basic prompt and validate the expected pong response.",
             (provider, cancellationToken) => ExecuteAsync(provider, executionOptions, cancellationToken));
     }
 
     private static async Task<ProviderConsoleScenarioResult> ExecuteAsync(
-        ICliProvider<CodexOptions> provider,
+        ICodexProvider provider,
         CodexConsoleExecutionOptions executionOptions,
         CancellationToken cancellationToken)
     {

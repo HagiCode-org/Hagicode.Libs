@@ -1,12 +1,11 @@
 using HagiCode.Libs.ConsoleTesting;
-using HagiCode.Libs.Providers;
 using HagiCode.Libs.Providers.Codex;
 
 namespace HagiCode.Libs.Codex.Console.Scenarios;
 
 public static class RepositoryAnalysisScenario
 {
-    public static ProviderConsoleScenario<ICliProvider<CodexOptions>> Create(CodexConsoleExecutionOptions executionOptions)
+    public static ProviderConsoleScenario<ICodexProvider> Create(CodexConsoleExecutionOptions executionOptions)
     {
         ArgumentNullException.ThrowIfNull(executionOptions);
 
@@ -16,14 +15,14 @@ public static class RepositoryAnalysisScenario
             throw new ArgumentException("--repo requires a value.");
         }
 
-        return new ProviderConsoleScenario<ICliProvider<CodexOptions>>(
+        return new ProviderConsoleScenario<ICodexProvider>(
             "Repository Analysis",
             $"Analyze repository at {repositoryPath}",
             (provider, cancellationToken) => ExecuteAsync(provider, executionOptions, cancellationToken));
     }
 
     private static async Task<ProviderConsoleScenarioResult> ExecuteAsync(
-        ICliProvider<CodexOptions> provider,
+        ICodexProvider provider,
         CodexConsoleExecutionOptions executionOptions,
         CancellationToken cancellationToken)
     {
@@ -38,10 +37,14 @@ public static class RepositoryAnalysisScenario
                 ErrorMessage: $"Repository path does not exist: {repositoryPath}");
         }
 
-        var options = executionOptions.CreateBaseOptions() with
+        var baseOptions = executionOptions.CreateBaseOptions();
+        var options = baseOptions with
         {
-            WorkingDirectory = repositoryPath,
-            AddDirectories = [repositoryPath],
+            ThreadOptions = baseOptions.ThreadOptions with
+            {
+                WorkingDirectory = repositoryPath,
+                AdditionalDirectories = [repositoryPath],
+            }
         };
 
         var prompt = "Provide a brief architectural summary of this repository. " +

@@ -1,4 +1,5 @@
 using HagiCode.Libs.Providers.Codex;
+using ManagedCode.CodexSharpSDK.Client;
 
 namespace HagiCode.Libs.Codex.Console;
 
@@ -69,16 +70,19 @@ public sealed record CodexConsoleExecutionOptions(
         return new CodexConsoleExecutionOptions(apiKey, baseUrl, model, sandboxMode, approvalPolicy, repositoryPath);
     }
 
-    public CodexOptions CreateBaseOptions()
+    public CodexSessionOptions CreateBaseOptions()
     {
-        return new CodexOptions
+        return new CodexSessionOptions
         {
             ApiKey = ApiKey,
             BaseUrl = BaseUrl,
-            Model = Model,
-            SandboxMode = SandboxMode,
-            ApprovalPolicy = ApprovalPolicy,
-            SkipGitRepositoryCheck = true,
+            ThreadOptions = new ThreadOptions
+            {
+                Model = Model,
+                SandboxMode = ParseSandboxMode(SandboxMode),
+                ApprovalPolicy = ParseApprovalMode(ApprovalPolicy),
+                SkipGitRepoCheck = true,
+            }
         };
     }
 
@@ -107,5 +111,30 @@ public sealed record CodexConsoleExecutionOptions(
         {
             throw new ArgumentException($"Unsupported sandbox mode: {value}");
         }
+    }
+
+    private static ManagedCode.CodexSharpSDK.Client.SandboxMode? ParseSandboxMode(string? value)
+    {
+        return value switch
+        {
+            null => null,
+            "read-only" => ManagedCode.CodexSharpSDK.Client.SandboxMode.ReadOnly,
+            "workspace-write" => ManagedCode.CodexSharpSDK.Client.SandboxMode.WorkspaceWrite,
+            "danger-full-access" => ManagedCode.CodexSharpSDK.Client.SandboxMode.DangerFullAccess,
+            _ => throw new ArgumentException($"Unsupported sandbox mode: {value}")
+        };
+    }
+
+    private static ManagedCode.CodexSharpSDK.Client.ApprovalMode? ParseApprovalMode(string? value)
+    {
+        return value switch
+        {
+            null => null,
+            "never" => ManagedCode.CodexSharpSDK.Client.ApprovalMode.Never,
+            "on-request" => ManagedCode.CodexSharpSDK.Client.ApprovalMode.OnRequest,
+            "on-failure" => ManagedCode.CodexSharpSDK.Client.ApprovalMode.OnFailure,
+            "untrusted" => ManagedCode.CodexSharpSDK.Client.ApprovalMode.Untrusted,
+            _ => throw new ArgumentException($"Unsupported approval policy: {value}")
+        };
     }
 }

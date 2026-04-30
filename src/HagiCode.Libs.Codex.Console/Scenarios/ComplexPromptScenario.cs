@@ -1,5 +1,4 @@
 using HagiCode.Libs.ConsoleTesting;
-using HagiCode.Libs.Providers;
 using HagiCode.Libs.Providers.Codex;
 
 namespace HagiCode.Libs.Codex.Console.Scenarios;
@@ -8,18 +7,18 @@ public static class ComplexPromptScenario
 {
     private const int MinResponseLength = 40;
 
-    public static ProviderConsoleScenario<ICliProvider<CodexOptions>> Create(CodexConsoleExecutionOptions executionOptions)
+    public static ProviderConsoleScenario<ICodexProvider> Create(CodexConsoleExecutionOptions executionOptions)
     {
         ArgumentNullException.ThrowIfNull(executionOptions);
 
-        return new ProviderConsoleScenario<ICliProvider<CodexOptions>>(
+        return new ProviderConsoleScenario<ICodexProvider>(
             "Complex Prompt",
             "Validate a bounded multi-step analysis prompt.",
             (provider, cancellationToken) => ExecuteAsync(provider, executionOptions, cancellationToken));
     }
 
     private static async Task<ProviderConsoleScenarioResult> ExecuteAsync(
-        ICliProvider<CodexOptions> provider,
+        ICodexProvider provider,
         CodexConsoleExecutionOptions executionOptions,
         CancellationToken cancellationToken)
     {
