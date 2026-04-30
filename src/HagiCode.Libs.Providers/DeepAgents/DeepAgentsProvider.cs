@@ -6,7 +6,6 @@ using HagiCode.Libs.Core.Environment;
 using HagiCode.Libs.Core.Process;
 using HagiCode.Libs.Core.Transport;
 using HagiCode.Libs.Providers;
-using HagiCode.Libs.Providers.Pooling;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -32,8 +31,6 @@ public class DeepAgentsProvider : ICliProvider<DeepAgentsOptions>
     private readonly CliExecutableResolver _executableResolver;
     private readonly CliProcessManager _processManager;
     private readonly IRuntimeEnvironmentResolver? _runtimeEnvironmentResolver;
-    private readonly CliProviderPoolCoordinator _poolCoordinator;
-    private readonly CliProviderPoolConfigurationRegistry _poolConfiguration;
     private readonly DeepAgentsLaunchResolver _launchResolver;
     private readonly ILogger<DeepAgentsProvider> _logger;
 
@@ -44,15 +41,11 @@ public class DeepAgentsProvider : ICliProvider<DeepAgentsOptions>
         CliExecutableResolver executableResolver,
         CliProcessManager processManager,
         IRuntimeEnvironmentResolver? runtimeEnvironmentResolver = null,
-        CliProviderPoolCoordinator? poolCoordinator = null,
-        CliProviderPoolConfigurationRegistry? poolConfiguration = null,
         ILogger<DeepAgentsProvider>? logger = null)
     {
         _executableResolver = executableResolver ?? throw new ArgumentNullException(nameof(executableResolver));
         _processManager = processManager ?? throw new ArgumentNullException(nameof(processManager));
         _runtimeEnvironmentResolver = runtimeEnvironmentResolver;
-        _poolCoordinator = poolCoordinator ?? new CliProviderPoolCoordinator();
-        _poolConfiguration = poolConfiguration ?? new CliProviderPoolConfigurationRegistry();
         _launchResolver = new DeepAgentsLaunchResolver(_executableResolver);
         _logger = logger ?? NullLogger<DeepAgentsProvider>.Instance;
     }
@@ -78,79 +71,9 @@ public class DeepAgentsProvider : ICliProvider<DeepAgentsOptions>
             ?? throw new FileNotFoundException(
                 "Unable to locate a DeepAgents launcher. Set DeepAgentsOptions.ExecutablePath, install 'deepagents-cli', or ensure 'deepagents' or 'uvx' is available.");
 
-        var compatibilityFingerprint = CliPoolFingerprintBuilder.Build(
-            startContext.ExecutablePath,
-            workingDirectory,
-            startContext.Arguments,
-            startContext.EnvironmentVariables);
-        var poolSettings = ResolvePoolSettings(options);
-        if (!poolSettings.Enabled)
+        await foreach (var message in ExecuteOneShotAsync(options, prompt, workingDirectory, startContext, cancellationToken).ConfigureAwait(false))
         {
-            await foreach (var message in ExecuteOneShotAsync(options, prompt, workingDirectory, startContext, cancellationToken).ConfigureAwait(false))
-            {
-                yield return message;
-            }
-
-            yield break;
-        }
-
-        var logicalSessionKey = ResolveLogicalSessionKey(options.SessionId, compatibilityFingerprint, poolSettings);
-        var request = new CliAcpPoolRequest(Name, logicalSessionKey, compatibilityFingerprint, poolSettings);
-
-        await using var lease = await _poolCoordinator.AcquireAcpSessionAsync(
-            request,
-            ct => CreatePooledEntryAsync(options, workingDirectory, startContext, request, ct),
-            cancellationToken).ConfigureAwait(false);
-
-        var supportsSessionLoad = await SupportsSessionLoadAsync(lease.Entry.SessionClient, cancellationToken).ConfigureAwait(false);
-        if (lease.IsWarmLease)
-        {
-            if (supportsSessionLoad)
-            {
-                var normalizedHandle = await lease.Entry.SessionClient.StartSessionAsync(
-                    workingDirectory,
-                    lease.Entry.SessionId,
-                    model: null,
-                    cancellationToken).ConfigureAwait(false);
-                lease.Entry.RefreshSession(normalizedHandle, request.CompatibilityFingerprint);
-            }
-            else
-            {
-                lease.Entry.Touch();
-            }
-
-            await EnsureModeAsync(lease.Entry.SessionClient, lease.Entry.SessionId, options.ModeId, cancellationToken).ConfigureAwait(false);
-        }
-
-        var lifecycleHandle = lease.IsWarmLease
-            ? new AcpSessionHandle(lease.Entry.SessionId, true, default)
-            : lease.Entry.SessionHandle;
-        yield return DeepAgentsAcpMessageMapper.CreateSessionLifecycleMessage(lifecycleHandle);
-
-        var shouldEvictAnonymous = options.SessionId is null && !poolSettings.KeepAnonymousSessions;
-        var faulted = false;
-        await lease.Entry.ExecutionLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            await foreach (var message in StreamPromptAttemptAsync(
-                               lease.Entry.SessionClient,
-                               lease.Entry.SessionId,
-                               lease.IsWarmLease || lifecycleHandle.IsResumed,
-                               prompt,
-                               cancellationToken).ConfigureAwait(false))
-            {
-                if (string.Equals(message.Type, "terminal.failed", StringComparison.OrdinalIgnoreCase))
-                {
-                    faulted = true;
-                }
-
-                yield return message;
-            }
-        }
-        finally
-        {
-            lease.Entry.ExecutionLock.Release();
-            lease.IsFaulted = faulted || shouldEvictAnonymous;
+            yield return message;
         }
     }
 
@@ -208,7 +131,7 @@ public class DeepAgentsProvider : ICliProvider<DeepAgentsOptions>
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
-        await _poolCoordinator.DisposeAcpProviderAsync(Name).ConfigureAwait(false);
+        await ValueTask.CompletedTask.ConfigureAwait(false);
     }
 
     internal virtual IReadOnlyList<string> BuildCommandArguments(DeepAgentsOptions options)
@@ -259,66 +182,6 @@ public class DeepAgentsProvider : ICliProvider<DeepAgentsOptions>
     protected virtual IAcpTransport CreateAcpTransport(ProcessStartContext startContext)
     {
         return new SubprocessAcpTransport(_processManager, startContext);
-    }
-
-    private CliPoolSettings ResolvePoolSettings(DeepAgentsOptions options)
-    {
-        return CliPoolSettings.Merge(_poolConfiguration.GetSettings(Name), options.PoolSettings);
-    }
-
-    private static string? ResolveLogicalSessionKey(string? requestedSessionId, string compatibilityFingerprint, CliPoolSettings settings)
-    {
-        var normalizedSessionId = ArgumentValueNormalizer.NormalizeOptionalValue(requestedSessionId);
-        if (normalizedSessionId is not null)
-        {
-            _ = compatibilityFingerprint;
-            return normalizedSessionId;
-        }
-
-        return settings.KeepAnonymousSessions ? $"deepagents:{Guid.NewGuid():N}" : null;
-    }
-
-    private async Task<PooledAcpSessionEntry> CreatePooledEntryAsync(
-        DeepAgentsOptions options,
-        string workingDirectory,
-        ProcessStartContext startContext,
-        CliAcpPoolRequest request,
-        CancellationToken cancellationToken)
-    {
-        var sessionClient = CreateSessionClient(startContext);
-        try
-        {
-            using var startupCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            startupCts.CancelAfter(options.StartupTimeout ?? DefaultStartupTimeout);
-
-            await sessionClient.ConnectAsync(startupCts.Token).ConfigureAwait(false);
-            var initializeResult = await sessionClient.InitializeAsync(startupCts.Token).ConfigureAwait(false);
-            _ = initializeResult;
-
-            if (IsSessionResumeUnsupported(options, initializeResult))
-            {
-                throw new InvalidOperationException(CreateUnsupportedSessionResumeMessage());
-            }
-
-            var sessionHandle = await sessionClient.StartSessionAsync(
-                workingDirectory,
-                options.SessionId,
-                model: null,
-                startupCts.Token).ConfigureAwait(false);
-            await EnsureModeAsync(sessionClient, sessionHandle.SessionId, options.ModeId, startupCts.Token).ConfigureAwait(false);
-            return new PooledAcpSessionEntry(
-                Name,
-                sessionHandle.SessionId,
-                sessionClient,
-                request.CompatibilityFingerprint,
-                sessionHandle,
-                request.Settings);
-        }
-        catch
-        {
-            await sessionClient.DisposeAsync().ConfigureAwait(false);
-            throw;
-        }
     }
 
     private async IAsyncEnumerable<CliMessage> ExecuteOneShotAsync(
@@ -576,12 +439,6 @@ public class DeepAgentsProvider : ICliProvider<DeepAgentsOptions>
                !SupportsSessionLoad(initializeResult);
     }
 
-    private static async Task<bool> SupportsSessionLoadAsync(IAcpSessionClient sessionClient, CancellationToken cancellationToken)
-    {
-        var initializeResult = await sessionClient.InitializeAsync(cancellationToken).ConfigureAwait(false);
-        return SupportsSessionLoad(initializeResult);
-    }
-
     private static bool SupportsSessionLoad(JsonElement initializeResult)
     {
         if (initializeResult.ValueKind != JsonValueKind.Object)
@@ -606,7 +463,7 @@ public class DeepAgentsProvider : ICliProvider<DeepAgentsOptions>
 
     private static string CreateUnsupportedSessionResumeMessage()
     {
-        return "DeepAgents ACP does not advertise session/load support. Resume requests only work while the original ACP process stays warm in the shared pool; a cold restart cannot restore prior conversation state.";
+        return "DeepAgents ACP does not advertise session/load support. Resume requests require provider-native load support; when the runtime cold-starts, prior conversation state cannot be restored.";
     }
 
     private static async IAsyncEnumerable<CliMessage> StreamPromptMessagesAsync(

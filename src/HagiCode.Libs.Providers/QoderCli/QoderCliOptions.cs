@@ -1,6 +1,5 @@
 namespace HagiCode.Libs.Providers.QoderCli;
 
-using HagiCode.Libs.Core.Acp;
 using HagiCode.Libs.Providers;
 
 /// <summary>
@@ -49,9 +48,4 @@ public sealed record QoderCliOptions
     /// Tokens are boundary-trimmed individually, whitespace-only tokens are ignored, and permission-bypass flags are skipped because the provider always forces ACP sessions into yolo mode.
     /// </summary>
     public IReadOnlyList<string> ExtraArguments { get; init; } = [];
-
-    /// <summary>
-    /// Gets or sets provider-level pooling overrides.
-    /// </summary>
-    public CliPoolSettings? PoolSettings { get; init; }
 }

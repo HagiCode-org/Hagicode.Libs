@@ -158,7 +158,7 @@ public sealed class DeepAgentsProviderTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_reuses_pooled_session_when_workspace_and_arguments_match()
+    public async Task ExecuteAsync_creates_fresh_session_client_when_workspace_and_arguments_match()
     {
         var provider = CreateProvider();
 
@@ -184,10 +184,13 @@ public sealed class DeepAgentsProviderTests
         {
         }
 
-        provider.CreatedSessionClients.Count.ShouldBe(1);
+        provider.CreatedSessionClients.Count.ShouldBe(2);
         provider.CreatedSessionClients[0].ConnectCalls.ShouldBe(1);
-        provider.CreatedSessionClients[0].StartSessionCalls.ShouldBe(2);
-        provider.CreatedSessionClients[0].PromptCalls.ShouldBe(2);
+        provider.CreatedSessionClients[1].ConnectCalls.ShouldBe(1);
+        provider.CreatedSessionClients[0].StartSessionCalls.ShouldBe(1);
+        provider.CreatedSessionClients[1].StartSessionCalls.ShouldBe(1);
+        provider.CreatedSessionClients[0].PromptCalls.ShouldBe(1);
+        provider.CreatedSessionClients[1].PromptCalls.ShouldBe(1);
     }
 
     [Fact]
@@ -199,10 +202,6 @@ public sealed class DeepAgentsProviderTests
                            new DeepAgentsOptions
                            {
                                ModeId = "bypassPermissions",
-                               PoolSettings = new CliPoolSettings
-                               {
-                                   Enabled = false
-                               }
                            },
                            "hello"))
         {
@@ -213,7 +212,7 @@ public sealed class DeepAgentsProviderTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_reapplies_bypass_mode_when_reusing_warm_pooled_session()
+    public async Task ExecuteAsync_reapplies_bypass_mode_for_each_fresh_execution()
     {
         var provider = CreateProvider();
 
@@ -237,9 +236,11 @@ public sealed class DeepAgentsProviderTests
         {
         }
 
-        provider.CreatedSessionClients.ShouldHaveSingleItem();
-        provider.CreatedSessionClients[0].SetModeCalls.ShouldBe(["bypassPermissions", "bypassPermissions"]);
-        provider.CreatedSessionClients[0].PromptCalls.ShouldBe(2);
+        provider.CreatedSessionClients.Count.ShouldBe(2);
+        provider.CreatedSessionClients[0].SetModeCalls.ShouldBe(["bypassPermissions"]);
+        provider.CreatedSessionClients[1].SetModeCalls.ShouldBe(["bypassPermissions"]);
+        provider.CreatedSessionClients[0].PromptCalls.ShouldBe(1);
+        provider.CreatedSessionClients[1].PromptCalls.ShouldBe(1);
     }
 
     [Fact]
@@ -256,10 +257,6 @@ public sealed class DeepAgentsProviderTests
                            new DeepAgentsOptions
                            {
                                ModeId = "bypassPermissions",
-                               PoolSettings = new CliPoolSettings
-                               {
-                                   Enabled = false
-                               }
                            },
                            "hello"))
         {
@@ -269,40 +266,6 @@ public sealed class DeepAgentsProviderTests
         messages.Select(static message => message.Type).ShouldBe(["session.started", "assistant", "terminal.completed"]);
         provider.CreatedSessionClients.ShouldHaveSingleItem();
         provider.CreatedSessionClients[0].SetModeCalls.ShouldBe(["bypassPermissions"]);
-    }
-
-    [Fact]
-    public async Task ExecuteAsync_reuses_warm_session_by_native_session_id_when_load_session_is_unsupported()
-    {
-        var provider = new TestDeepAgentsProvider(
-            new StubExecutableResolver(),
-            new CliProcessManager(),
-            new StubRuntimeEnvironmentResolver(),
-            _ => new FakeAcpSessionClient(loadSessionSupported: false));
-
-        string? resolvedSessionId = null;
-        await foreach (var message in provider.ExecuteAsync(new DeepAgentsOptions(), "first"))
-        {
-            if (message.Type == "session.started")
-            {
-                resolvedSessionId = message.Content.GetProperty("session_id").GetString();
-            }
-        }
-
-        resolvedSessionId.ShouldNotBeNullOrWhiteSpace();
-
-        await foreach (var _ in provider.ExecuteAsync(
-                           new DeepAgentsOptions
-                           {
-                               SessionId = resolvedSessionId
-                           },
-                           "second"))
-        {
-        }
-
-        provider.CreatedSessionClients.Count.ShouldBe(1);
-        provider.CreatedSessionClients[0].StartSessionCalls.ShouldBe(1);
-        provider.CreatedSessionClients[0].PromptCalls.ShouldBe(2);
     }
 
     [Fact]

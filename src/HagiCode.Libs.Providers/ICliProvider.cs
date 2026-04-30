@@ -16,7 +16,9 @@ public interface ICliProvider : IAsyncDisposable
     bool IsAvailable { get; }
 
     /// <summary>
-    /// Performs a lightweight health check against the provider.
+    /// Performs a lightweight readiness check against the provider.
+    /// Implementations should rely on executable discovery, version probing, ACP startup, or equivalent
+    /// non-message diagnostics instead of sending an assistant prompt.
     /// </summary>
     /// <param name="cancellationToken">Cancels the ping operation.</param>
     /// <returns>The provider test result.</returns>

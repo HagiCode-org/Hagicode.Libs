@@ -1,7 +1,7 @@
 namespace HagiCode.Libs.Providers;
 
 /// <summary>
-/// Represents the result of testing a provider.
+/// Represents the result of a lightweight provider readiness probe.
 /// </summary>
 public sealed record CliProviderTestResult
 {
@@ -27,16 +27,19 @@ public sealed record CliProviderTestResult
 
     /// <summary>
     /// Gets or sets the validation mode that produced this diagnostic.
+    /// Connectivity/readiness should be the default for provider-level ping operations.
     /// </summary>
     public string? ValidationMode { get; init; }
 
     /// <summary>
     /// Gets or sets the model identifier that was explicitly validated.
+    /// Null for readiness probes that do not send prompts.
     /// </summary>
     public string? CheckedModel { get; init; }
 
     /// <summary>
     /// Gets or sets whether a model-aware validation passed.
+    /// Null for readiness probes that do not send prompts.
     /// </summary>
     public bool? ValidationPassed { get; init; }
 

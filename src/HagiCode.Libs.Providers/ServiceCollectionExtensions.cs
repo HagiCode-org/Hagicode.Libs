@@ -41,20 +41,13 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IRuntimeEnvironmentResolver, RuntimeEnvironmentResolver>();
         services.AddSingleton<ICliExecutionPolicy, AllowAllCliExecutionPolicy>();
         services.AddSingleton<ICliExecutionFacade, CliExecutionFacade>();
-        services.AddSingleton<ICopilotSdkGateway, GitHubCopilotSdkGateway>();
+        services.AddSingleton<ICopilotSdkGateway>(static _ => new GitHubCopilotSdkGateway());
         services.AddSingleton<ICliAcpSessionPool, CliAcpSessionPool>();
         services.AddSingleton<CliProviderPoolCoordinator>();
         services.AddSingleton(static _ =>
         {
             var registry = new CliProviderPoolConfigurationRegistry();
-            registry.Register("codebuddy", new CliPoolSettings { MaxActiveSessions = 50, IdleTimeout = TimeSpan.FromMinutes(10) });
-            registry.Register("codex", new CliPoolSettings { MaxActiveSessions = 50, IdleTimeout = TimeSpan.FromMinutes(10) });
-            registry.Register("deepagents", new CliPoolSettings { MaxActiveSessions = 50, IdleTimeout = TimeSpan.FromMinutes(10) });
-            registry.Register("gemini", new CliPoolSettings { MaxActiveSessions = 50, IdleTimeout = TimeSpan.FromMinutes(10) });
             registry.Register("hermes", new CliPoolSettings { MaxActiveSessions = 500, IdleTimeout = TimeSpan.FromHours(24) });
-            registry.Register("kimi", new CliPoolSettings { MaxActiveSessions = 50, IdleTimeout = TimeSpan.FromMinutes(10) });
-            registry.Register("kiro-cli", new CliPoolSettings { MaxActiveSessions = 50, IdleTimeout = TimeSpan.FromMinutes(10) });
-            registry.Register("qodercli", new CliPoolSettings { MaxActiveSessions = 50, IdleTimeout = TimeSpan.FromMinutes(10) });
             return registry;
         });
         services.AddSingleton<ClaudeCodeProvider>();

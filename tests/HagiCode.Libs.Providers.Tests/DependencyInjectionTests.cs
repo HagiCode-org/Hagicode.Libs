@@ -12,7 +12,6 @@ using HagiCode.Libs.Providers.Hermes;
 using HagiCode.Libs.Providers.Kimi;
 using HagiCode.Libs.Providers.Kiro;
 using HagiCode.Libs.Providers.OpenCode;
-using HagiCode.Libs.Providers.Pooling;
 using HagiCode.Libs.Providers.QoderCli;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -30,8 +29,7 @@ public sealed class DependencyInjectionTests
         var registry = serviceProvider.GetRequiredService<ProviderRegistry>();
         var executionFacade = serviceProvider.GetRequiredService<ICliExecutionFacade>();
         var acpPool = serviceProvider.GetRequiredService<ICliAcpSessionPool>();
-        var poolCoordinator = serviceProvider.GetRequiredService<CliProviderPoolCoordinator>();
-        var poolConfiguration = serviceProvider.GetRequiredService<CliProviderPoolConfigurationRegistry>();
+        var poolConfiguration = serviceProvider.GetRequiredService<HagiCode.Libs.Providers.Pooling.CliProviderPoolConfigurationRegistry>();
         var claudeProvider = serviceProvider.GetRequiredService<ICliProvider<ClaudeCodeOptions>>();
         var codebuddyProvider = serviceProvider.GetRequiredService<ICliProvider<CodebuddyOptions>>();
         var copilotProvider = serviceProvider.GetRequiredService<ICliProvider<CopilotOptions>>();
@@ -47,18 +45,17 @@ public sealed class DependencyInjectionTests
 
         executionFacade.ShouldNotBeNull();
         acpPool.ShouldNotBeNull();
-        poolCoordinator.ShouldNotBeNull();
         poolConfiguration.HasSettings("claude-code").ShouldBeFalse();
-        poolConfiguration.GetSettings("codebuddy").IdleTimeout.ShouldBe(TimeSpan.FromMinutes(10));
-        poolConfiguration.GetSettings("copilot").IdleTimeout.ShouldBe(TimeSpan.FromMinutes(10));
-        poolConfiguration.GetSettings("codex").IdleTimeout.ShouldBe(TimeSpan.FromMinutes(10));
-        poolConfiguration.GetSettings("deepagents").IdleTimeout.ShouldBe(TimeSpan.FromMinutes(10));
-        poolConfiguration.GetSettings("gemini").IdleTimeout.ShouldBe(TimeSpan.FromMinutes(10));
+        poolConfiguration.HasSettings("codebuddy").ShouldBeFalse();
+        poolConfiguration.HasSettings("copilot").ShouldBeFalse();
+        poolConfiguration.HasSettings("codex").ShouldBeFalse();
+        poolConfiguration.HasSettings("deepagents").ShouldBeFalse();
+        poolConfiguration.HasSettings("gemini").ShouldBeFalse();
         poolConfiguration.GetSettings("hermes").Enabled.ShouldBeTrue();
         poolConfiguration.GetSettings("hermes").IdleTimeout.ShouldBe(TimeSpan.FromHours(24));
-        poolConfiguration.GetSettings("kimi").IdleTimeout.ShouldBe(TimeSpan.FromMinutes(10));
-        poolConfiguration.GetSettings("kiro-cli").IdleTimeout.ShouldBe(TimeSpan.FromMinutes(10));
-        poolConfiguration.GetSettings("qodercli").IdleTimeout.ShouldBe(TimeSpan.FromMinutes(10));
+        poolConfiguration.HasSettings("kimi").ShouldBeFalse();
+        poolConfiguration.HasSettings("kiro-cli").ShouldBeFalse();
+        poolConfiguration.HasSettings("qodercli").ShouldBeFalse();
         poolConfiguration.HasSettings("opencode").ShouldBeFalse();
         registry.GetProvider("claude-code").ShouldNotBeNull();
         registry.GetProvider("claude").ShouldNotBeNull();

@@ -1,6 +1,5 @@
 namespace HagiCode.Libs.Providers.Gemini;
 
-using HagiCode.Libs.Core.Acp;
 using HagiCode.Libs.Providers;
 
 /// <summary>
@@ -65,9 +64,4 @@ public sealed record GeminiOptions
     /// Tokens are boundary-trimmed individually, whitespace-only tokens are ignored, and duplicate ACP launch arguments are skipped.
     /// </summary>
     public IReadOnlyList<string> ExtraArguments { get; init; } = [];
-
-    /// <summary>
-    /// Gets or sets provider-level pooling overrides.
-    /// </summary>
-    public CliPoolSettings? PoolSettings { get; init; }
 }

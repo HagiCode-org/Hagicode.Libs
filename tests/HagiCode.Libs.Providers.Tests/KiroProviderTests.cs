@@ -178,7 +178,7 @@ public sealed class KiroProviderTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_reuses_pooled_session_without_reconnecting_when_pooling_is_enabled()
+    public async Task ExecuteAsync_creates_fresh_session_client_for_each_execution()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient());
 
@@ -190,37 +190,9 @@ public sealed class KiroProviderTests
         {
         }
 
-        provider.SessionClient!.ConnectCalls.ShouldBe(1);
+        provider.SessionClient!.ConnectCalls.ShouldBe(2);
         provider.SessionClient.StartSessionCalls.ShouldBe(2);
         provider.SessionClient.PromptCalls.ShouldBe(2);
-    }
-
-    [Fact]
-    public async Task ExecuteAsync_uses_one_shot_path_when_pooling_is_disabled()
-    {
-        var provider = CreateProvider(sessionClient: new FakeAcpSessionClient());
-
-        await foreach (var _ in provider.ExecuteAsync(
-                           new KiroOptions
-                           {
-                               SessionId = "session-key",
-                               PoolSettings = new HagiCode.Libs.Core.Acp.CliPoolSettings { Enabled = false }
-                           },
-                           "first"))
-        {
-        }
-
-        await foreach (var _ in provider.ExecuteAsync(
-                           new KiroOptions
-                           {
-                               SessionId = "session-key",
-                               PoolSettings = new HagiCode.Libs.Core.Acp.CliPoolSettings { Enabled = false }
-                           },
-                           "second"))
-        {
-        }
-
-        provider.SessionClient!.ConnectCalls.ShouldBe(2);
     }
 
     [Fact]
@@ -367,7 +339,7 @@ public sealed class KiroProviderTests
         });
 
         exception.Message.ShouldContain("fallback");
-        exception.Message.ShouldContain("ExecutablePath");
+        exception.Message.ShouldContain("unsupported generic 'kiro'");
         exception.Message.ShouldContain("/resolved/kiro");
         executableResolver.ResolutionAttempts.ShouldBe(["kiro-cli", "kiro"]);
     }
@@ -411,7 +383,7 @@ public sealed class KiroProviderTests
         result.Success.ShouldBeFalse();
         result.ErrorMessage.ShouldNotBeNull();
         result.ErrorMessage.ShouldContain("blocked");
-        result.ErrorMessage.ShouldContain("ExecutablePath");
+        result.ErrorMessage.ShouldContain("only 'kiro-cli' executables are supported");
         result.ErrorMessage.ShouldContain("/resolved/kiro");
         provider.SessionClient.ShouldBeNull();
     }
