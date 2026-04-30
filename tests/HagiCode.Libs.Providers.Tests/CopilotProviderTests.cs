@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using System.Collections.Concurrent;
 using GitHub.Copilot.SDK;
 using HagiCode.Libs.Core.Acp;
 using HagiCode.Libs.Core.Discovery;
@@ -594,7 +595,7 @@ public sealed class CopilotProviderTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_ignores_legacy_pool_settings_and_stays_on_the_one_shot_path()
+    public async Task ExecuteAsync_stays_on_the_one_shot_path_for_repeated_requests()
     {
         var gateway = new StubCopilotSdkGateway(
         [
@@ -606,8 +607,7 @@ public sealed class CopilotProviderTests
         await foreach (var _ in provider.ExecuteAsync(
                            new CopilotOptions
                            {
-                               WorkingDirectory = "/tmp/project",
-                               PoolSettings = new HagiCode.Libs.Core.Acp.CliPoolSettings { Enabled = false }
+                               WorkingDirectory = "/tmp/project"
                            },
                            "first"))
         {
@@ -616,14 +616,125 @@ public sealed class CopilotProviderTests
         await foreach (var _ in provider.ExecuteAsync(
                            new CopilotOptions
                            {
-                               WorkingDirectory = "/tmp/project",
-                               PoolSettings = new HagiCode.Libs.Core.Acp.CliPoolSettings { Enabled = false }
+                               WorkingDirectory = "/tmp/project"
                            },
                            "second"))
         {
         }
 
         gateway.CreatedRuntimeCount.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_allows_concurrent_requests_with_same_effective_environment_and_keeps_session_metadata_isolated()
+    {
+        var sync = new ConcurrentSendSynchronizer(expectedParticipants: 2);
+        var gateway = new GitHubCopilotSdkGateway(
+            new ControlledCopilotSdkClientFactory(
+                promptHandler: async (context, cancellationToken) =>
+                {
+                    await sync.SignalAndWaitAsync(cancellationToken);
+                    context.EmitText($"reply:{context.Prompt}");
+                }),
+            new CopilotSdkEnvironmentLeaseCoordinator());
+        var provider = CreateProvider(gateway: gateway);
+
+        var firstExecution = ReadExecutionMessagesAsync(
+            provider,
+            new CopilotOptions
+            {
+                EnvironmentVariables = new Dictionary<string, string?>
+                {
+                    ["COPILOT_TEST_ENV"] = "shared"
+                }
+            },
+            "alpha");
+        var secondExecution = ReadExecutionMessagesAsync(
+            provider,
+            new CopilotOptions
+            {
+                EnvironmentVariables = new Dictionary<string, string?>
+                {
+                    ["COPILOT_TEST_ENV"] = "shared"
+                }
+            },
+            "beta");
+
+        var executions = await Task.WhenAll(firstExecution, secondExecution);
+
+        sync.MaxConcurrentCalls.ShouldBe(2);
+
+        var firstMessages = executions[0];
+        var secondMessages = executions[1];
+        firstMessages.Select(static message => message.Type).ShouldBe(["session.started", "assistant", "result"]);
+        secondMessages.Select(static message => message.Type).ShouldBe(["session.started", "assistant", "result"]);
+
+        var firstSessionId = firstMessages[0].Content.GetProperty("session_id").GetString();
+        var secondSessionId = secondMessages[0].Content.GetProperty("session_id").GetString();
+        firstSessionId.ShouldNotBeNullOrWhiteSpace();
+        secondSessionId.ShouldNotBeNullOrWhiteSpace();
+        firstSessionId.ShouldNotBe(secondSessionId);
+
+        firstMessages[1].Content.GetProperty("text").GetString().ShouldBe("reply:alpha");
+        secondMessages[1].Content.GetProperty("text").GetString().ShouldBe("reply:beta");
+        firstMessages[1].Content.GetProperty("session_id").GetString().ShouldBe(firstSessionId);
+        firstMessages[2].Content.GetProperty("session_id").GetString().ShouldBe(firstSessionId);
+        secondMessages[1].Content.GetProperty("session_id").GetString().ShouldBe(secondSessionId);
+        secondMessages[2].Content.GetProperty("session_id").GetString().ShouldBe(secondSessionId);
+    }
+
+    [Fact]
+    public async Task CreateRuntimeAsync_serializes_incompatible_environment_overrides_and_restores_baseline_after_disposal()
+    {
+        const string variableName = "HAGICODE_COPILOT_GATEWAY_TEST_ENV";
+        var originalValue = Environment.GetEnvironmentVariable(variableName);
+        var firstPromptStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var allowFirstPromptToFinish = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var factory = new ControlledCopilotSdkClientFactory(
+            observedEnvironmentKeys: [variableName],
+            promptHandler: async (context, cancellationToken) =>
+            {
+                if (string.Equals(context.ObservedEnvironment[variableName], "A", StringComparison.Ordinal))
+                {
+                    firstPromptStarted.TrySetResult(true);
+                    await allowFirstPromptToFinish.Task.WaitAsync(cancellationToken);
+                }
+
+                context.EmitText($"env:{context.ObservedEnvironment[variableName]}");
+            });
+        var gateway = new GitHubCopilotSdkGateway(factory, new CopilotSdkEnvironmentLeaseCoordinator());
+
+        Environment.SetEnvironmentVariable(variableName, "baseline");
+        try
+        {
+            var firstRuntime = await gateway.CreateRuntimeAsync(CreateSdkRequest("first", variableName, "A"));
+            var firstDrain = DrainRuntimeAsync(firstRuntime, CreateSdkRequest("first", variableName, "A"));
+            await firstPromptStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            var secondRuntimeTask = gateway.CreateRuntimeAsync(CreateSdkRequest("second", variableName, "B"));
+            await Task.Delay(200);
+
+            factory.CreateInvocations.Count.ShouldBe(1);
+            factory.CreateInvocations[0].ObservedEnvironment[variableName].ShouldBe("A");
+            Environment.GetEnvironmentVariable(variableName).ShouldBe("A");
+
+            allowFirstPromptToFinish.TrySetResult(true);
+            await firstDrain;
+            await firstRuntime.DisposeAsync();
+
+            var secondRuntime = await secondRuntimeTask.WaitAsync(TimeSpan.FromSeconds(5));
+            await DrainRuntimeAsync(secondRuntime, CreateSdkRequest("second", variableName, "B"));
+            await secondRuntime.DisposeAsync();
+
+            factory.CreateInvocations.Count.ShouldBe(2);
+            factory.CreateInvocations[0].ObservedEnvironment[variableName].ShouldBe("A");
+            factory.CreateInvocations[1].ObservedEnvironment[variableName].ShouldBe("B");
+            Environment.GetEnvironmentVariable(variableName).ShouldBe("baseline");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(variableName, originalValue);
+        }
     }
 
     [Fact]
@@ -743,11 +854,7 @@ public sealed class CopilotProviderTests
                 WorkingDirectory = sandbox.WorkingDirectory,
                 AdditionalArgs = ["--config-dir", sandbox.ConfigDirectory],
                 Timeout = TimeSpan.FromSeconds(45),
-                StartupTimeout = TimeSpan.FromSeconds(20),
-                PoolSettings = new CliPoolSettings
-                {
-                    Enabled = false
-                }
+                StartupTimeout = TimeSpan.FromSeconds(20)
             },
             "Reply with exactly the word 'pong'.",
             TimeSpan.FromSeconds(60));
@@ -929,6 +1036,34 @@ public sealed class CopilotProviderTests
         return messages;
     }
 
+    private static CopilotSdkRequest CreateSdkRequest(string prompt, string environmentKey, string environmentValue)
+    {
+        return new CopilotSdkRequest(
+            Prompt: prompt,
+            Model: null,
+            WorkingDirectory: "/tmp/project",
+            SessionId: null,
+            CliPath: "/custom/copilot",
+            CliUrl: null,
+            GitHubToken: null,
+            UseLoggedInUser: true,
+            Timeout: TimeSpan.FromSeconds(30),
+            IdleTimeout: TimeSpan.FromSeconds(30),
+            StartupTimeout: TimeSpan.FromSeconds(5),
+            CliArgs: [],
+            EnvironmentVariables: new Dictionary<string, string?>
+            {
+                [environmentKey] = environmentValue
+            });
+    }
+
+    private static async Task DrainRuntimeAsync(ICopilotSdkRuntime runtime, CopilotSdkRequest request)
+    {
+        await foreach (var _ in runtime.SendPromptAsync(request))
+        {
+        }
+    }
+
     private sealed class TestCopilotProvider(
         CliExecutableResolver executableResolver,
         CliProcessManager processManager,
@@ -1069,5 +1204,158 @@ public sealed class CopilotProviderTests
 
             return Task.FromResult(ExecuteResults.Dequeue());
         }
+    }
+
+    private sealed class ConcurrentSendSynchronizer(int expectedParticipants)
+    {
+        private readonly TaskCompletionSource<bool> _allParticipantsReached = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _currentCalls;
+        private int _maxConcurrentCalls;
+        private int _participantCount;
+
+        public int MaxConcurrentCalls => Volatile.Read(ref _maxConcurrentCalls);
+
+        public async Task SignalAndWaitAsync(CancellationToken cancellationToken)
+        {
+            var currentCalls = Interlocked.Increment(ref _currentCalls);
+            UpdateMaxConcurrentCalls(currentCalls);
+
+            if (Interlocked.Increment(ref _participantCount) >= expectedParticipants)
+            {
+                _allParticipantsReached.TrySetResult(true);
+            }
+
+            try
+            {
+                await _allParticipantsReached.Task.WaitAsync(cancellationToken);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _currentCalls);
+            }
+        }
+
+        private void UpdateMaxConcurrentCalls(int currentCalls)
+        {
+            while (true)
+            {
+                var observed = Volatile.Read(ref _maxConcurrentCalls);
+                if (observed >= currentCalls)
+                {
+                    return;
+                }
+
+                if (Interlocked.CompareExchange(ref _maxConcurrentCalls, currentCalls, observed) == observed)
+                {
+                    return;
+                }
+            }
+        }
+    }
+
+    private sealed class ControlledCopilotSdkClientFactory : ICopilotSdkClientFactory
+    {
+        private readonly Func<PromptExecutionContext, CancellationToken, Task> _promptHandler;
+        private readonly IReadOnlyList<string> _observedEnvironmentKeys;
+        private int _sessionCounter;
+
+        public ControlledCopilotSdkClientFactory(
+            Func<PromptExecutionContext, CancellationToken, Task> promptHandler,
+            IReadOnlyList<string>? observedEnvironmentKeys = null)
+        {
+            _promptHandler = promptHandler ?? throw new ArgumentNullException(nameof(promptHandler));
+            _observedEnvironmentKeys = observedEnvironmentKeys ?? [];
+        }
+
+        public List<CreateInvocation> CreateInvocations { get; } = [];
+
+        public ICopilotSdkClient Create(CopilotClientOptions options)
+        {
+            var invocation = new CreateInvocation(
+                options,
+                _observedEnvironmentKeys.ToDictionary(
+                    static key => key,
+                    static key => Environment.GetEnvironmentVariable(key),
+                    StringComparer.Ordinal));
+            CreateInvocations.Add(invocation);
+
+            return new ControlledCopilotSdkClient(this, invocation);
+        }
+
+        private sealed class ControlledCopilotSdkClient(
+            ControlledCopilotSdkClientFactory owner,
+            CreateInvocation invocation) : ICopilotSdkClient
+        {
+            public Task<ICopilotSdkSession> CreateSessionAsync(SessionConfig config, CancellationToken cancellationToken)
+            {
+                var sessionId = $"gateway-session-{Interlocked.Increment(ref owner._sessionCounter):D4}";
+                return Task.FromResult<ICopilotSdkSession>(new ControlledCopilotSdkSession(sessionId, owner._promptHandler, invocation.ObservedEnvironment));
+            }
+
+            public Task<ICopilotSdkSession> ResumeSessionAsync(string sessionId, ResumeSessionConfig config, CancellationToken cancellationToken)
+            {
+                return Task.FromResult<ICopilotSdkSession>(new ControlledCopilotSdkSession(sessionId, owner._promptHandler, invocation.ObservedEnvironment));
+            }
+
+            public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        }
+
+        private sealed class ControlledCopilotSdkSession(
+            string sessionId,
+            Func<PromptExecutionContext, CancellationToken, Task> promptHandler,
+            IReadOnlyDictionary<string, string?> observedEnvironment) : ICopilotSdkSession
+        {
+            private event SessionEventHandler? SessionEventReceived;
+
+            public string SessionId => sessionId;
+
+            public IDisposable On(SessionEventHandler handler)
+            {
+                SessionEventReceived += handler;
+                return new DelegateDisposable(() => SessionEventReceived -= handler);
+            }
+
+            public async Task SendAndWaitAsync(MessageOptions options, TimeSpan timeout, CancellationToken cancellationToken)
+            {
+                var context = new PromptExecutionContext(options.Prompt ?? string.Empty, observedEnvironment, EmitText);
+                await promptHandler(context, cancellationToken);
+            }
+
+            public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+            private void EmitText(string text)
+            {
+                SessionEventReceived?.Invoke(new AssistantMessageDeltaEvent
+                {
+                    Data = new AssistantMessageDeltaData
+                    {
+                        MessageId = $"message-{sessionId}",
+                        DeltaContent = text
+                    }
+                });
+            }
+        }
+
+        private sealed class DelegateDisposable(Action disposeAction) : IDisposable
+        {
+            private int _disposed;
+
+            public void Dispose()
+            {
+                if (Interlocked.Exchange(ref _disposed, 1) == 0)
+                {
+                    disposeAction();
+                }
+            }
+        }
+
+        internal sealed record CreateInvocation(
+            CopilotClientOptions ClientOptions,
+            IReadOnlyDictionary<string, string?> ObservedEnvironment);
+
+        internal sealed record PromptExecutionContext(
+            string Prompt,
+            IReadOnlyDictionary<string, string?> ObservedEnvironment,
+            Action<string> EmitText);
     }
 }

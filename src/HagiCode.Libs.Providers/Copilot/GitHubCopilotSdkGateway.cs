@@ -7,8 +7,24 @@ namespace HagiCode.Libs.Providers.Copilot;
 
 internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
 {
-    private static readonly SemaphoreSlim EnvironmentMutationLock = new(1, 1);
     private static readonly TimeSpan IdleCancellationGracePeriod = TimeSpan.FromSeconds(10);
+    private static readonly CopilotSdkEnvironmentLeaseCoordinator SharedEnvironmentLeaseCoordinator = new();
+
+    private readonly ICopilotSdkClientFactory _clientFactory;
+    private readonly CopilotSdkEnvironmentLeaseCoordinator _environmentLeaseCoordinator;
+
+    internal GitHubCopilotSdkGateway()
+        : this(new GitHubCopilotSdkClientFactory(), SharedEnvironmentLeaseCoordinator)
+    {
+    }
+
+    internal GitHubCopilotSdkGateway(
+        ICopilotSdkClientFactory clientFactory,
+        CopilotSdkEnvironmentLeaseCoordinator environmentLeaseCoordinator)
+    {
+        _clientFactory = clientFactory ?? throw new ArgumentNullException(nameof(clientFactory));
+        _environmentLeaseCoordinator = environmentLeaseCoordinator ?? throw new ArgumentNullException(nameof(environmentLeaseCoordinator));
+    }
 
     public async Task<ICopilotSdkRuntime> CreateRuntimeAsync(
         CopilotSdkRequest request,
@@ -18,12 +34,12 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
         using var startupCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         startupCancellationTokenSource.CancelAfter(request.StartupTimeout);
 
-        var environmentScope = await CopilotSdkEnvironmentScope.EnterAsync(request.EnvironmentVariables, cancellationToken);
-        CopilotClient? client = null;
+        var environmentLease = await _environmentLeaseCoordinator.AcquireAsync(request, cancellationToken).ConfigureAwait(false);
+        ICopilotSdkClient? client = null;
         try
         {
-            client = new CopilotClient(clientOptions);
-            CopilotSession session;
+            client = _clientFactory.Create(clientOptions);
+            ICopilotSdkSession session;
             CopilotSdkStreamEvent lifecycleEvent;
             if (!string.IsNullOrWhiteSpace(request.SessionId))
             {
@@ -32,7 +48,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
                     session = await client.ResumeSessionAsync(
                         request.SessionId,
                         BuildResumeSessionConfig(request),
-                        startupCancellationTokenSource.Token);
+                        startupCancellationTokenSource.Token).ConfigureAwait(false);
                     lifecycleEvent = new CopilotSdkStreamEvent(
                         CopilotSdkStreamEventType.SessionResumed,
                         SessionId: session.SessionId,
@@ -42,7 +58,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
                 {
                     session = await client.CreateSessionAsync(
                         BuildSessionConfig(request),
-                        startupCancellationTokenSource.Token);
+                        startupCancellationTokenSource.Token).ConfigureAwait(false);
                     lifecycleEvent = new CopilotSdkStreamEvent(
                         CopilotSdkStreamEventType.SessionStarted,
                         SessionId: session.SessionId,
@@ -53,22 +69,22 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
             {
                 session = await client.CreateSessionAsync(
                     BuildSessionConfig(request),
-                    startupCancellationTokenSource.Token);
+                    startupCancellationTokenSource.Token).ConfigureAwait(false);
                 lifecycleEvent = new CopilotSdkStreamEvent(
                     CopilotSdkStreamEventType.SessionStarted,
                     SessionId: session.SessionId);
             }
 
-            return new PooledCopilotSdkRuntime(client, session, environmentScope, lifecycleEvent);
+            return new PooledCopilotSdkRuntime(client, session, environmentLease, lifecycleEvent);
         }
         catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested && startupCancellationTokenSource.IsCancellationRequested)
         {
             if (client is not null)
             {
-                await client.DisposeAsync();
+                await client.DisposeAsync().ConfigureAwait(false);
             }
 
-            await environmentScope.DisposeAsync();
+            await environmentLease.DisposeAsync().ConfigureAwait(false);
             throw new InvalidOperationException(
                 NormalizeFailureMessage(rawMessage: null, startupTimedOut: true, startupTimeout: request.StartupTimeout),
                 ex);
@@ -77,10 +93,10 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
         {
             if (client is not null)
             {
-                await client.DisposeAsync();
+                await client.DisposeAsync().ConfigureAwait(false);
             }
 
-            await environmentScope.DisposeAsync();
+            await environmentLease.DisposeAsync().ConfigureAwait(false);
             throw;
         }
     }
@@ -361,9 +377,9 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
     internal sealed record SessionEventDispatchResult(bool SawDelta, IReadOnlyList<CopilotSdkStreamEvent> Events);
 
     private sealed class PooledCopilotSdkRuntime(
-        CopilotClient client,
-        CopilotSession session,
-        CopilotSdkEnvironmentScope environmentScope,
+        ICopilotSdkClient client,
+        ICopilotSdkSession session,
+        IAsyncDisposable environmentLease,
         CopilotSdkStreamEvent lifecycleEvent) : ICopilotSdkRuntime
     {
         private bool _lifecycleEventSent;
@@ -530,7 +546,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
         {
             try
             {
-                await session.DisposeAsync();
+                await session.DisposeAsync().ConfigureAwait(false);
             }
             catch
             {
@@ -538,7 +554,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
 
             try
             {
-                await client.DisposeAsync();
+                await client.DisposeAsync().ConfigureAwait(false);
             }
             catch
             {
@@ -546,7 +562,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
 
             try
             {
-                await environmentScope.DisposeAsync();
+                await environmentLease.DisposeAsync().ConfigureAwait(false);
             }
             catch
             {
@@ -610,53 +626,4 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
         }
     }
 
-    private sealed class CopilotSdkEnvironmentScope : IAsyncDisposable
-    {
-        private readonly Dictionary<string, string?> _originalValues = new(StringComparer.Ordinal);
-        private bool _disposed;
-
-        private CopilotSdkEnvironmentScope()
-        {
-        }
-
-        public static async Task<CopilotSdkEnvironmentScope> EnterAsync(
-            IReadOnlyDictionary<string, string?> environmentVariables,
-            CancellationToken cancellationToken)
-        {
-            var scope = new CopilotSdkEnvironmentScope();
-            await EnvironmentMutationLock.WaitAsync(cancellationToken);
-            try
-            {
-                foreach (var entry in environmentVariables)
-                {
-                    scope._originalValues[entry.Key] = Environment.GetEnvironmentVariable(entry.Key);
-                    Environment.SetEnvironmentVariable(entry.Key, entry.Value);
-                }
-
-                return scope;
-            }
-            catch
-            {
-                await scope.DisposeAsync();
-                throw;
-            }
-        }
-
-        public ValueTask DisposeAsync()
-        {
-            if (_disposed)
-            {
-                return ValueTask.CompletedTask;
-            }
-
-            foreach (var entry in _originalValues)
-            {
-                Environment.SetEnvironmentVariable(entry.Key, entry.Value);
-            }
-
-            _disposed = true;
-            EnvironmentMutationLock.Release();
-            return ValueTask.CompletedTask;
-        }
-    }
 }

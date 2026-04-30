@@ -1,7 +1,5 @@
 namespace HagiCode.Libs.Providers.Copilot;
 
-using HagiCode.Libs.Core.Acp;
-
 /// <summary>
 /// Describes a GitHub Copilot CLI invocation routed through the SDK-managed session path.
 /// </summary>
@@ -96,15 +94,6 @@ public sealed record CopilotOptions
     /// Gets or sets a value indicating whether to disable ask-user prompts during execution.
     /// </summary>
     public bool NoAskUser { get; init; } = true;
-
-    /// <summary>
-    /// Gets or sets legacy Copilot pool settings.
-    /// </summary>
-    /// <remarks>
-    /// Copilot now executes each request on a fresh SDK runtime, so this property is ignored and only
-    /// remains as an inert compatibility surface for older callers.
-    /// </remarks>
-    public CliPoolSettings? PoolSettings { get; init; }
 }
 
 /// <summary>
