@@ -35,7 +35,7 @@ public sealed class DependencyInjectionTests
         var claudeProvider = serviceProvider.GetRequiredService<ICliProvider<ClaudeCodeOptions>>();
         var codebuddyProvider = serviceProvider.GetRequiredService<ICliProvider<CodebuddyOptions>>();
         var copilotProvider = serviceProvider.GetRequiredService<ICliProvider<CopilotOptions>>();
-        var codexProvider = serviceProvider.GetRequiredService<ICliProvider<CodexOptions>>();
+        var codexProvider = serviceProvider.GetRequiredService<ICodexProvider>();
         var deepAgentsProvider = serviceProvider.GetRequiredService<ICliProvider<DeepAgentsOptions>>();
         var geminiProvider = serviceProvider.GetRequiredService<ICliProvider<GeminiOptions>>();
         var hermesProvider = serviceProvider.GetRequiredService<ICliProvider<HermesOptions>>();
@@ -69,6 +69,8 @@ public sealed class DependencyInjectionTests
         registry.GetProvider("github-copilot").ShouldNotBeNull();
         registry.GetProvider("githubcopilot").ShouldNotBeNull();
         registry.GetProvider("codex").ShouldNotBeNull();
+        registry.GetProvider("codex-cli").ShouldNotBeNull();
+        registry.GetProvider("openai-codex").ShouldNotBeNull();
         registry.GetProvider("deepagents").ShouldNotBeNull();
         registry.GetProvider("deepagents-acp").ShouldBeNull();
         registry.GetProvider("gemini").ShouldNotBeNull();
@@ -93,6 +95,7 @@ public sealed class DependencyInjectionTests
         kiroProvider.ShouldBeOfType<KiroProvider>();
         openCodeProvider.ShouldBeOfType<OpenCodeProvider>();
         qoderCliProvider.ShouldBeOfType<QoderCliProvider>();
+        allProviders.ShouldContain(provider => provider is CodexProvider);
         allProviders.ShouldContain(provider => provider is GeminiProvider);
         allProviders.ShouldContain(provider => provider is HermesProvider);
         allProviders.ShouldContain(provider => provider is KimiProvider);

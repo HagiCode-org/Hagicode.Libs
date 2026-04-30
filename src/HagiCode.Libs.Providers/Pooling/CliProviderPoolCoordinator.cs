@@ -1,7 +1,6 @@
 using HagiCode.Libs.Core.Acp;
 using HagiCode.Libs.Core.Transport;
 using HagiCode.Libs.Providers.Copilot;
-using HagiCode.Libs.Providers.Codex;
 
 namespace HagiCode.Libs.Providers.Pooling;
 
@@ -12,7 +11,6 @@ public sealed class CliProviderPoolCoordinator : IAsyncDisposable
 {
     private readonly ICliAcpSessionPool _acpPool;
     private readonly CliRuntimePool<ICliTransport> _transportPool = new();
-    private readonly CliRuntimePool<CodexPooledThreadState> _codexThreadPool = new();
 
     public CliProviderPoolCoordinator(ICliAcpSessionPool? acpPool = null)
     {
@@ -43,22 +41,9 @@ public sealed class CliProviderPoolCoordinator : IAsyncDisposable
     internal Task DisposeTransportProviderAsync(string providerName, CancellationToken cancellationToken = default)
         => _transportPool.DisposeProviderEntriesAsync(providerName, cancellationToken);
 
-    internal Task<CliRuntimePoolLease<CodexPooledThreadState>> AcquireCodexThreadAsync(
-        CliRuntimePoolRequest request,
-        Func<CancellationToken, Task<CliRuntimePoolEntry<CodexPooledThreadState>>> entryFactory,
-        CancellationToken cancellationToken = default)
-        => _codexThreadPool.AcquireAsync(request, entryFactory, cancellationToken);
-
-    internal Task<int> ReapCodexThreadEntriesAsync(string? providerName = null, CancellationToken cancellationToken = default)
-        => _codexThreadPool.ReapIdleEntriesAsync(providerName, cancellationToken);
-
-    internal Task DisposeCodexProviderAsync(string providerName, CancellationToken cancellationToken = default)
-        => _codexThreadPool.DisposeProviderEntriesAsync(providerName, cancellationToken);
-
     public async ValueTask DisposeAsync()
     {
         await _acpPool.DisposeAsync().ConfigureAwait(false);
         await _transportPool.DisposeAsync().ConfigureAwait(false);
-        await _codexThreadPool.DisposeAsync().ConfigureAwait(false);
     }
 }

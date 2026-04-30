@@ -65,6 +65,7 @@ public static class ServiceCollectionExtensions
             serviceProvider.GetRequiredService<ICopilotSdkGateway>(),
             serviceProvider.GetRequiredService<IRuntimeEnvironmentResolver>()));
         services.AddSingleton<CodexProvider>();
+        services.AddSingleton<ICodexProvider>(serviceProvider => serviceProvider.GetRequiredService<CodexProvider>());
         services.AddSingleton<DeepAgentsProvider>();
         services.AddSingleton<GeminiProvider>();
         services.AddSingleton<HermesProvider>();
@@ -77,7 +78,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<ClaudeCodeProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<CodebuddyProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<CopilotProvider>());
-        services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<CodexProvider>());
+        services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<ICodexProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<DeepAgentsProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<GeminiProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<HermesProvider>());
@@ -88,7 +89,6 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICliProvider<ClaudeCodeOptions>>(serviceProvider => serviceProvider.GetRequiredService<ClaudeCodeProvider>());
         services.AddSingleton<ICliProvider<CodebuddyOptions>>(serviceProvider => serviceProvider.GetRequiredService<CodebuddyProvider>());
         services.AddSingleton<ICliProvider<CopilotOptions>>(serviceProvider => serviceProvider.GetRequiredService<CopilotProvider>());
-        services.AddSingleton<ICliProvider<CodexOptions>>(serviceProvider => serviceProvider.GetRequiredService<CodexProvider>());
         services.AddSingleton<ICliProvider<DeepAgentsOptions>>(serviceProvider => serviceProvider.GetRequiredService<DeepAgentsProvider>());
         services.AddSingleton<ICliProvider<GeminiOptions>>(serviceProvider => serviceProvider.GetRequiredService<GeminiProvider>());
         services.AddSingleton<ICliProvider<HermesOptions>>(serviceProvider => serviceProvider.GetRequiredService<HermesProvider>());
@@ -128,6 +128,12 @@ public static class ServiceCollectionExtensions
                 if (provider is CopilotProvider)
                 {
                     registry.Register(provider.Name, provider, ["github-copilot", "githubcopilot"]);
+                    continue;
+                }
+
+                if (provider is CodexProvider)
+                {
+                    registry.Register(provider.Name, provider, ["codex-cli", "openai-codex"]);
                     continue;
                 }
 
