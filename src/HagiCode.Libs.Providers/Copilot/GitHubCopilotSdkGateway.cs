@@ -172,7 +172,8 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
                     CopilotSdkStreamEventType.ReasoningDelta,
                     SessionId: sessionId,
                     Content: reasoningEvent.Data.Content,
-                    ReasoningId: reasoningEvent.Data.ReasoningId));
+                    ReasoningId: reasoningEvent.Data.ReasoningId,
+                    IsAuthoritativeReasoningReplay: true));
                 break;
 
             case AssistantReasoningEvent:
@@ -183,7 +184,8 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
                     CopilotSdkStreamEventType.ReasoningDelta,
                     SessionId: sessionId,
                     Content: reasoningDeltaEvent.Data.DeltaContent,
-                    ReasoningId: reasoningDeltaEvent.Data.ReasoningId));
+                    ReasoningId: reasoningDeltaEvent.Data.ReasoningId,
+                    IsAuthoritativeReasoningReplay: false));
                 break;
 
             case AssistantReasoningDeltaEvent:

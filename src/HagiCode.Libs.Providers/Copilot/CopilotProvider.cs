@@ -317,7 +317,8 @@ public class CopilotProvider : ICliProvider<CopilotOptions>
                     ["type"] = "reasoning",
                     ["session_id"] = sessionId,
                     ["text"] = eventData.Content,
-                    ["reasoning_id"] = eventData.ReasoningId
+                    ["reasoning_id"] = eventData.ReasoningId,
+                    ["is_authoritative_replay"] = eventData.IsAuthoritativeReasoningReplay
                 }),
             CopilotSdkStreamEventType.StreamingDelta when eventData.TotalResponseSizeBytes.HasValue =>
                 CreateMessage("streaming.delta", new Dictionary<string, object?>

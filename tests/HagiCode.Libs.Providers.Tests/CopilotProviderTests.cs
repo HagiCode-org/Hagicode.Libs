@@ -148,6 +148,7 @@ public sealed class CopilotProviderTests
         messages[2].Content.GetProperty("session_id").GetString().ShouldBe("copilot-session-1");
         messages[3].Content.GetProperty("text").GetString().ShouldBe("thinking");
         messages[3].Content.GetProperty("reasoning_id").GetString().ShouldBe("reasoning-1");
+        messages[3].Content.GetProperty("is_authoritative_replay").GetBoolean().ShouldBeFalse();
         messages[4].Content.GetProperty("total_response_size_bytes").GetDouble().ShouldBe(2048d);
         messages[5].Content.GetProperty("tool_name").GetString().ShouldBe("grep");
         messages[5].Content.GetProperty("session_id").GetString().ShouldBe("copilot-session-1");
@@ -174,6 +175,29 @@ public sealed class CopilotProviderTests
         result.Events[0].Type.ShouldBe(CopilotSdkStreamEventType.ReasoningDelta);
         result.Events[0].Content.ShouldBe("think");
         result.Events[0].ReasoningId.ShouldBe("reasoning-42");
+        result.Events[0].IsAuthoritativeReasoningReplay.ShouldBeFalse();
+        result.Events[0].Type.ShouldNotBe(CopilotSdkStreamEventType.RawEvent);
+    }
+
+    [Fact]
+    public void DispatchSessionEvent_normalizes_authoritative_reasoning_replay_before_raw_fallback()
+    {
+        var result = GitHubCopilotSdkGateway.DispatchSessionEvent(
+            new AssistantReasoningEvent
+            {
+                Data = new AssistantReasoningData
+                {
+                    Content = "think more",
+                    ReasoningId = "reasoning-42"
+                }
+            },
+            sawDelta: false);
+
+        result.Events.ShouldHaveSingleItem();
+        result.Events[0].Type.ShouldBe(CopilotSdkStreamEventType.ReasoningDelta);
+        result.Events[0].Content.ShouldBe("think more");
+        result.Events[0].ReasoningId.ShouldBe("reasoning-42");
+        result.Events[0].IsAuthoritativeReasoningReplay.ShouldBeTrue();
         result.Events[0].Type.ShouldNotBe(CopilotSdkStreamEventType.RawEvent);
     }
 
@@ -220,7 +244,7 @@ public sealed class CopilotProviderTests
         var provider = CreateProvider(gateway: new StubCopilotSdkGateway(
         [
             new CopilotSdkStreamEvent(CopilotSdkStreamEventType.TextDelta, Content: " "),
-            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.ReasoningDelta, Content: "\n\n"),
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.ReasoningDelta, Content: "\n\n", IsAuthoritativeReasoningReplay: false),
             new CopilotSdkStreamEvent(CopilotSdkStreamEventType.TextDelta, Content: "tail"),
             new CopilotSdkStreamEvent(CopilotSdkStreamEventType.Completed)
         ]));
@@ -235,7 +259,80 @@ public sealed class CopilotProviderTests
         messages[1].Content.GetProperty("text").GetString().ShouldBe(" ");
         messages[1].Content.GetProperty("is_authoritative_snapshot").GetBoolean().ShouldBeFalse();
         messages[2].Content.GetProperty("text").GetString().ShouldBe("\n\n");
+        messages[2].Content.GetProperty("is_authoritative_replay").GetBoolean().ShouldBeFalse();
         messages[3].Content.GetProperty("text").GetString().ShouldBe("tail");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_preserves_reasoning_replay_metadata_across_incremental_and_authoritative_sequences()
+    {
+        var provider = CreateProvider(gateway: new StubCopilotSdkGateway(
+        [
+            new CopilotSdkStreamEvent(
+                CopilotSdkStreamEventType.ReasoningDelta,
+                Content: "Plan",
+                ReasoningId: "reasoning-1",
+                IsAuthoritativeReasoningReplay: false),
+            new CopilotSdkStreamEvent(
+                CopilotSdkStreamEventType.ReasoningDelta,
+                Content: "Plan carefully",
+                ReasoningId: "reasoning-1",
+                IsAuthoritativeReasoningReplay: true),
+            new CopilotSdkStreamEvent(
+                CopilotSdkStreamEventType.ReasoningDelta,
+                Content: "New track",
+                ReasoningId: "reasoning-2",
+                IsAuthoritativeReasoningReplay: true),
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.Completed)
+        ]));
+        var messages = new List<CliMessage>();
+
+        await foreach (var message in provider.ExecuteAsync(new CopilotOptions(), "hello"))
+        {
+            messages.Add(message);
+        }
+
+        var reasoningMessages = messages.Where(static message => message.Type == "reasoning").ToArray();
+        reasoningMessages.Length.ShouldBe(3);
+        reasoningMessages.Select(static message => message.Content.GetProperty("text").GetString())
+            .ShouldBe(["Plan", "Plan carefully", "New track"]);
+        reasoningMessages.Select(static message => message.Content.GetProperty("reasoning_id").GetString())
+            .ShouldBe(["reasoning-1", "reasoning-1", "reasoning-2"]);
+        reasoningMessages.Select(static message => message.Content.GetProperty("is_authoritative_replay").GetBoolean())
+            .ShouldBe([false, true, true]);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_preserves_full_authoritative_reasoning_replays_for_downstream_suppression()
+    {
+        var provider = CreateProvider(gateway: new StubCopilotSdkGateway(
+        [
+            new CopilotSdkStreamEvent(
+                CopilotSdkStreamEventType.ReasoningDelta,
+                Content: "Inspect repo",
+                ReasoningId: "reasoning-1",
+                IsAuthoritativeReasoningReplay: false),
+            new CopilotSdkStreamEvent(
+                CopilotSdkStreamEventType.ReasoningDelta,
+                Content: "Inspect repo",
+                ReasoningId: "reasoning-1",
+                IsAuthoritativeReasoningReplay: true),
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.Completed)
+        ]));
+        var messages = new List<CliMessage>();
+
+        await foreach (var message in provider.ExecuteAsync(new CopilotOptions(), "hello"))
+        {
+            messages.Add(message);
+        }
+
+        var reasoningMessages = messages.Where(static message => message.Type == "reasoning").ToArray();
+        reasoningMessages.Length.ShouldBe(2);
+        reasoningMessages[0].Content.GetProperty("text").GetString().ShouldBe("Inspect repo");
+        reasoningMessages[0].Content.GetProperty("is_authoritative_replay").GetBoolean().ShouldBeFalse();
+        reasoningMessages[1].Content.GetProperty("text").GetString().ShouldBe("Inspect repo");
+        reasoningMessages[1].Content.GetProperty("is_authoritative_replay").GetBoolean().ShouldBeTrue();
+        reasoningMessages[1].Content.GetProperty("reasoning_id").GetString().ShouldBe("reasoning-1");
     }
 
     [Fact]

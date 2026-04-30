@@ -26,4 +26,5 @@ internal sealed record CopilotSdkStreamEvent(
     string? ToolCallId = null,
     string? RawEventType = null,
     string? ReasoningId = null,
+    bool IsAuthoritativeReasoningReplay = false,
     double? TotalResponseSizeBytes = null);
