@@ -246,7 +246,7 @@ await using var provider = services.BuildServiceProvider();
 var claude = provider.GetRequiredService<ICliProvider<ClaudeCodeOptions>>();
 var codebuddy = provider.GetRequiredService<ICliProvider<CodebuddyOptions>>();
 var copilot = provider.GetRequiredService<ICliProvider<CopilotOptions>>();
-var codex = provider.GetRequiredService<ICliProvider<CodexOptions>>();
+var codex = provider.GetRequiredService<ICodexProvider>();
 var deepAgents = provider.GetRequiredService<ICliProvider<DeepAgentsOptions>>();
 var gemini = provider.GetRequiredService<ICliProvider<GeminiOptions>>();
 var hermes = provider.GetRequiredService<ICliProvider<HermesOptions>>();
@@ -296,7 +296,7 @@ Built-in providers now participate in a shared pooling architecture:
 
 - ACP providers (`CodeBuddy`, `Gemini`, `Hermes`, `Kimi`, `Kiro`, `QoderCLI`) lease warm ACP sessions from the shared `CliProviderPoolCoordinator`.
 - `Claude Code` keeps native `SessionId` / `Resume` continuity but always starts a fresh local CLI transport for each invocation and disposes it after the terminal message.
-- `Codex` keeps thread-resume state in the shared pool for an explicit `LogicalSessionKey` or a stable `ThreadId`; a shared working directory alone never becomes the pool identity.
+- `Codex` runs each request in a fresh local CLI process. Resume continuity depends on an explicit `ThreadId`; there is no Codex-specific runtime pooling.
 - `Copilot` does not participate in the shared runtime pool. Each invocation creates a fresh SDK runtime, and continuity depends only on provider-native `SessionId` resume semantics.
 
 Providers that actually participate in pooling expose `PoolSettings` so callers can disable pooling or tune provider-level behavior. `ClaudeCodeOptions` intentionally does not expose provider-level pool controls anymore:
@@ -323,7 +323,7 @@ Operational notes:
 - Idle entries are reaped before capacity failures are reported; if a provider is still full after TTL cleanup, the oldest idle entry is evicted next.
 - Faulted transports and broken ACP sessions are removed immediately instead of being returned to the pool.
 - `CliAcpSessionPool.GetDiagnosticsSnapshot()` now reports global plus provider-scoped hit/miss/evict/fault counters, along with the latest eviction/fault reason; the pool also emits structured logs and `System.Diagnostics.Metrics` counters for monitoring hooks.
-- Default ACP idle TTL baselines remain provider-specific: `codebuddy/codex/deepagents/gemini/kimi/kiro/qodercli=10m` and `hermes=24h`. `claude-code`, `copilot`, and `opencode` do not register shared local-runtime TTL entries.
+- Default ACP idle TTL baselines remain provider-specific: `codebuddy/deepagents/gemini/kimi/kiro/qodercli=10m` and `hermes=24h`. `claude-code`, `codex`, `copilot`, and `opencode` do not register shared local-runtime TTL entries.
 - Hosts can enable `CliProcessOwnershipOptions` to persist managed subprocess PID ownership. `hagicode-core` now defaults this to `DataDir/cli-owned-processes.json` and reaps matching orphaned CLI processes during startup recovery.
 
 CodeBuddy execution options cover the ACP-specific runtime settings without forcing raw command lines:
@@ -376,24 +376,25 @@ Set `SessionId` when you want provider-native Copilot resume semantics. The prov
 Codex execution options cover the common CLI settings without forcing raw command lines:
 
 ```csharp
-var options = new CodexOptions
+var options = new CodexSessionOptions
 {
-    Model = "gpt-5-codex",
-    SandboxMode = "workspace-write",
-    ApprovalPolicy = "never",
-    WorkingDirectory = "/path/to/repo",
-    LogicalSessionKey = "session-123|/path/to/repo|codex|gpt-5-codex",
-    AddDirectories = ["/path/to/repo"],
-    SkipGitRepositoryCheck = true,
+    ThreadOptions = new ThreadOptions
+    {
+        Model = "gpt-5-codex",
+        SandboxMode = SandboxMode.WorkspaceWrite,
+        ApprovalPolicy = ApprovalMode.Never,
+        WorkingDirectory = "/path/to/repo",
+        AdditionalDirectories = ["/path/to/repo"],
+        SkipGitRepoCheck = true,
+    }
 };
 
-await foreach (var message in codex.ExecuteAsync(options, "Reply with exactly the word 'pong'"))
-{
-    Console.WriteLine(message.Type);
-}
+await using var codexSession = await codex.CreateSessionAsync(options);
+var result = await codexSession.Thread.RunAsync("Reply with exactly the word 'pong'");
+Console.WriteLine(result.FinalResponse);
 ```
 
-For pooled Codex sessions, `LogicalSessionKey` should remain stable for the same logical conversation and differ across parallel conversations that share a repository path. The provider isolates execution locks by that key, records acquire/wait/reindex diagnostics, and registers a thread-based resume alias after `thread.started`. If both `LogicalSessionKey` and `ThreadId` are absent, the request stays anonymous and does not reuse a pooled entry solely because the directory matches.
+For Codex sessions, pass a stable `CodexSessionOptions.ThreadId` when you want to resume a previous conversation. Requests without `ThreadId` stay anonymous and always start a fresh local CLI process.
 
 Hermes execution options cover the managed `hermes acp` bootstrap path without forcing raw process wiring. `SessionId` is treated as an in-memory conversation key for the current provider instance, rather than a cross-process resume token:
 

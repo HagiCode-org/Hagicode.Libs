@@ -41,7 +41,7 @@ await using var serviceProvider = services.BuildServiceProvider();
 var executionFacade = serviceProvider.GetRequiredService<ICliExecutionFacade>();
 var codebuddy = serviceProvider.GetRequiredService<ICliProvider<CodebuddyOptions>>();
 var copilot = serviceProvider.GetRequiredService<ICliProvider<CopilotOptions>>();
-var codex = serviceProvider.GetRequiredService<ICliProvider<CodexOptions>>();
+var codex = serviceProvider.GetRequiredService<ICodexProvider>();
 var deepAgents = serviceProvider.GetRequiredService<ICliProvider<DeepAgentsOptions>>();
 var hermes = serviceProvider.GetRequiredService<ICliProvider<HermesOptions>>();
 var kimi = serviceProvider.GetRequiredService<ICliProvider<KimiOptions>>();
@@ -137,21 +137,22 @@ var resumedOptions = copilotOptions with { SessionId = "copilot-session-123" };
 // Without SessionId, Copilot requests stay anonymous; WorkingDirectory and permission
 // flags only shape the compatibility fingerprint and will not hit the shared pool alone.
 
-var options = new CodexOptions
+var codexOptions = new CodexSessionOptions
 {
-    WorkingDirectory = "/path/to/repo",
-    Model = "gpt-5-codex",
-    SandboxMode = "workspace-write",
-    ApprovalPolicy = "never",
-    LogicalSessionKey = "session-123|/path/to/repo|codex|gpt-5-codex",
-    AddDirectories = ["/path/to/repo"],
-    SkipGitRepositoryCheck = true,
+    ThreadOptions = new ThreadOptions
+    {
+        WorkingDirectory = "/path/to/repo",
+        Model = "gpt-5-codex",
+        SandboxMode = SandboxMode.WorkspaceWrite,
+        ApprovalPolicy = ApprovalMode.Never,
+        AdditionalDirectories = ["/path/to/repo"],
+        SkipGitRepoCheck = true,
+    }
 };
 
-await foreach (var message in codex.ExecuteAsync(options, "Reply with exactly the word 'pong'"))
-{
-    Console.WriteLine($"{message.Type}: {message.Content}");
-}
+await using var codexSession = await codex.CreateSessionAsync(codexOptions);
+var codexResult = await codexSession.Thread.RunAsync("Reply with exactly the word 'pong'");
+Console.WriteLine(codexResult.FinalResponse);
 
 var deepAgentsOptions = new DeepAgentsOptions
 {
@@ -174,11 +175,8 @@ await foreach (var message in deepAgents.ExecuteAsync(deepAgentsOptions, "Reply 
 // sessions re-apply ModeId before every prompt and a faulted entry is evicted so
 // later requests can cold-start a fresh session.
 
-// Reuse the same logical Codex session key to keep thread continuity on later calls.
-// The logical key stays stable, while the compatibility fingerprint decides whether
-// the existing warm runtime can be resumed or must be rebuilt under that same key.
-// If LogicalSessionKey and ThreadId are both absent, the request remains anonymous
-// even when WorkingDirectory matches a previous call.
+// Reuse the same Codex thread id to continue a previous conversation by setting
+// CodexSessionOptions.ThreadId before calling CreateSessionAsync.
 
 var kimiOptions = new KimiOptions
 {
@@ -233,7 +231,7 @@ Practical boundaries:
 - `CodeBuddy`, `Gemini`, `Hermes`, `Kimi`, `Kiro`, and `QoderCLI` pool live ACP sessions.
 - `DeepAgents` pools live ACP sessions, treats `DeepAgentsOptions.ModeId` as the authoritative typed session-mode signal, re-applies it before prompt execution, and evicts faulted entries so later acquires can cold-start a fresh session.
 - `Claude Code` keeps `SessionId` / `Resume` as Claude-native continuity controls, but every `ExecuteAsync` invocation starts a fresh local transport and disposes it after the terminal message.
-- `Codex` keeps logical session identity stable, but rebuilds pooled entries when the compatibility fingerprint changes before reusing a previous thread binding.
+- `Codex` runs each request in a fresh local CLI process, reusing only the persisted thread binding when the compatibility fingerprint still matches.
 - `Copilot` only treats explicit `SessionId` as the logical reuse key; permissions and runtime flags stay in the compatibility fingerprint so config changes cold-start a replacement runtime under the same session identity.
 - `CodeBuddy` and `Hermes` now include `ModeId` in their reuse fingerprint and re-apply it after `session/new` or warm reuse.
 - Providers that expose `PoolSettings` can still disable pooling per call, which falls back to the original one-shot behavior without changing message semantics.
