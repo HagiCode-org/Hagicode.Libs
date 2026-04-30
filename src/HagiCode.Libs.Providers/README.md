@@ -9,7 +9,7 @@
 - `AddHagiCodeLibs()` for dependency injection registration
 - A provider registry for resolving providers by name or alias
 - Registration of the shared `ICliExecutionFacade` for provider-side probes or adapters
-- Registration of the shared `CliProviderPoolCoordinator`, provider-scoped pool defaults, and ACP/runtime reuse backends
+- Registration of the shared `CliProviderPoolCoordinator`, Hermes pool defaults, and ACP/runtime reuse backends
 - Single-attempt provider primitives that preserve native thread or session context for upstream retry orchestration
 
 ## Install
@@ -48,7 +48,7 @@ var kimi = serviceProvider.GetRequiredService<ICliProvider<KimiOptions>>();
 var kiro = serviceProvider.GetRequiredService<ICliProvider<KiroOptions>>();
 ```
 
-The same DI graph also exposes the shared pool services when advanced callers need diagnostics or explicit cleanup:
+The same DI graph also exposes the shared pool services for Hermes diagnostics or explicit cleanup:
 
 ```csharp
 using HagiCode.Libs.Providers.Pooling;
@@ -62,7 +62,7 @@ var poolDefaults = serviceProvider.GetRequiredService<CliProviderPoolConfigurati
 `Claude Code`、`CodeBuddy`、`Hermes` 现在与 `hagicode-core` 的对应 provider 薄适配层共享同一套 libs-backed 实现。重点是：
 
 - `Claude Code` 继续保留 raw stream / resume 语义，但 `ClaudeCodeProvider` 现在固定按次启动并回收本地 CLI 进程，不再做 warm transport reuse
-- `CodeBuddy` 的 ACP session reuse、tool update 归一化与 permission-mode 映射统一落在 `CodebuddyProvider`
+- `CodeBuddy` 的 tool update 归一化与 permission-mode 映射统一落在 `CodebuddyProvider`
 - `Hermes` 的 ACP session reuse、fallback 文本聚合与 lifecycle 诊断统一落在 `HermesProvider`
 - 自动重试调度属于 `hagicode-core` 的 backend wrapper；`HagiCode.Libs.Providers` 只负责单次执行并保留可恢复上下文
 
@@ -135,7 +135,7 @@ await foreach (var message in copilot.ExecuteAsync(copilotOptions, "Reply with e
 var resumedOptions = copilotOptions with { SessionId = "copilot-session-123" };
 
 // Without SessionId, Copilot requests stay anonymous; WorkingDirectory and permission
-// flags only shape the compatibility fingerprint and will not hit the shared pool alone.
+// flags only shape the compatibility fingerprint and do not preserve prior runtime state on their own.
 
 var codexOptions = new CodexSessionOptions
 {
@@ -171,9 +171,8 @@ await foreach (var message in deepAgents.ExecuteAsync(deepAgentsOptions, "Reply 
 }
 
 // ModeId is the authoritative ACP session-mode contract for DeepAgents.
-// Compatibility flags such as --auto-approve may still be forwarded, but pooled
-// sessions re-apply ModeId before every prompt and a faulted entry is evicted so
-// later requests can cold-start a fresh session.
+// Compatibility flags such as --auto-approve may still be forwarded, but cross-call
+// resume depends on provider-native session/load support.
 
 // Reuse the same Codex thread id to continue a previous conversation by setting
 // CodexSessionOptions.ThreadId before calling CreateSessionAsync.
@@ -207,12 +206,17 @@ await foreach (var message in kiro.ExecuteAsync(kiroOptions, "Reply with exactly
 }
 ```
 
-## Pool controls
+## Vendored Codex SDK notice
 
-ACP-backed and pooled runtime providers expose `PoolSettings`. `ClaudeCodeOptions` 则只保留真实 Claude CLI 参数，因为 Claude Code 现在始终按 one-shot 生命周期执行：
+The Codex integration vendors source from `ManagedCode.CodexSharpSDK` under `Codex/Vendored/`.
+The upstream MIT license is preserved in source control at `Codex/Vendored/LICENSE.ManagedCode.CodexSharpSDK.txt` and is included in the NuGet package under `vendor/codex/`.
+
+## Hermes pool controls
+
+`Hermes` is the only built-in provider that still exposes `PoolSettings`:
 
 ```csharp
-var qoderOptions = new QoderCliOptions
+var hermesPoolOptions = new HermesOptions
 {
     SessionId = "demo-session",
     WorkingDirectory = "/path/to/repo",
@@ -228,13 +232,10 @@ var qoderOptions = new QoderCliOptions
 
 Practical boundaries:
 
-- `CodeBuddy`, `Gemini`, `Hermes`, `Kimi`, `Kiro`, and `QoderCLI` pool live ACP sessions.
-- `DeepAgents` pools live ACP sessions, treats `DeepAgentsOptions.ModeId` as the authoritative typed session-mode signal, re-applies it before prompt execution, and evicts faulted entries so later acquires can cold-start a fresh session.
-- `Claude Code` keeps `SessionId` / `Resume` as Claude-native continuity controls, but every `ExecuteAsync` invocation starts a fresh local transport and disposes it after the terminal message.
-- `Codex` runs each request in a fresh local CLI process, reusing only the persisted thread binding when the compatibility fingerprint still matches.
-- `Copilot` only treats explicit `SessionId` as the logical reuse key; permissions and runtime flags stay in the compatibility fingerprint so config changes cold-start a replacement runtime under the same session identity.
-- `CodeBuddy` and `Hermes` now include `ModeId` in their reuse fingerprint and re-apply it after `session/new` or warm reuse.
-- Providers that expose `PoolSettings` can still disable pooling per call, which falls back to the original one-shot behavior without changing message semantics.
+- `Hermes` pools live ACP sessions.
+- `Hermes` includes `ModeId` in its reuse fingerprint and re-applies it after `session/new` or warm reuse.
+- Setting `HermesOptions.PoolSettings.Enabled = false` falls back to the one-shot path without changing message semantics.
+- Non-Hermes providers now execute as one-shot transports or processes. `SessionId` remains a provider-native continuity hint only where that backend supports it.
 - Idle eviction is lazy and deterministic; if a lease faults, the coordinator disposes that entry immediately rather than returning it to the warm set.
 
 ## Adoption boundaries
