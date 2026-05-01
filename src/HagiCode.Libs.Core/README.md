@@ -34,6 +34,8 @@ Console.WriteLine(executablePath ?? "Codex CLI not found.");
 Console.WriteLine(environment.TryGetValue("PATH", out var path) ? path : "PATH is unavailable.");
 ```
 
+Set `HAGICODE_AGENT_CLI_PATH` to a platform-separated directory list when you need HagiCode to search custom Agent CLI install locations before falling back to `PATH`.
+
 Execute a command through the shared execution facade without constructing `ProcessStartContext` directly:
 
 ```csharp
