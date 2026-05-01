@@ -5,14 +5,57 @@ namespace HagiCode.Libs.Core.Tests.Discovery;
 
 public sealed class CliExecutableResolverTests
 {
+    private const string AgentCliPathEnvironmentVariable = "HAGICODE_AGENT_CLI_PATH";
+
     [Fact]
-    public void ResolveExecutablePath_uses_custom_path_environment()
+    public void ResolveExecutablePath_prefers_hagicode_agent_cli_path_before_path()
     {
         using var sandbox = new DirectorySandbox();
-        var executable = sandbox.CreateFile("alpha");
+        var executable = sandbox.CreateFile(Path.Combine("custom", "alpha"));
+        sandbox.CreateFile(Path.Combine("path", "alpha"));
         var resolver = new CliExecutableResolver();
 
-        var resolved = resolver.ResolveExecutablePath("alpha", sandbox.BuildEnvironment());
+        var resolved = resolver.ResolveExecutablePath(
+            "alpha",
+            sandbox.BuildEnvironment(
+                customPath: Path.Combine(sandbox.RootPath, "custom"),
+                path: Path.Combine(sandbox.RootPath, "path")));
+
+        resolved.ShouldBe(executable);
+    }
+
+    [Fact]
+    public void ResolveExecutablePath_preserves_hagicode_agent_cli_path_directory_order()
+    {
+        using var sandbox = new DirectorySandbox();
+        var firstMatch = sandbox.CreateFile(Path.Combine("custom-a", "alpha"));
+        sandbox.CreateFile(Path.Combine("custom-b", "alpha"));
+        var resolver = new CliExecutableResolver();
+
+        var resolved = resolver.ResolveExecutablePath(
+            "alpha",
+            sandbox.BuildEnvironment(
+                customPath: string.Join(
+                    Path.PathSeparator,
+                    [Path.Combine(sandbox.RootPath, "custom-a"), Path.Combine(sandbox.RootPath, "custom-b")]),
+                path: Path.Combine(sandbox.RootPath, "path")));
+
+        resolved.ShouldBe(firstMatch);
+    }
+
+    [Fact]
+    public void ResolveExecutablePath_falls_back_to_path_when_hagicode_agent_cli_path_has_no_match()
+    {
+        using var sandbox = new DirectorySandbox();
+        sandbox.CreateDirectory("custom");
+        var executable = sandbox.CreateFile(Path.Combine("path", "alpha"));
+        var resolver = new CliExecutableResolver();
+
+        var resolved = resolver.ResolveExecutablePath(
+            "alpha",
+            sandbox.BuildEnvironment(
+                customPath: Path.Combine(sandbox.RootPath, "custom"),
+                path: Path.Combine(sandbox.RootPath, "path")));
 
         resolved.ShouldBe(executable);
     }
@@ -55,13 +98,17 @@ public sealed class CliExecutableResolverTests
     }
 
     [Fact]
-    public void ResolveExecutablePath_on_windows_tries_known_extensions_for_npm_style_short_names()
+    public void ResolveExecutablePath_on_windows_tries_known_extensions_for_hagicode_agent_cli_path_entries()
     {
         using var sandbox = new DirectorySandbox();
-        var executable = sandbox.CreateFile("npm.cmd");
+        var executable = sandbox.CreateFile(Path.Combine("custom", "npm.cmd"));
         var resolver = new CliExecutableResolver(static () => true);
 
-        var resolved = resolver.ResolveExecutablePath("npm", sandbox.BuildEnvironment(pathExt: ".EXE;.CMD;.BAT"));
+        var resolved = resolver.ResolveExecutablePath(
+            "npm",
+            sandbox.BuildEnvironment(
+                customPath: Path.Combine(sandbox.RootPath, "custom"),
+                pathExt: ".EXE;.CMD;.BAT"));
 
         resolved.ShouldBe(executable);
     }
@@ -106,11 +153,22 @@ public sealed class CliExecutableResolverTests
             return fullPath;
         }
 
-        public IReadOnlyDictionary<string, string?> BuildEnvironment(string? pathExt = null)
+        public string CreateDirectory(string relativePath)
+        {
+            var fullPath = Path.Combine(_root, relativePath);
+            Directory.CreateDirectory(fullPath);
+            return fullPath;
+        }
+
+        public IReadOnlyDictionary<string, string?> BuildEnvironment(
+            string? customPath = null,
+            string? path = null,
+            string? pathExt = null)
         {
             return new Dictionary<string, string?>
             {
-                ["PATH"] = _root,
+                [AgentCliPathEnvironmentVariable] = customPath,
+                ["PATH"] = path ?? _root,
                 ["PATHEXT"] = pathExt
             };
         }

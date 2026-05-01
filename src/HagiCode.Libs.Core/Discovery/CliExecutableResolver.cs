@@ -7,6 +7,7 @@ namespace HagiCode.Libs.Core.Discovery;
 /// </summary>
 public class CliExecutableResolver
 {
+    private const string AgentCliPathEnvironmentVariable = "HAGICODE_AGENT_CLI_PATH";
     private static readonly string[] DefaultWindowsExtensions = [".exe", ".cmd", ".bat"];
     private readonly Func<bool> _isWindows;
 
@@ -165,7 +166,22 @@ public class CliExecutableResolver
 
         yield return Directory.GetCurrentDirectory();
 
-        var pathValue = GetEnvironmentValue(environmentVariables, "PATH");
+        foreach (var path in EnumerateEnvironmentDirectories(environmentVariables, AgentCliPathEnvironmentVariable))
+        {
+            yield return path;
+        }
+
+        foreach (var path in EnumerateEnvironmentDirectories(environmentVariables, "PATH"))
+        {
+            yield return path;
+        }
+    }
+
+    private static IEnumerable<string> EnumerateEnvironmentDirectories(
+        IReadOnlyDictionary<string, string?>? environmentVariables,
+        string environmentVariableName)
+    {
+        var pathValue = GetEnvironmentValue(environmentVariables, environmentVariableName);
         if (string.IsNullOrWhiteSpace(pathValue))
         {
             yield break;
