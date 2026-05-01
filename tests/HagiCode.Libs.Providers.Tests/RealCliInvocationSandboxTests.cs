@@ -5,6 +5,39 @@ namespace HagiCode.Libs.Providers.Tests;
 public sealed class RealCliInvocationSandboxTests
 {
     [Fact]
+    public void CreateEnvironmentWithAgentCliPath_sets_override_and_removes_matching_path_entries()
+    {
+        var baseEnvironment = new Dictionary<string, string?>(StringComparer.Ordinal)
+        {
+            ["PATH"] = string.Join(Path.PathSeparator, ["/opt/agent", "/usr/local/bin", "/opt/agent-extra"]),
+            ["HOME"] = "/tmp/home"
+        };
+
+        var environment = RealCliInvocationSandbox.CreateEnvironmentWithAgentCliPath(
+            baseEnvironment,
+            ["/opt/agent", "/opt/agent-extra"]);
+
+        environment["HAGICODE_AGENT_CLI_PATH"].ShouldBe(string.Join(Path.PathSeparator, ["/opt/agent", "/opt/agent-extra"]));
+        environment["PATH"].ShouldBe("/usr/local/bin");
+        environment["HOME"].ShouldBe("/tmp/home");
+    }
+
+    [Fact]
+    public void CreateEnvironmentWithAgentCliPath_clears_override_when_directories_are_empty()
+    {
+        var baseEnvironment = new Dictionary<string, string?>(StringComparer.Ordinal)
+        {
+            ["HAGICODE_AGENT_CLI_PATH"] = "/old/custom/bin",
+            ["PATH"] = "/usr/local/bin"
+        };
+
+        var environment = RealCliInvocationSandbox.CreateEnvironmentWithAgentCliPath(baseEnvironment, []);
+
+        environment.ContainsKey("HAGICODE_AGENT_CLI_PATH").ShouldBeFalse();
+        environment["PATH"].ShouldBe("/usr/local/bin");
+    }
+
+    [Fact]
     public void DeleteDirectoryWithRetries_retries_io_failures_until_delete_succeeds()
     {
         using var tempDirectory = new TemporaryDirectory();

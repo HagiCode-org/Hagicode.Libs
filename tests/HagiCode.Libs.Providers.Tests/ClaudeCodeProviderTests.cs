@@ -350,6 +350,54 @@ public sealed class ClaudeCodeProviderTests
     [Fact]
     [Trait("Category", "RealCli")]
     [Trait("Category", "RealCliInvocationContract")]
+    public async Task ExecuteAsync_real_cli_can_resolve_from_hagicode_agent_cli_path_when_path_does_not_include_cli()
+    {
+        if (!IsRealCliTestsEnabled())
+        {
+            return;
+        }
+
+        var executableResolver = new CliExecutableResolver();
+        var realClaudePath = executableResolver.ResolveFirstAvailablePath(ClaudeExecutableCandidates);
+        realClaudePath.ShouldNotBeNullOrWhiteSpace("The real CLI lane must install Claude Code before running the HAGICODE_AGENT_CLI_PATH integration test.");
+
+        using var sandbox = new RealCliInvocationSandbox();
+        var executableDirectory = Path.GetDirectoryName(realClaudePath!)
+            ?? throw new InvalidOperationException("The real Claude executable path must include a parent directory.");
+        var runtimeEnvironment = sandbox.CreateEnvironmentWithAgentCliPath(executableDirectory);
+
+        if (runtimeEnvironment.TryGetValue("PATH", out var pathValue) && !string.IsNullOrWhiteSpace(pathValue))
+        {
+            pathValue.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Any(pathEntry => string.Equals(
+                    pathEntry,
+                    executableDirectory,
+                    OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+                .ShouldBeFalse();
+        }
+
+        await using var provider = new ClaudeCodeProvider(
+            executableResolver,
+            new CliProcessManager(),
+            new StaticRuntimeEnvironmentResolver(runtimeEnvironment));
+
+        var failureMessage = await RealCliInvocationTestHarness.CaptureFailureMessageAsync(
+            provider,
+            new ClaudeCodeOptions
+            {
+                WorkingDirectory = sandbox.WorkingDirectory,
+                AddDirectories = [sandbox.WorkingDirectory],
+                PermissionMode = "plan"
+            },
+            "Reply with exactly the word 'pong'.",
+            TimeSpan.FromSeconds(45));
+
+        RealCliInvocationTestHarness.AssertActionableFailure("claude-code/hagicode-agent-cli-path", failureMessage);
+    }
+
+    [Fact]
+    [Trait("Category", "RealCli")]
+    [Trait("Category", "RealCliInvocationContract")]
     [Trait("Category", "RealCliWindowsZhCnWhitespaceShim")]
     public async Task ExecuteAsync_real_cli_windows_zh_cn_whitespace_cmd_shim_surfaces_actionable_failure_without_mojibake()
     {

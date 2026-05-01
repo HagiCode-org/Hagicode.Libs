@@ -204,6 +204,7 @@ internal static class RealCliInvocationTestHarness
 
 internal sealed class RealCliInvocationSandbox : IRuntimeEnvironmentResolver, IDisposable
 {
+    private const string AgentCliPathEnvironmentVariable = "HAGICODE_AGENT_CLI_PATH";
     private static readonly TimeSpan DeleteRetryDelay = TimeSpan.FromMilliseconds(250);
     private static readonly string[] SensitiveEnvironmentKeys =
     [
@@ -288,9 +289,52 @@ internal sealed class RealCliInvocationSandbox : IRuntimeEnvironmentResolver, ID
 
     public string TempDirectory { get; }
 
+    public IReadOnlyDictionary<string, string?> CreateEnvironmentWithAgentCliPath(params string[] customDirectories)
+    {
+        return CreateEnvironmentWithAgentCliPath(_environment, customDirectories);
+    }
+
     public Task<IReadOnlyDictionary<string, string?>> ResolveAsync(CancellationToken cancellationToken = default)
     {
         return Task.FromResult(_environment);
+    }
+
+    internal static IReadOnlyDictionary<string, string?> CreateEnvironmentWithAgentCliPath(
+        IReadOnlyDictionary<string, string?> baseEnvironment,
+        IEnumerable<string> customDirectories)
+    {
+        ArgumentNullException.ThrowIfNull(baseEnvironment);
+        ArgumentNullException.ThrowIfNull(customDirectories);
+
+        var directoryComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var normalizedDirectories = customDirectories
+            .Where(static directory => !string.IsNullOrWhiteSpace(directory))
+            .Select(static directory => directory.Trim())
+            .Distinct(directoryComparer)
+            .ToArray();
+
+        var environment = baseEnvironment.ToDictionary(
+            static pair => pair.Key,
+            static pair => pair.Value,
+            StringComparer.Ordinal);
+
+        if (normalizedDirectories.Length == 0)
+        {
+            environment.Remove(AgentCliPathEnvironmentVariable);
+            return new ReadOnlyDictionary<string, string?>(environment);
+        }
+
+        environment[AgentCliPathEnvironmentVariable] = string.Join(Path.PathSeparator, normalizedDirectories);
+
+        if (environment.TryGetValue("PATH", out var pathValue) && !string.IsNullOrWhiteSpace(pathValue))
+        {
+            var filteredPathEntries = pathValue
+                .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(pathEntry => !normalizedDirectories.Contains(pathEntry, directoryComparer));
+            environment["PATH"] = string.Join(Path.PathSeparator, filteredPathEntries);
+        }
+
+        return new ReadOnlyDictionary<string, string?>(environment);
     }
 
     public void Dispose()
