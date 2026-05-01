@@ -14,6 +14,14 @@ public sealed record CopilotCliArgumentBuildResult(
 /// </summary>
 public static class CopilotCliCompatibility
 {
+    private static readonly HashSet<string> MaximumAccessSuppressedValueFlags = new(StringComparer.Ordinal)
+    {
+        "--add-dir",
+        "--available-tools",
+        "--deny-tool",
+        "--deny-url"
+    };
+
     private static readonly HashSet<string> SupportedStandaloneFlags = new(StringComparer.Ordinal)
     {
         "--allow-all",
@@ -113,9 +121,10 @@ public static class CopilotCliCompatibility
         var args = new List<string>();
         var diagnostics = new List<string>();
         var seenStandaloneFlags = new HashSet<string>(StringComparer.Ordinal);
+        var maximumAccessProfile = HasMaximumAccessProfile(options.Permissions);
 
-        AddDerivedArguments(options, args, seenStandaloneFlags);
-        AddConfiguredArguments(options.AdditionalArgs, args, diagnostics, seenStandaloneFlags);
+        AddDerivedArguments(options, args, diagnostics, seenStandaloneFlags, maximumAccessProfile);
+        AddConfiguredArguments(options.AdditionalArgs, args, diagnostics, seenStandaloneFlags, maximumAccessProfile);
 
         return new CopilotCliArgumentBuildResult(args, diagnostics);
     }
@@ -174,7 +183,9 @@ public static class CopilotCliCompatibility
     private static void AddDerivedArguments(
         CopilotOptions options,
         List<string> args,
-        HashSet<string> seenStandaloneFlags)
+        List<string> diagnostics,
+        HashSet<string> seenStandaloneFlags,
+        bool maximumAccessProfile)
     {
         if (options.Permissions.AllowAllTools)
         {
@@ -194,6 +205,15 @@ public static class CopilotCliCompatibility
         if (options.NoAskUser)
         {
             AddStandaloneFlag(args, seenStandaloneFlags, "--no-ask-user");
+        }
+
+        if (maximumAccessProfile)
+        {
+            AddScopedRestrictionSuppressionDiagnostic(diagnostics, "--add-dir", options.Permissions.AllowedPaths);
+            AddScopedRestrictionSuppressionDiagnostic(diagnostics, "--available-tools", options.Permissions.AllowedTools);
+            AddScopedRestrictionSuppressionDiagnostic(diagnostics, "--deny-tool", options.Permissions.DeniedTools);
+            AddScopedRestrictionSuppressionDiagnostic(diagnostics, "--deny-url", options.Permissions.DeniedUrls);
+            return;
         }
 
         foreach (var allowedPath in options.Permissions.AllowedPaths.Where(static path => !string.IsNullOrWhiteSpace(path)))
@@ -221,7 +241,8 @@ public static class CopilotCliCompatibility
         IEnumerable<string> additionalArgs,
         List<string> args,
         List<string> diagnostics,
-        HashSet<string> seenStandaloneFlags)
+        HashSet<string> seenStandaloneFlags,
+        bool maximumAccessProfile)
     {
         var tokens = additionalArgs
             .Where(static value => !string.IsNullOrWhiteSpace(value))
@@ -239,6 +260,12 @@ public static class CopilotCliCompatibility
 
             if (TrySplitOptionAssignment(token, out var assignedFlag, out var assignedValue))
             {
+                if (maximumAccessProfile && MaximumAccessSuppressedValueFlags.Contains(assignedFlag))
+                {
+                    diagnostics.Add(CreateMaximumAccessSuppressionMessage(assignedFlag));
+                    continue;
+                }
+
                 if (RejectedFlags.TryGetValue(assignedFlag, out var rejectedReason))
                 {
                     diagnostics.Add(CreateRejectedArgumentMessage(assignedFlag, rejectedReason));
@@ -261,6 +288,17 @@ public static class CopilotCliCompatibility
                 if (SupportedValueFlags.TryGetValue(token, out var rejectedValueCount))
                 {
                     index += SkipFlagValues(tokens, index, rejectedValueCount);
+                }
+
+                continue;
+            }
+
+            if (maximumAccessProfile && MaximumAccessSuppressedValueFlags.Contains(token))
+            {
+                diagnostics.Add(CreateMaximumAccessSuppressionMessage(token));
+                if (SupportedValueFlags.TryGetValue(token, out var suppressedValueCount))
+                {
+                    index += SkipFlagValues(tokens, index, suppressedValueCount);
                 }
 
                 continue;
@@ -355,6 +393,26 @@ public static class CopilotCliCompatibility
 
     private static string CreateRejectedArgumentMessage(string flag, string reason)
         => $"Copilot CLI startup argument '{flag}' was rejected because {reason}.";
+
+    private static string CreateMaximumAccessSuppressionMessage(string flag)
+        => $"Copilot CLI startup argument '{flag}' was ignored because maximum-access typed permissions suppress scoped restrictions for this request.";
+
+    private static bool HasMaximumAccessProfile(CopilotPermissionOptions permissions)
+    {
+        ArgumentNullException.ThrowIfNull(permissions);
+        return permissions.AllowAllTools && permissions.AllowAllPaths && permissions.AllowAllUrls;
+    }
+
+    private static void AddScopedRestrictionSuppressionDiagnostic(
+        List<string> diagnostics,
+        string flag,
+        IEnumerable<string> values)
+    {
+        if (values.Any(static value => !string.IsNullOrWhiteSpace(value)))
+        {
+            diagnostics.Add(CreateMaximumAccessSuppressionMessage(flag));
+        }
+    }
 
     private static void AddStandaloneFlag(
         List<string> args,

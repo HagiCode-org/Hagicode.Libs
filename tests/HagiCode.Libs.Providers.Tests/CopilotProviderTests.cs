@@ -108,6 +108,50 @@ public sealed class CopilotProviderTests
     }
 
     [Fact]
+    public void BuildCliArgs_suppresses_scoped_restrictions_for_maximum_access_profile()
+    {
+        var result = CopilotCliCompatibility.BuildCliArgs(new CopilotOptions
+        {
+            Permissions = new CopilotPermissionOptions
+            {
+                AllowAllTools = true,
+                AllowAllPaths = true,
+                AllowAllUrls = true,
+                AllowedPaths = ["/tmp/project"],
+                AllowedTools = ["grep"],
+                DeniedTools = ["rm"],
+                DeniedUrls = ["example.com"]
+            },
+            AdditionalArgs =
+            [
+                "--available-tools", "Read",
+                "--add-dir", "/tmp/other",
+                "--deny-tool", "Bash(rm:*)",
+                "--deny-url", "example.net"
+            ]
+        });
+
+        result.CliArgs.ShouldBe(
+        [
+            "--allow-all-tools",
+            "--allow-all-paths",
+            "--allow-all-urls",
+            "--no-ask-user"
+        ]);
+        result.Diagnostics.ShouldBe(
+        [
+            "Copilot CLI startup argument '--add-dir' was ignored because maximum-access typed permissions suppress scoped restrictions for this request.",
+            "Copilot CLI startup argument '--available-tools' was ignored because maximum-access typed permissions suppress scoped restrictions for this request.",
+            "Copilot CLI startup argument '--deny-tool' was ignored because maximum-access typed permissions suppress scoped restrictions for this request.",
+            "Copilot CLI startup argument '--deny-url' was ignored because maximum-access typed permissions suppress scoped restrictions for this request.",
+            "Copilot CLI startup argument '--available-tools' was ignored because maximum-access typed permissions suppress scoped restrictions for this request.",
+            "Copilot CLI startup argument '--add-dir' was ignored because maximum-access typed permissions suppress scoped restrictions for this request.",
+            "Copilot CLI startup argument '--deny-tool' was ignored because maximum-access typed permissions suppress scoped restrictions for this request.",
+            "Copilot CLI startup argument '--deny-url' was ignored because maximum-access typed permissions suppress scoped restrictions for this request."
+        ]);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_normalizes_sdk_stream_events_into_cli_messages()
     {
         var provider = CreateProvider(gateway: new StubCopilotSdkGateway(

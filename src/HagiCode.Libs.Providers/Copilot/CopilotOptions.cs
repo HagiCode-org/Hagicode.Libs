@@ -77,6 +77,7 @@ public sealed record CopilotOptions
 
     /// <summary>
     /// Gets or sets Copilot permission defaults forwarded to verified CLI startup arguments.
+    /// Setting all typed allow-all flags enables the maximum-access profile without relying on raw CLI flags.
     /// </summary>
     public CopilotPermissionOptions Permissions { get; init; } = new();
 
@@ -114,6 +115,7 @@ public enum CopilotAuthSource
 
 /// <summary>
 /// Permission settings forwarded to compatible Copilot CLI startup flags.
+/// When all typed allow-all switches are enabled, scoped allow/deny lists are treated as suppressed.
 /// </summary>
 public sealed record CopilotPermissionOptions
 {
@@ -134,21 +136,25 @@ public sealed record CopilotPermissionOptions
 
     /// <summary>
     /// Gets or sets the explicitly allowed tool names.
+    /// Ignored when the maximum-access allow-all profile is active.
     /// </summary>
     public IReadOnlyList<string> AllowedTools { get; init; } = [];
 
     /// <summary>
     /// Gets or sets the explicitly allowed filesystem paths.
+    /// Ignored when the maximum-access allow-all profile is active.
     /// </summary>
     public IReadOnlyList<string> AllowedPaths { get; init; } = [];
 
     /// <summary>
     /// Gets or sets the explicitly denied tool names.
+    /// Ignored when the maximum-access allow-all profile is active.
     /// </summary>
     public IReadOnlyList<string> DeniedTools { get; init; } = [];
 
     /// <summary>
     /// Gets or sets the explicitly denied URLs.
+    /// Ignored when the maximum-access allow-all profile is active.
     /// </summary>
     public IReadOnlyList<string> DeniedUrls { get; init; } = [];
 }
