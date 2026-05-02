@@ -136,6 +136,7 @@ public sealed class CopilotProviderTests
             "--allow-all-tools",
             "--allow-all-paths",
             "--allow-all-urls",
+            "--allow-all",
             "--no-ask-user"
         ]);
         result.Diagnostics.ShouldBe(
@@ -149,6 +150,43 @@ public sealed class CopilotProviderTests
             "Copilot CLI startup argument '--deny-tool' was ignored because maximum-access typed permissions suppress scoped restrictions for this request.",
             "Copilot CLI startup argument '--deny-url' was ignored because maximum-access typed permissions suppress scoped restrictions for this request."
         ]);
+    }
+
+    [Fact]
+    public void BuildCliArgs_includes_allow_all_aggregate_flag_for_maximum_access_profile()
+    {
+        var result = CopilotCliCompatibility.BuildCliArgs(new CopilotOptions
+        {
+            Permissions = new CopilotPermissionOptions
+            {
+                AllowAllTools = true,
+                AllowAllPaths = true,
+                AllowAllUrls = true
+            }
+        });
+
+        result.CliArgs.ShouldContain("--allow-all-tools");
+        result.CliArgs.ShouldContain("--allow-all-paths");
+        result.CliArgs.ShouldContain("--allow-all-urls");
+        result.CliArgs.ShouldContain("--allow-all");
+    }
+
+    [Fact]
+    public void BuildCliArgs_does_not_include_allow_all_for_non_maximum_access_profile()
+    {
+        var result = CopilotCliCompatibility.BuildCliArgs(new CopilotOptions
+        {
+            Permissions = new CopilotPermissionOptions
+            {
+                AllowAllTools = true,
+                AllowAllPaths = true,
+                AllowAllUrls = false
+            }
+        });
+
+        result.CliArgs.ShouldContain("--allow-all-tools");
+        result.CliArgs.ShouldContain("--allow-all-paths");
+        result.CliArgs.ShouldNotContain("--allow-all");
     }
 
     [Fact]

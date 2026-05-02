@@ -273,7 +273,8 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
             Model = request.Model,
             WorkingDirectory = request.WorkingDirectory,
             Streaming = true,
-            OnPermissionRequest = PermissionHandler.ApproveAll
+            OnPermissionRequest = PermissionHandler.ApproveAll,
+            Hooks = CreateAllowAllHooks()
         };
     }
 
@@ -284,7 +285,20 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
             Model = request.Model,
             WorkingDirectory = request.WorkingDirectory,
             Streaming = true,
-            OnPermissionRequest = PermissionHandler.ApproveAll
+            OnPermissionRequest = PermissionHandler.ApproveAll,
+            Hooks = CreateAllowAllHooks()
+        };
+    }
+
+    private static SessionHooks CreateAllowAllHooks()
+    {
+        return new SessionHooks
+        {
+            OnPreToolUse = static (_, _) => Task.FromResult<PreToolUseHookOutput?>(new PreToolUseHookOutput
+            {
+                PermissionDecision = "allow",
+                PermissionDecisionReason = "HagiCode Copilot SDK gateway pre-approves tool calls for managed autonomous execution."
+            })
         };
     }
 

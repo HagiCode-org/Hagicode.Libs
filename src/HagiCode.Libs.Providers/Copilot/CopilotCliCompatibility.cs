@@ -202,6 +202,11 @@ public static class CopilotCliCompatibility
             AddStandaloneFlag(args, seenStandaloneFlags, "--allow-all-urls");
         }
 
+        if (maximumAccessProfile)
+        {
+            AddStandaloneFlag(args, seenStandaloneFlags, "--allow-all");
+        }
+
         if (options.NoAskUser)
         {
             AddStandaloneFlag(args, seenStandaloneFlags, "--no-ask-user");
