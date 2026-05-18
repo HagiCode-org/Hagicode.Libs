@@ -494,6 +494,37 @@ public sealed class CopilotProviderTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_preserves_leading_and_trailing_spaces_in_snapshots_and_reasoning_payloads()
+    {
+        var provider = CreateProvider(gateway: new StubCopilotSdkGateway(
+        [
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.TextDelta, Content: "  keep"),
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.AssistantSnapshot, Content: "  keep spacing  "),
+            new CopilotSdkStreamEvent(
+                CopilotSdkStreamEventType.ReasoningDelta,
+                Content: "\n  think carefully  \n",
+                ReasoningId: "reasoning-1",
+                IsAuthoritativeReasoningReplay: true),
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.Completed)
+        ]));
+        var messages = new List<CliMessage>();
+
+        await foreach (var message in provider.ExecuteAsync(new CopilotOptions(), "hello"))
+        {
+            messages.Add(message);
+        }
+
+        messages.Select(static message => message.Type).ShouldBe(["session.started", "assistant", "assistant", "reasoning", "result"]);
+        messages[1].Content.GetProperty("text").GetString().ShouldBe("  keep");
+        messages[1].Content.GetProperty("is_authoritative_snapshot").GetBoolean().ShouldBeFalse();
+        messages[2].Content.GetProperty("text").GetString().ShouldBe("  keep spacing  ");
+        messages[2].Content.GetProperty("is_authoritative_snapshot").GetBoolean().ShouldBeTrue();
+        messages[3].Content.GetProperty("text").GetString().ShouldBe("\n  think carefully  \n");
+        messages[3].Content.GetProperty("reasoning_id").GetString().ShouldBe("reasoning-1");
+        messages[3].Content.GetProperty("is_authoritative_replay").GetBoolean().ShouldBeTrue();
+    }
+
+    [Fact]
     public void NormalizeFailureMessage_formats_startup_timeout_with_actionable_marker()
     {
         var message = GitHubCopilotSdkGateway.NormalizeFailureMessage(
