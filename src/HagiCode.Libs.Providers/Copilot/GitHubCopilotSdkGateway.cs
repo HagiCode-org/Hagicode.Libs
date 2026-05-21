@@ -54,7 +54,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
                         SessionId: session.SessionId,
                         RequestedSessionId: request.SessionId);
                 }
-                catch (InvalidOperationException)
+                catch (Exception ex) when (ShouldFallbackToFreshSession(ex))
                 {
                     session = await client.CreateSessionAsync(
                         BuildSessionConfig(request),
@@ -137,6 +137,35 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
         }
 
         return rawMessage ?? "GitHub Copilot stream failed.";
+    }
+
+    private static bool ShouldFallbackToFreshSession(Exception exception)
+    {
+        if (exception is InvalidOperationException)
+        {
+            return true;
+        }
+
+        return EnumerateExceptionMessages(exception).Any(static message =>
+            message.Contains("Request session.resume failed with message: No authentication info available", StringComparison.OrdinalIgnoreCase)
+            || (message.Contains("session.resume", StringComparison.OrdinalIgnoreCase)
+                && message.Contains("no authentication info available", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static IEnumerable<string> EnumerateExceptionMessages(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException!)
+        {
+            if (!string.IsNullOrWhiteSpace(current.Message))
+            {
+                yield return current.Message;
+            }
+
+            if (current.InnerException is null)
+            {
+                yield break;
+            }
+        }
     }
 
     internal static SessionEventDispatchResult DispatchSessionEvent(SessionEvent evt, bool sawDelta)

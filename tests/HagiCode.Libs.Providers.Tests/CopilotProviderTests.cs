@@ -851,6 +851,44 @@ public sealed class CopilotProviderTests
     }
 
     [Fact]
+    public async Task CreateRuntimeAsync_falls_back_to_fresh_session_when_resume_lacks_authentication_info()
+    {
+        var factory = new ResumeFailureCopilotSdkClientFactory(
+            new IOException(
+                "Communication error with Copilot CLI: Request session.resume failed with message: No authentication info available",
+                new InvalidOperationException("Request session.resume failed with message: No authentication info available")));
+        var gateway = new GitHubCopilotSdkGateway(factory, new CopilotSdkEnvironmentLeaseCoordinator());
+        var request = new CopilotSdkRequest(
+            Prompt: "continue",
+            Model: null,
+            WorkingDirectory: "/tmp/project",
+            SessionId: "resume-session",
+            CliPath: "/custom/copilot",
+            CliUrl: null,
+            GitHubToken: null,
+            UseLoggedInUser: true,
+            Timeout: TimeSpan.FromSeconds(30),
+            IdleTimeout: TimeSpan.FromSeconds(30),
+            StartupTimeout: TimeSpan.FromSeconds(5),
+            CliArgs: [],
+            EnvironmentVariables: new Dictionary<string, string?>());
+
+        await using var runtime = await gateway.CreateRuntimeAsync(request);
+        var events = new List<CopilotSdkStreamEvent>();
+
+        await foreach (var eventData in runtime.SendPromptAsync(request))
+        {
+            events.Add(eventData);
+        }
+
+        factory.ResumeAttemptCount.ShouldBe(1);
+        factory.CreateAttemptCount.ShouldBe(1);
+        events.First().Type.ShouldBe(CopilotSdkStreamEventType.SessionStarted);
+        events.First().RequestedSessionId.ShouldBe("resume-session");
+        runtime.SessionId.ShouldBe("resume-session");
+    }
+
+    [Fact]
     public async Task ExecuteAsync_emits_error_terminal_message_when_gateway_fails()
     {
         var provider = CreateProvider(gateway: new StubCopilotSdkGateway(
@@ -1470,5 +1508,60 @@ public sealed class CopilotProviderTests
             string Prompt,
             IReadOnlyDictionary<string, string?> ObservedEnvironment,
             Action<string> EmitText);
+    }
+
+    private sealed class ResumeFailureCopilotSdkClientFactory(Exception resumeFailure) : ICopilotSdkClientFactory
+    {
+        public int CreateAttemptCount { get; private set; }
+
+        public int ResumeAttemptCount { get; private set; }
+
+        public ICopilotSdkClient Create(CopilotClientOptions options)
+        {
+            return new ResumeFailureCopilotSdkClient(this, resumeFailure);
+        }
+
+        private sealed class ResumeFailureCopilotSdkClient(
+            ResumeFailureCopilotSdkClientFactory owner,
+            Exception resumeFailure) : ICopilotSdkClient
+        {
+            public Task<ICopilotSdkSession> CreateSessionAsync(SessionConfig config, CancellationToken cancellationToken)
+            {
+                owner.CreateAttemptCount++;
+                return Task.FromResult<ICopilotSdkSession>(new ResumeFailureCopilotSdkSession(config.SessionId ?? "created-session"));
+            }
+
+            public Task<ICopilotSdkSession> ResumeSessionAsync(string sessionId, ResumeSessionConfig config, CancellationToken cancellationToken)
+            {
+                owner.ResumeAttemptCount++;
+                return Task.FromException<ICopilotSdkSession>(resumeFailure);
+            }
+
+            public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        }
+
+        private sealed class ResumeFailureCopilotSdkSession(string sessionId) : ICopilotSdkSession
+        {
+            public string SessionId => sessionId;
+
+            public IDisposable On(SessionEventHandler handler)
+            {
+                return new NoopDisposable();
+            }
+
+            public Task SendAndWaitAsync(MessageOptions options, TimeSpan timeout, CancellationToken cancellationToken)
+            {
+                return Task.CompletedTask;
+            }
+
+            public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        }
+
+        private sealed class NoopDisposable : IDisposable
+        {
+            public void Dispose()
+            {
+            }
+        }
     }
 }
