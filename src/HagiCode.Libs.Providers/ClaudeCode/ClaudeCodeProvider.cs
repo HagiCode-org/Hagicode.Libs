@@ -61,7 +61,7 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
         {
             ExecutablePath = executablePath,
             Arguments = BuildCommandArguments(options),
-            WorkingDirectory = options.WorkingDirectory,
+            WorkingDirectory = ResolveExecutionWorkingDirectory(options),
             EnvironmentVariables = BuildEnvironmentVariables(options, runtimeEnvironment),
             InputEncoding = Utf8NoBom,
             OutputEncoding = Utf8NoBom,
@@ -147,7 +147,7 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
             arguments.AddRange(["--system-prompt", systemPrompt]);
         }
 
-        var appendSystemPrompt = ArgumentValueNormalizer.NormalizeOptionalValue(options.AppendSystemPrompt);
+        var appendSystemPrompt = BuildEffectiveAppendSystemPrompt(options);
         if (appendSystemPrompt is not null)
         {
             arguments.AddRange(["--append-system-prompt", appendSystemPrompt]);
@@ -417,6 +417,50 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
     {
         return ArgumentValueNormalizer.NormalizeOptionalValue(options.SessionId)
                ?? ArgumentValueNormalizer.NormalizeOptionalValue(options.Resume);
+    }
+
+    private static string? ResolveExecutionWorkingDirectory(ClaudeCodeOptions options)
+    {
+        return ArgumentValueNormalizer.NormalizeOptionalValue(options.ExecutionWorkingDirectory)
+               ?? ArgumentValueNormalizer.NormalizeOptionalValue(options.WorkingDirectory);
+    }
+
+    private static string? BuildEffectiveAppendSystemPrompt(ClaudeCodeOptions options)
+    {
+        var appendSystemPrompt = ArgumentValueNormalizer.NormalizeOptionalValue(options.AppendSystemPrompt);
+        var bootstrapPrompt = BuildOriginalWorkingDirectoryBootstrap(options);
+
+        return (appendSystemPrompt, bootstrapPrompt) switch
+        {
+            (null, null) => null,
+            (not null, null) => appendSystemPrompt,
+            (null, not null) => bootstrapPrompt,
+            (not null, not null) => $"{appendSystemPrompt}\n\n{bootstrapPrompt}"
+        };
+    }
+
+    private static string? BuildOriginalWorkingDirectoryBootstrap(ClaudeCodeOptions options)
+    {
+        if (!options.BootstrapOriginalWorkingDirectory)
+        {
+            return null;
+        }
+
+        var originalWorkingDirectory = ArgumentValueNormalizer.NormalizeOptionalValue(options.OriginalWorkingDirectory);
+        if (originalWorkingDirectory is null)
+        {
+            return null;
+        }
+
+        var executionWorkingDirectory = ResolveExecutionWorkingDirectory(options) ?? "(unknown)";
+        return string.Join(
+            "\n",
+            [
+                "You are running in an isolated working directory for this session.",
+                $"Current isolated working directory: {executionWorkingDirectory}",
+                $"Original project working directory: {originalWorkingDirectory}",
+                "Use the original project path whenever you need to inspect or reference the source repository."
+            ]);
     }
 
     private static void UpsertString(JsonObject rootNode, string propertyName, string? value)

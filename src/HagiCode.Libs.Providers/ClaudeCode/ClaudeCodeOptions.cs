@@ -28,6 +28,23 @@ public sealed record ClaudeCodeOptions
     public string? WorkingDirectory { get; init; }
 
     /// <summary>
+    /// Gets or sets the process working directory used for the current execution.
+    /// When omitted, <see cref="WorkingDirectory" /> remains the execution root.
+    /// </summary>
+    public string? ExecutionWorkingDirectory { get; init; }
+
+    /// <summary>
+    /// Gets or sets the canonical project working directory preserved outside the execution cwd.
+    /// </summary>
+    public string? OriginalWorkingDirectory { get; init; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the provider should append one-time guidance
+    /// describing the preserved original working directory for the current execution.
+    /// </summary>
+    public bool BootstrapOriginalWorkingDirectory { get; init; }
+
+    /// <summary>
     /// Gets or sets the Claude model name.
     /// </summary>
     public string? Model { get; init; }

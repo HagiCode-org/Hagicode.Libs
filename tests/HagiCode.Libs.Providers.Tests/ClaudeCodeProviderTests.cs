@@ -109,6 +109,41 @@ public sealed class ClaudeCodeProviderTests
     }
 
     [Fact]
+    public void BuildCommandArguments_appends_isolated_workdir_bootstrap_only_when_requested()
+    {
+        var provider = CreateProvider();
+
+        var firstRunArguments = provider.BuildCommandArguments(new ClaudeCodeOptions
+        {
+            WorkingDirectory = "/repo/project",
+            ExecutionWorkingDirectory = "/tmp/hagicode/claude/session-1",
+            OriginalWorkingDirectory = "/repo/project",
+            BootstrapOriginalWorkingDirectory = true,
+            AppendSystemPrompt = "Keep responses terse."
+        });
+
+        var appendPromptIndex = firstRunArguments
+            .Select((argument, index) => new { argument, index })
+            .FirstOrDefault(entry => entry.argument == "--append-system-prompt")?.index ?? -1;
+        appendPromptIndex.ShouldBeGreaterThanOrEqualTo(0);
+        var combinedPrompt = firstRunArguments[appendPromptIndex + 1];
+        combinedPrompt.ShouldContain("Keep responses terse.");
+        combinedPrompt.ShouldContain("isolated working directory");
+        combinedPrompt.ShouldContain("/tmp/hagicode/claude/session-1");
+        combinedPrompt.ShouldContain("/repo/project");
+
+        var resumedArguments = provider.BuildCommandArguments(new ClaudeCodeOptions
+        {
+            WorkingDirectory = "/repo/project",
+            ExecutionWorkingDirectory = "/tmp/hagicode/claude/session-1",
+            OriginalWorkingDirectory = "/repo/project",
+            BootstrapOriginalWorkingDirectory = false
+        });
+
+        resumedArguments.ShouldNotContain("--append-system-prompt");
+    }
+
+    [Fact]
     public async Task ExecuteAsync_uses_custom_executable_and_streams_messages()
     {
         var provider = CreateProvider();
@@ -132,6 +167,28 @@ public sealed class ClaudeCodeProviderTests
         messages.Select(static message => message.Type).ShouldBe(["assistant", "result"]);
         provider.SentMessages.ShouldHaveSingleItem();
         provider.SentMessages[0].Content.GetProperty("message").GetProperty("content").GetString().ShouldBe("hello");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_prefers_execution_working_directory_when_isolation_is_enabled()
+    {
+        var provider = CreateProvider();
+
+        await foreach (var _ in provider.ExecuteAsync(
+                           new ClaudeCodeOptions
+                           {
+                               WorkingDirectory = "/repo/project",
+                               ExecutionWorkingDirectory = "/tmp/hagicode/claude/session-1",
+                               OriginalWorkingDirectory = "/repo/project",
+                               BootstrapOriginalWorkingDirectory = true,
+                               SessionId = "session-1"
+                           },
+                           "hello"))
+        {
+        }
+
+        provider.LastStartContext.ShouldNotBeNull();
+        provider.LastStartContext.WorkingDirectory.ShouldBe("/tmp/hagicode/claude/session-1");
     }
 
     [Fact]
