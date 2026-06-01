@@ -457,9 +457,12 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
             "\n",
             [
                 "You are running in an isolated working directory for this session.",
+                "This isolation exists only to avoid concurrency conflicts and message serialization issues when multiple sessions operate on the same repository.",
                 $"Current isolated working directory: {executionWorkingDirectory}",
-                $"Original project working directory: {originalWorkingDirectory}",
-                "Use the original project path whenever you need to inspect or reference the source repository."
+                $"Canonical project working directory: {originalWorkingDirectory}",
+                "The isolated directory is scratch-only execution context, not the real project workspace.",
+                "Perform repository inspection, code edits, file creation or modification, and Git operations against the canonical project path above.",
+                "Do not leave final project artifacts in the isolated temp directory."
             ]);
     }
 

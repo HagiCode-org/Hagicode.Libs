@@ -129,6 +129,10 @@ public sealed class ClaudeCodeProviderTests
         var combinedPrompt = firstRunArguments[appendPromptIndex + 1];
         combinedPrompt.ShouldContain("Keep responses terse.");
         combinedPrompt.ShouldContain("isolated working directory");
+        combinedPrompt.ShouldContain("avoid concurrency conflicts and message serialization issues");
+        combinedPrompt.ShouldContain("scratch-only execution context");
+        combinedPrompt.ShouldContain("Perform repository inspection, code edits, file creation or modification, and Git operations against the canonical project path above.");
+        combinedPrompt.ShouldContain("Do not leave final project artifacts in the isolated temp directory.");
         combinedPrompt.ShouldContain("/tmp/hagicode/claude/session-1");
         combinedPrompt.ShouldContain("/repo/project");
 
