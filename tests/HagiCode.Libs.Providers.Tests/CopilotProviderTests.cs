@@ -1,7 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Collections.Concurrent;
-using GitHub.Copilot.SDK;
+using GitHub.Copilot;
 using HagiCode.Libs.Core.Acp;
 using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Environment;
@@ -292,7 +292,7 @@ public sealed class CopilotProviderTests
             {
                 Data = new AssistantStreamingDeltaData
                 {
-                    TotalResponseSizeBytes = 4096d
+                    TotalResponseSizeBytes = 4096L
                 }
             },
             sawDelta: false);
@@ -311,7 +311,7 @@ public sealed class CopilotProviderTests
             {
                 Data = new AbortData
                 {
-                    Reason = "user_cancelled"
+                    Reason = new AbortReason("user_cancelled")
                 }
             },
             sawDelta: false);
@@ -1456,11 +1456,11 @@ public sealed class CopilotProviderTests
             Func<PromptExecutionContext, CancellationToken, Task> promptHandler,
             IReadOnlyDictionary<string, string?> observedEnvironment) : ICopilotSdkSession
         {
-            private event SessionEventHandler? SessionEventReceived;
+            private event Action<SessionEvent>? SessionEventReceived;
 
             public string SessionId => sessionId;
 
-            public IDisposable On(SessionEventHandler handler)
+            public IDisposable On(Action<SessionEvent> handler)
             {
                 SessionEventReceived += handler;
                 return new DelegateDisposable(() => SessionEventReceived -= handler);
@@ -1544,7 +1544,7 @@ public sealed class CopilotProviderTests
         {
             public string SessionId => sessionId;
 
-            public IDisposable On(SessionEventHandler handler)
+            public IDisposable On(Action<SessionEvent> handler)
             {
                 return new NoopDisposable();
             }

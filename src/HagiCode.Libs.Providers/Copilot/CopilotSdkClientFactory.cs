@@ -1,4 +1,4 @@
-using GitHub.Copilot.SDK;
+using GitHub.Copilot;
 
 namespace HagiCode.Libs.Providers.Copilot;
 
@@ -13,7 +13,7 @@ internal interface ICopilotSdkSession : IAsyncDisposable
 {
     string SessionId { get; }
 
-    IDisposable On(SessionEventHandler handler);
+    IDisposable On(Action<SessionEvent> handler);
 
     Task SendAndWaitAsync(MessageOptions options, TimeSpan timeout, CancellationToken cancellationToken);
 }
@@ -50,10 +50,10 @@ internal sealed class GitHubCopilotSdkClientFactory : ICopilotSdkClientFactory
     {
         public string SessionId => session.SessionId;
 
-        public IDisposable On(SessionEventHandler handler)
+        public IDisposable On(Action<SessionEvent> handler)
         {
             ArgumentNullException.ThrowIfNull(handler);
-            return session.On(handler);
+            return session.On<SessionEvent>(handler);
         }
 
         public Task SendAndWaitAsync(MessageOptions options, TimeSpan timeout, CancellationToken cancellationToken)

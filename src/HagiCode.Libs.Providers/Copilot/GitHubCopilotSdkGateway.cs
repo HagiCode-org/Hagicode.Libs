@@ -1,7 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Threading.Channels;
-using GitHub.Copilot.SDK;
+using GitHub.Copilot;
 
 namespace HagiCode.Libs.Providers.Copilot;
 
@@ -280,17 +280,26 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
 
     internal static CopilotClientOptions BuildClientOptions(CopilotSdkRequest request)
     {
+        RuntimeConnection? connection = null;
+        if (!string.IsNullOrWhiteSpace(request.CliUrl))
+        {
+            connection = RuntimeConnection.ForUri(request.CliUrl);
+        }
+        else if (!string.IsNullOrWhiteSpace(request.CliPath) || request.CliArgs.Count > 0)
+        {
+            connection = RuntimeConnection.ForStdio(
+                string.IsNullOrWhiteSpace(request.CliPath) ? null : request.CliPath,
+                [.. request.CliArgs]);
+        }
+
         return new CopilotClientOptions
         {
-            AutoStart = true,
-            UseStdio = true,
-            AutoRestart = true,
-            Cwd = request.WorkingDirectory,
-            CliPath = request.CliPath,
-            CliUrl = request.CliUrl,
-            UseLoggedInUser = request.UseLoggedInUser,
-            GitHubToken = request.GitHubToken,
-            CliArgs = [.. request.CliArgs]
+            Connection = connection,
+            WorkingDirectory = request.WorkingDirectory,
+            Environment = request.EnvironmentVariables
+                .Where(static entry => entry.Value is not null)
+                .ToDictionary(static entry => entry.Key, static entry => entry.Value!, StringComparer.Ordinal),
+            UseLoggedInUser = string.IsNullOrWhiteSpace(request.CliUrl) ? request.UseLoggedInUser : null
         };
     }
 
@@ -300,6 +309,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
         {
             SessionId = request.SessionId,
             Model = request.Model,
+            GitHubToken = request.GitHubToken,
             WorkingDirectory = request.WorkingDirectory,
             Streaming = true,
             OnPermissionRequest = PermissionHandler.ApproveAll,
@@ -312,6 +322,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
         return new ResumeSessionConfig
         {
             Model = request.Model,
+            GitHubToken = request.GitHubToken,
             WorkingDirectory = request.WorkingDirectory,
             Streaming = true,
             OnPermissionRequest = PermissionHandler.ApproveAll,
