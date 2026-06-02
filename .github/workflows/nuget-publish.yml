@@ -81,11 +81,16 @@ jobs:
             echo "should_publish_release=${should_publish_release}"
           } >> "${GITHUB_OUTPUT}"
 
-      - name: Pack Core, Providers, and Skills packages
+      - name: Pack Core, Prompts, Providers, and Skills packages
         run: |
           mkdir -p artifacts/packages
 
           dotnet pack src/HagiCode.Libs.Core/HagiCode.Libs.Core.csproj \
+            -c Release \
+            -o artifacts/packages \
+            /p:Version="${{ steps.publish_context.outputs.package_version }}"
+
+          dotnet pack src/HagiCode.Libs.Prompts/HagiCode.Libs.Prompts.csproj \
             -c Release \
             -o artifacts/packages \
             /p:Version="${{ steps.publish_context.outputs.package_version }}"

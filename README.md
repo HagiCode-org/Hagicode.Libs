@@ -5,6 +5,7 @@
 ## Projects
 
 - `src/HagiCode.Libs.Core` - transport, process management, executable discovery, and runtime environment resolution.
+- `src/HagiCode.Libs.Prompts` - file-backed Handlebars prompt catalog loading, override merging, locale fallback, diagnostics, and rendering.
 - `src/HagiCode.Libs.Providers` - provider abstractions, the Claude Code/Copilot/Codex/DeepAgents/CodeBuddy/Gemini/Hermes/Kimi/Kiro/OpenCode/QoderCLI providers, and optional DI registration.
 - `src/HagiCode.Libs.Skills` - skills-oriented infrastructure. Its first shipped capability is a typed online API client for search, well-known discovery, audit, telemetry, and GitHub metadata/tree requests.
 - `src/HagiCode.Libs.Exploration` - Git repository discovery and state inspection.
@@ -20,7 +21,7 @@ dotnet test HagiCode.Libs.slnx
 
 ## NuGet publishing
 
-`repos/Hagicode.Libs/.github/workflows/nuget-publish.yml` now supports two publish modes for `src/HagiCode.Libs.Core`, `src/HagiCode.Libs.Providers`, and `src/HagiCode.Libs.Skills`:
+`repos/Hagicode.Libs/.github/workflows/nuget-publish.yml` now supports two publish modes for `src/HagiCode.Libs.Core`, `src/HagiCode.Libs.Prompts`, `src/HagiCode.Libs.Providers`, and `src/HagiCode.Libs.Skills`:
 
 - Push a `v*.*.*` tag to publish a stable package version that matches the tag name without the leading `v` and publish the matching GitHub Release.
 - Push to `main` to publish a dev prerelease package automatically without creating a GitHub Release.
