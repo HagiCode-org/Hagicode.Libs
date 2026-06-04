@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Text.Json.Nodes;
 using ManagedCode.CodexSharpSDK.Client;
 using ManagedCode.CodexSharpSDK.Internal;
@@ -423,16 +424,18 @@ internal interface ICodexProcessRunner
 
 internal sealed class DefaultCodexProcessRunner : ICodexProcessRunner
 {
-    public async IAsyncEnumerable<string> RunAsync(
-        CodexProcessInvocation invocation,
-        ILogger logger,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
+    private static readonly UTF8Encoding Utf8NoBom = new(false);
+
+    internal static ProcessStartInfo CreateStartInfo(CodexProcessInvocation invocation)
     {
         var startInfo = new ProcessStartInfo(invocation.ExecutablePath)
         {
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            StandardInputEncoding = Utf8NoBom,
+            StandardOutputEncoding = Utf8NoBom,
+            StandardErrorEncoding = Utf8NoBom,
             UseShellExecute = false,
             CreateNoWindow = true,
         };
@@ -447,6 +450,16 @@ internal sealed class DefaultCodexProcessRunner : ICodexProcessRunner
         {
             startInfo.Environment[key] = value;
         }
+
+        return startInfo;
+    }
+
+    public async IAsyncEnumerable<string> RunAsync(
+        CodexProcessInvocation invocation,
+        ILogger logger,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var startInfo = CreateStartInfo(invocation);
 
         using var process = new Process { StartInfo = startInfo };
         Task<string>? standardErrorTask = null;
