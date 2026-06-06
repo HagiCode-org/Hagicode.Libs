@@ -170,6 +170,10 @@ public class CliProcessManager
         var stdoutTask = CaptureStreamAsync(handle.StandardOutput, ProcessOutputChannel.StandardOutput, standardOutput, capturedOutput, CancellationToken.None);
         var stderrTask = CaptureStreamAsync(handle.StandardError, ProcessOutputChannel.StandardError, standardError, capturedOutput, CancellationToken.None);
 
+        // One-shot executions never stream request payloads over stdin, so close the pipe early.
+        // Some CLIs wait for EOF before terminating even when all request arguments are provided on the command line.
+        TryCloseInput(handle);
+
         var timedOut = false;
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         if (context.Timeout is { } timeout)

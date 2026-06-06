@@ -58,6 +58,19 @@ public sealed class CliProcessManagerTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_closes_redirected_stdin_so_processes_waiting_for_eof_can_exit()
+    {
+        var result = await _manager.ExecuteAsync(new ProcessStartContext
+        {
+            ExecutablePath = "/bin/sh",
+            Arguments = ["-lc", "cat >/dev/null; printf 'done'"]
+        });
+
+        result.ExitCode.ShouldBe(0);
+        result.StandardOutput.ShouldBe("done");
+    }
+
+    [Fact]
     public void CreateStartInfo_redirects_streams_and_preserves_utf8()
     {
         var startInfo = _manager.CreateStartInfo(CreateShellContext("printf 'ok'"));
@@ -67,10 +80,13 @@ public sealed class CliProcessManagerTests
         startInfo.RedirectStandardError.ShouldBeTrue();
         startInfo.StandardInputEncoding.ShouldNotBeNull();
         startInfo.StandardInputEncoding.WebName.ShouldBe(Encoding.UTF8.WebName);
+        startInfo.StandardInputEncoding.GetPreamble().ShouldBeEmpty();
         startInfo.StandardOutputEncoding.ShouldNotBeNull();
         startInfo.StandardOutputEncoding.WebName.ShouldBe(Encoding.UTF8.WebName);
+        startInfo.StandardOutputEncoding.GetPreamble().ShouldBeEmpty();
         startInfo.StandardErrorEncoding.ShouldNotBeNull();
         startInfo.StandardErrorEncoding.WebName.ShouldBe(Encoding.UTF8.WebName);
+        startInfo.StandardErrorEncoding.GetPreamble().ShouldBeEmpty();
     }
 
     [Fact]

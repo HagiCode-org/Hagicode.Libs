@@ -7,6 +7,8 @@ namespace HagiCode.Libs.Core.Process;
 /// </summary>
 public sealed record ProcessStartContext
 {
+    private static readonly Encoding Utf8WithoutBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+
     /// <summary>
     /// Gets or sets the executable path or command name.
     /// </summary>
@@ -31,12 +33,12 @@ public sealed record ProcessStartContext
     /// <summary>
     /// Gets or sets the encoding used for redirected input streams.
     /// </summary>
-    public Encoding InputEncoding { get; init; } = Encoding.UTF8;
+    public Encoding InputEncoding { get; init; } = Utf8WithoutBom;
 
     /// <summary>
     /// Gets or sets the encoding used for redirected output streams.
     /// </summary>
-    public Encoding OutputEncoding { get; init; } = Encoding.UTF8;
+    public Encoding OutputEncoding { get; init; } = Utf8WithoutBom;
 
     /// <summary>
     /// Gets or sets the maximum execution duration for one-shot commands.

@@ -53,8 +53,9 @@ public sealed class SubprocessAcpTransport : IAcpTransport, IAcpTransportDiagnos
             throw new InvalidOperationException("The ACP transport is already connected.");
         }
 
-        _processHandle = await _processManager.StartAsync(_startContext, cancellationToken);
-        _standardErrorPumpTask = Task.Run(() => PumpStandardErrorAsync(_processHandle), CancellationToken.None);
+        var processHandle = await _processManager.StartAsync(_startContext, cancellationToken);
+        _processHandle = processHandle;
+        _standardErrorPumpTask = Task.Run(() => PumpStandardErrorAsync(processHandle), CancellationToken.None);
     }
 
     /// <inheritdoc />
@@ -143,7 +144,7 @@ public sealed class SubprocessAcpTransport : IAcpTransport, IAcpTransportDiagnos
             {
                 line = await handle.StandardError.ReadLineAsync().ConfigureAwait(false);
             }
-            catch (ObjectDisposedException)
+            catch (Exception ex) when (IsExpectedShutdownException(ex))
             {
                 break;
             }
@@ -185,13 +186,39 @@ public sealed class SubprocessAcpTransport : IAcpTransport, IAcpTransportDiagnos
         {
             await _standardErrorPumpTask.ConfigureAwait(false);
         }
-        catch (ObjectDisposedException)
+        catch (Exception ex) when (IsExpectedShutdownException(ex))
         {
         }
         finally
         {
             _standardErrorPumpTask = null;
         }
+    }
+
+    private static bool IsExpectedShutdownException(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is ObjectDisposedException or OperationCanceledException)
+            {
+                return true;
+            }
+
+            if (current is IOException ioException &&
+                ContainsOperationCanceledMessage(ioException.Message))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool ContainsOperationCanceledMessage(string? message)
+    {
+        return !string.IsNullOrWhiteSpace(message) &&
+               (message.Contains("Operation canceled", StringComparison.OrdinalIgnoreCase) ||
+                message.Contains("Operation cancelled", StringComparison.OrdinalIgnoreCase));
     }
 
     private static string BuildUnexpectedExitMessage(int exitCode, string? standardError)
