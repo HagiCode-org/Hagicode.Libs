@@ -6,7 +6,7 @@
 
 - `src/HagiCode.Libs.Core` - transport, process management, executable discovery, and runtime environment resolution.
 - `src/HagiCode.Libs.Prompts` - file-backed Handlebars prompt catalog loading, override merging, locale fallback, diagnostics, and rendering.
-- `src/HagiCode.Libs.Providers` - provider abstractions, the Claude Code/Copilot/Codex/DeepAgents/CodeBuddy/Gemini/Hermes/Kimi/Kiro/OpenCode/QoderCLI providers, and optional DI registration.
+- `src/HagiCode.Libs.Providers` - provider abstractions, the Claude Code/Copilot/Codex/DeepAgents/CodeBuddy/Gemini/Hermes/Kimi/Kiro/OpenCode/QoderCLI/Reasonix providers, and optional DI registration.
 - `src/HagiCode.Libs.Skills` - skills-oriented infrastructure. Its first shipped capability is a typed online API client for search, well-known discovery, audit, telemetry, and GitHub metadata/tree requests.
 - `src/HagiCode.Libs.Exploration` - Git repository discovery and state inspection.
 - `tests/*` - xUnit coverage for each project.
@@ -86,7 +86,7 @@ The endpoint profile is provider-driven, so consumers can replace `IOnlineApiEnd
 
 ## Dedicated provider console
 
-`src/HagiCode.Libs.ClaudeCode.Console`, `src/HagiCode.Libs.Copilot.Console`, `src/HagiCode.Libs.Codex.Console`, `src/HagiCode.Libs.DeepAgents.Console`, `src/HagiCode.Libs.Codebuddy.Console`, `src/HagiCode.Libs.Gemini.Console`, `src/HagiCode.Libs.Hermes.Console`, `src/HagiCode.Libs.Kimi.Console`, `src/HagiCode.Libs.Kiro.Console`, `src/HagiCode.Libs.OpenCode.Console`, and `src/HagiCode.Libs.QoderCli.Console` are dedicated provider consoles built on the shared `HagiCode.Libs.ConsoleTesting` harness.
+`src/HagiCode.Libs.ClaudeCode.Console`, `src/HagiCode.Libs.Copilot.Console`, `src/HagiCode.Libs.Codex.Console`, `src/HagiCode.Libs.DeepAgents.Console`, `src/HagiCode.Libs.Codebuddy.Console`, `src/HagiCode.Libs.Gemini.Console`, `src/HagiCode.Libs.Hermes.Console`, `src/HagiCode.Libs.Kimi.Console`, `src/HagiCode.Libs.Kiro.Console`, `src/HagiCode.Libs.OpenCode.Console`, `src/HagiCode.Libs.QoderCli.Console`, and `src/HagiCode.Libs.Reasonix.Console` are dedicated provider consoles built on the shared `HagiCode.Libs.ConsoleTesting` harness.
 
 `src/HagiCode.Libs.Providers/OpenCode` now owns the canonical OpenCode typed runtime/session surface and the reusable `OpenCodeFixtureServer` test fixture. `hagicode-core` consumes that boundary through adapter-level tests and no longer ships a second OpenCode console or runtime project.
 
@@ -168,6 +168,13 @@ dotnet run --project src/HagiCode.Libs.QoderCli.Console -- --test-provider qoder
 dotnet run --project src/HagiCode.Libs.QoderCli.Console -- --test-provider-full --repo .
 dotnet run --project src/HagiCode.Libs.QoderCli.Console -- --test-provider-full --model qoder-max
 dotnet run --project src/HagiCode.Libs.QoderCli.Console -- --test-all qodercli
+
+dotnet run --project src/HagiCode.Libs.Reasonix.Console -- --help
+dotnet run --project src/HagiCode.Libs.Reasonix.Console
+dotnet run --project src/HagiCode.Libs.Reasonix.Console -- --test-provider reasonix
+dotnet run --project src/HagiCode.Libs.Reasonix.Console -- --test-provider-full --repo .
+dotnet run --project src/HagiCode.Libs.Reasonix.Console -- --test-provider-full --model deepseek-flash
+dotnet run --project src/HagiCode.Libs.Reasonix.Console -- --test-all reasonix
 ```
 
 - No arguments run the default Claude suite.
@@ -218,6 +225,9 @@ dotnet run --project src/HagiCode.Libs.QoderCli.Console -- --test-all qodercli
 - OpenCode repository summary remains opt-in via `--repo <path>`, and `open-code` / `opencode-cli` both normalize to the canonical `opencode` provider name.
 - No arguments also run the default QoderCLI suite.
 - QoderCLI 默认套件当前包含 `Ping`、`Simple Prompt`、`Complex Prompt` 和 `Session Resume`。
+- No arguments also run the default Reasonix suite.
+- Reasonix 默认套件当前包含 `Ping`、`Simple Prompt`、`Complex Prompt` 和 `Session Resume`。
+- Reasonix accepts `--model <model>`, `--executable <path>`, repeated `--arg <value>` overrides, and keeps repository summary opt-in via `--repo <path>`.
 - QoderCLI accepts `--model <model>` for explicit model forwarding only; no default model is imposed because supported qodercli model identifiers have not been confirmed yet.
 - QoderCLI repository summary remains opt-in via `--repo <path>`, and the provider now forces ACP sessions into `yolo` mode for unattended runs.
 
@@ -610,6 +620,13 @@ dotnet run --project src/HagiCode.Libs.Kimi.Console -- --test-provider-full --re
 HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.Providers.Tests/HagiCode.Libs.Providers.Tests.csproj --filter "FullyQualifiedName~QoderCli"
 HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.ConsoleTesting.Tests/HagiCode.Libs.ConsoleTesting.Tests.csproj --filter "FullyQualifiedName~QoderCli"
 dotnet run --project src/HagiCode.Libs.QoderCli.Console -- --test-provider-full --repo .
+```
+
+**Reasonix** (requires local installation):
+```bash
+HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.Providers.Tests/HagiCode.Libs.Providers.Tests.csproj --filter "FullyQualifiedName~Reasonix"
+HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.ConsoleTesting.Tests/HagiCode.Libs.ConsoleTesting.Tests.csproj --filter "FullyQualifiedName~Reasonix"
+dotnet run --project src/HagiCode.Libs.Reasonix.Console -- --test-provider-full --repo .
 ```
 
 ## Design goals
