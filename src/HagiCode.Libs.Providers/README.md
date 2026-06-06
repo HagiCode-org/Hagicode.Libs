@@ -1,6 +1,6 @@
 # HagiCode.Libs.Providers
 
-`HagiCode.Libs.Providers` builds on `HagiCode.Libs.Core` and adds reusable provider abstractions plus built-in integrations for Claude Code, Copilot, Codex, DeepAgents, CodeBuddy, Hermes, Kimi, Kiro, and QoderCLI.
+`HagiCode.Libs.Providers` builds on `HagiCode.Libs.Core` and adds reusable provider abstractions plus built-in integrations for Claude Code, Copilot, Codex, DeepAgents, CodeBuddy, Hermes, Kimi, Kiro, QoderCLI, and Reasonix.
 
 ## What is included
 
@@ -32,6 +32,7 @@ using HagiCode.Libs.Providers.DeepAgents;
 using HagiCode.Libs.Providers.Hermes;
 using HagiCode.Libs.Providers.Kimi;
 using HagiCode.Libs.Providers.Kiro;
+using HagiCode.Libs.Providers.Reasonix;
 using Microsoft.Extensions.DependencyInjection;
 
 var services = new ServiceCollection();
@@ -46,6 +47,7 @@ var deepAgents = serviceProvider.GetRequiredService<ICliProvider<DeepAgentsOptio
 var hermes = serviceProvider.GetRequiredService<ICliProvider<HermesOptions>>();
 var kimi = serviceProvider.GetRequiredService<ICliProvider<KimiOptions>>();
 var kiro = serviceProvider.GetRequiredService<ICliProvider<KiroOptions>>();
+var reasonix = serviceProvider.GetRequiredService<ICliProvider<ReasonixOptions>>();
 ```
 
 The same DI graph also exposes the shared pool services for Hermes diagnostics or explicit cleanup:
@@ -82,6 +84,7 @@ using HagiCode.Libs.Providers.DeepAgents;
 using HagiCode.Libs.Providers.Hermes;
 using HagiCode.Libs.Providers.Kimi;
 using HagiCode.Libs.Providers.Kiro;
+using HagiCode.Libs.Providers.Reasonix;
 
 var codebuddyOptions = new CodebuddyOptions
 {
@@ -204,6 +207,22 @@ await foreach (var message in kiro.ExecuteAsync(kiroOptions, "Reply with exactly
 {
     Console.WriteLine($"{message.Type}: {message.Content}");
 }
+
+var reasonixOptions = new ReasonixOptions
+{
+    WorkingDirectory = "/path/to/repo",
+    Model = "deepseek-v4-flash",
+    Effort = "high",
+    BudgetUsd = 1.5m,
+    EnableYolo = true,
+    McpServerSpecs = ["stdio:git"],
+    ExtraArguments = ["--no-proxy"]
+};
+
+await foreach (var message in reasonix.ExecuteAsync(reasonixOptions, "Reply with exactly the word 'pong'"))
+{
+    Console.WriteLine($"{message.Type}: {message.Content}");
+}
 ```
 
 ## Vendored Codex SDK notice
@@ -247,5 +266,6 @@ Practical boundaries:
 - `deepagents` is the canonical built-in provider name, and the managed runtime boots ACP through `deepagents --acp`.
 - `kimi` is the canonical built-in provider name; `ProviderRegistry` and the dedicated console also accept `kimi-cli` as an alias.
 - `kiro-cli` is the canonical built-in provider name across the shared provider registry and the dedicated console.
+- `reasonix` is the canonical built-in provider name and uses startup-time ACP flags for model, budget, MCP wiring, and `--yolo` behavior because the current Reasonix ACP runtime does not advertise `session/load` or `session/set_model` support.
 - Kiro discovery is strict: the shared provider only supports `kiro-cli` executables. Generic `kiro` launchers are not accepted for implicit discovery, explicit `ExecutablePath`, or readiness checks.
 - `CliInstallRegistry` now treats DeepAgents as local-only validation metadata because the managed runtime expects a `deepagents` executable (or `uvx --from deepagents-cli deepagents --acp`) rather than the legacy `deepagents-acp` npm package.

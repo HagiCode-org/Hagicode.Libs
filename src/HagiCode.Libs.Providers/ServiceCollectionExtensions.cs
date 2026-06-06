@@ -15,6 +15,7 @@ using HagiCode.Libs.Providers.Kiro;
 using HagiCode.Libs.Providers.OpenCode;
 using HagiCode.Libs.Providers.Pooling;
 using HagiCode.Libs.Providers.QoderCli;
+using HagiCode.Libs.Providers.Reasonix;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace HagiCode.Libs.Providers;
@@ -68,6 +69,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IOpenCodeStandaloneServerClient>(serviceProvider => serviceProvider.GetRequiredService<OpenCodeStandaloneServerHost>());
         services.AddSingleton<OpenCodeProvider>();
         services.AddSingleton<QoderCliProvider>();
+        services.AddSingleton<ReasonixProvider>();
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<ClaudeCodeProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<CodebuddyProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<CopilotProvider>());
@@ -79,6 +81,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<KiroProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<OpenCodeProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<QoderCliProvider>());
+        services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<ReasonixProvider>());
         services.AddSingleton<ICliProvider<ClaudeCodeOptions>>(serviceProvider => serviceProvider.GetRequiredService<ClaudeCodeProvider>());
         services.AddSingleton<ICliProvider<CodebuddyOptions>>(serviceProvider => serviceProvider.GetRequiredService<CodebuddyProvider>());
         services.AddSingleton<ICliProvider<CopilotOptions>>(serviceProvider => serviceProvider.GetRequiredService<CopilotProvider>());
@@ -89,6 +92,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICliProvider<KiroOptions>>(serviceProvider => serviceProvider.GetRequiredService<KiroProvider>());
         services.AddSingleton<ICliProvider<OpenCodeOptions>>(serviceProvider => serviceProvider.GetRequiredService<OpenCodeProvider>());
         services.AddSingleton<ICliProvider<QoderCliOptions>>(serviceProvider => serviceProvider.GetRequiredService<QoderCliProvider>());
+        services.AddSingleton<ICliProvider<ReasonixOptions>>(serviceProvider => serviceProvider.GetRequiredService<ReasonixProvider>());
         services.AddSingleton(static serviceProvider =>
         {
             var registry = new ProviderRegistry();
