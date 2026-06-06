@@ -85,6 +85,12 @@ public static class CliInstallRegistry
             PinnedVersion: string.Empty,
             ExecutableCandidates: ["qodercli"],
             IsPubliclyInstallable: false),
+        new CliInstallDescriptor(
+            ProviderName: "Reasonix",
+            NpmPackage: string.Empty,
+            PinnedVersion: string.Empty,
+            ExecutableCandidates: ["reasonix"],
+            IsPubliclyInstallable: false),
     ];
 
     /// <summary>
