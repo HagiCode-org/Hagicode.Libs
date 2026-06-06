@@ -47,45 +47,17 @@ public class OpenCodeProvider : ICliProvider<OpenCodeOptions>
         var runtime = await _standaloneServerClient.AcquireAsync(ToStandaloneOptions(options), cancellationToken).ConfigureAwait(false);
         var sessionResolution = await ResolveSessionAsync(runtime, options, cancellationToken).ConfigureAwait(false);
         var debugContext = BuildDebugContext(sessionResolution);
-        var lifecycleMessages = new List<CliMessage>
-        {
-            OpenCodeMessageMapper.CreateSessionLifecycleMessage(
-                sessionResolution.SessionId,
-                sessionResolution.ResumeMode,
-                sessionResolution.RequestedSessionId,
-                sessionResolution.RuntimeFingerprint,
-                sessionResolution.PoolFingerprint)
-        };
+        var lifecycleMessage = OpenCodeMessageMapper.CreateSessionLifecycleMessage(
+            sessionResolution.SessionId,
+            sessionResolution.ResumeMode,
+            sessionResolution.RequestedSessionId,
+            sessionResolution.RuntimeFingerprint,
+            sessionResolution.PoolFingerprint);
 
         var request = OpenCodeSessionPromptRequest.FromText(prompt, ResolveModelSelection(options.Model));
-        OpenCodeMessageEnvelope response;
-        try
-        {
-            response = await runtime.Client.PromptAsync(sessionResolution.SessionId, request, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ShouldRetryWithFreshRuntime(ex))
-        {
-            await _standaloneServerClient.InvalidateAsync(
-                ToStandaloneOptions(options),
-                reason: "OpenCode prompt failed and requested a fresh runtime.",
-                cancellationToken).ConfigureAwait(false);
-            runtime = await _standaloneServerClient.AcquireAsync(ToStandaloneOptions(options), cancellationToken).ConfigureAwait(false);
-            sessionResolution = await ResolveSessionAsync(runtime, options, cancellationToken).ConfigureAwait(false);
-            debugContext = BuildDebugContext(sessionResolution);
-            lifecycleMessages.Add(
-                OpenCodeMessageMapper.CreateSessionLifecycleMessage(
-                    sessionResolution.SessionId,
-                    sessionResolution.ResumeMode,
-                    sessionResolution.RequestedSessionId,
-                    sessionResolution.RuntimeFingerprint,
-                    sessionResolution.PoolFingerprint));
-            response = await runtime.Client.PromptAsync(sessionResolution.SessionId, request, cancellationToken).ConfigureAwait(false);
-        }
+        var response = await runtime.Client.PromptAsync(sessionResolution.SessionId, request, cancellationToken).ConfigureAwait(false);
 
-        foreach (var lifecycleMessage in lifecycleMessages)
-        {
-            yield return lifecycleMessage;
-        }
+        yield return lifecycleMessage;
 
         var assistantText = response.GetTextContent();
         if (string.IsNullOrWhiteSpace(assistantText))
@@ -190,45 +162,13 @@ public class OpenCodeProvider : ICliProvider<OpenCodeOptions>
             }
         }
 
-        var createdSessionId = (await CreateSessionWithRecoveryAsync(runtime, options, cancellationToken).ConfigureAwait(false)).Id;
+        var createdSessionId = (await runtime.Client.CreateSessionAsync(options.SessionTitle, cancellationToken).ConfigureAwait(false)).Id;
         return new OpenCodeSessionResolution(
             createdSessionId,
             requestedSessionId,
             string.IsNullOrWhiteSpace(requestedSessionId) ? ResumeModeStarted : ResumeModeRestarted,
             runtimeFingerprint,
             BuildPoolFingerprint(requestedSessionId, createdSessionId));
-    }
-
-    private async Task<OpenCodeSession> CreateSessionWithRecoveryAsync(
-        OpenCodeStandaloneServerConnection runtime,
-        OpenCodeOptions options,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            return await runtime.Client.CreateSessionAsync(options.SessionTitle, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ShouldRetryWithFreshRuntime(ex) && runtime.OwnsRuntime)
-        {
-            await _standaloneServerClient.InvalidateAsync(
-                ToStandaloneOptions(options),
-                reason: "OpenCode session API became unavailable during session creation.",
-                cancellationToken).ConfigureAwait(false);
-            var recoveredRuntime = await _standaloneServerClient.AcquireAsync(ToStandaloneOptions(options), cancellationToken).ConfigureAwait(false);
-            return await recoveredRuntime.Client.CreateSessionAsync(options.SessionTitle, cancellationToken).ConfigureAwait(false);
-        }
-    }
-
-    private static bool ShouldRetryWithFreshRuntime(Exception ex)
-    {
-        return ex is HttpRequestException
-            || ex is TaskCanceledException
-            || ex is OpenCodeApiException
-            {
-                StatusCode: System.Net.HttpStatusCode.NotFound
-                    or System.Net.HttpStatusCode.BadGateway
-                    or System.Net.HttpStatusCode.ServiceUnavailable
-            };
     }
 
     private static OpenCodeStandaloneServerOptions ToStandaloneOptions(OpenCodeOptions options)

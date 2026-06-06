@@ -190,6 +190,50 @@ public sealed class OpenCodeProviderTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_surfaces_prompt_failure_without_hidden_runtime_replay()
+    {
+        await using var server = await OpenCodeTestServer.StartAsync(
+            static (_, sessionId, _) => OpenCodeTestServer.CreateTextEnvelope(sessionId, "unused"));
+        server.RemainingPromptFailures = 1;
+        await using var provider = CreateProvider(new MissingExecutableResolver());
+
+        var exception = await Should.ThrowAsync<OpenCodeApiException>(async () =>
+        {
+            await foreach (var _ in provider.ExecuteAsync(
+                               new OpenCodeOptions { BaseUrl = server.BaseUri.ToString() },
+                               "hello"))
+            {
+            }
+        });
+
+        exception.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
+        server.PromptCount.ShouldBe(1);
+        server.CreateSessionCount.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_surfaces_session_creation_failure_without_hidden_runtime_replay()
+    {
+        await using var server = await OpenCodeTestServer.StartAsync(
+            static (_, sessionId, _) => OpenCodeTestServer.CreateTextEnvelope(sessionId, "unused"));
+        server.RemainingCreateSessionFailures = 1;
+        await using var provider = CreateProvider(new MissingExecutableResolver());
+
+        var exception = await Should.ThrowAsync<OpenCodeApiException>(async () =>
+        {
+            await foreach (var _ in provider.ExecuteAsync(
+                               new OpenCodeOptions { BaseUrl = server.BaseUri.ToString() },
+                               "hello"))
+            {
+            }
+        });
+
+        exception.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
+        server.CreateSessionCount.ShouldBe(1);
+        server.PromptCount.ShouldBe(0);
+    }
+
+    [Fact]
     public async Task PingAsync_reports_success_and_version_when_runtime_is_healthy()
     {
         await using var server = await OpenCodeTestServer.StartAsync(
@@ -352,6 +396,12 @@ public sealed class OpenCodeProviderTests
 
         public int CreateSessionCount { get; private set; }
 
+        public int PromptCount { get; private set; }
+
+        public int RemainingCreateSessionFailures { get; set; }
+
+        public int RemainingPromptFailures { get; set; }
+
         public static async Task<OpenCodeTestServer> StartAsync(
             Func<OpenCodeTestServer, string, string, OpenCodeMessageEnvelope> promptResponder,
             string version = "opencode-test-1.0.0")
@@ -482,6 +532,14 @@ public sealed class OpenCodeProviderTests
                 if (request.HttpMethod == "POST" && path == "/session")
                 {
                     CreateSessionCount++;
+                    if (RemainingCreateSessionFailures > 0)
+                    {
+                        RemainingCreateSessionFailures--;
+                        context.Response.StatusCode = (int)HttpStatusCode.ServiceUnavailable;
+                        await WriteStringAsync(context.Response, "session unavailable", cancellationToken);
+                        return;
+                    }
+
                     var sessionId = $"session-{Interlocked.Increment(ref _nextSessionId):D4}";
                     var session = new OpenCodeSession
                     {
@@ -509,6 +567,15 @@ public sealed class OpenCodeProviderTests
                         ?? new OpenCodeSessionPromptRequest();
                     var promptText = promptRequest.Parts.FirstOrDefault(static part => string.Equals(part.Type, "text", StringComparison.OrdinalIgnoreCase))?.Text
                         ?? string.Empty;
+                    PromptCount++;
+                    if (RemainingPromptFailures > 0)
+                    {
+                        RemainingPromptFailures--;
+                        context.Response.StatusCode = (int)HttpStatusCode.ServiceUnavailable;
+                        await WriteStringAsync(context.Response, "prompt unavailable", cancellationToken);
+                        return;
+                    }
+
                     var response = _promptResponder(this, sessionIdForPrompt, promptText);
                     await WriteJsonAsync(context.Response, response, cancellationToken);
                     return;
