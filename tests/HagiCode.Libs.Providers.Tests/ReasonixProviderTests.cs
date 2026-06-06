@@ -16,7 +16,7 @@ public sealed class ReasonixProviderTests
     private static readonly string[] ReasonixExecutableCandidates = ["reasonix"];
 
     [Fact]
-    public void BuildCommandArguments_includes_managed_reasonix_flags_once()
+    public void BuildCommandArguments_filters_legacy_bootstrap_flags_for_reasonix_1x()
     {
         var provider = CreateProvider();
 
@@ -35,12 +35,14 @@ public sealed class ReasonixProviderTests
                 "acp",
                 "--dir", "/tmp/ignored",
                 "-m", "ignored-model",
+                "-model", "ignored-provider",
                 "--effort", "low",
                 "--budget", "0.25",
                 "--transcript", "/tmp/ignored.jsonl",
                 "--mcp", "ignored",
                 "--mcp-prefix", "ignored",
                 "--yolo",
+                "--dangerously-skip-permissions",
                 "--no-proxy",
                 "   "
             ]
@@ -49,16 +51,7 @@ public sealed class ReasonixProviderTests
         arguments.ShouldBe(
         [
             "acp",
-            "--dir", "/tmp/project",
-            "-m", "deepseek-v4-flash",
-            "--effort", "high",
-            "--budget", "1.25",
-            "--transcript", "/tmp/reasonix/transcript.jsonl",
-            "--yolo",
-            "--mcp", "stdio:git",
-            "--mcp", "stdio:search",
-            "--mcp-prefix", "reasonix",
-            "--no-proxy"
+            "-model", "deepseek-v4-flash"
         ]);
     }
 
@@ -93,12 +86,7 @@ public sealed class ReasonixProviderTests
         provider.LastStartContext.Arguments.ShouldBe(
         [
             "acp",
-            "--dir", "/tmp/project",
-            "-m", "deepseek-v4-flash",
-            "--effort", "medium",
-            "--budget", "2.5",
-            "--yolo",
-            "--no-proxy"
+            "-model", "deepseek-v4-flash"
         ]);
         provider.LastStartContext.EnvironmentVariables!["REASONIX_TOKEN"].ShouldBe("token");
         provider.SessionClient!.ConnectCalls.ShouldBe(1);
@@ -109,6 +97,93 @@ public sealed class ReasonixProviderTests
         provider.SessionClient.LastModel.ShouldBeNull();
         messages.Select(static message => message.Type).ShouldBe(["session.started", "assistant", "terminal.completed"]);
         messages[1].Content.GetProperty("text").GetString().ShouldBe("pong");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_forwards_session_id_and_emits_resumed_lifecycle_message()
+    {
+        var provider = CreateProvider();
+        var messages = new List<CliMessage>();
+
+        await foreach (var message in provider.ExecuteAsync(
+                           new ReasonixOptions
+                           {
+                               SessionId = "session-123",
+                               Model = "deepseek-flash"
+                           },
+                           "hello"))
+        {
+            messages.Add(message);
+        }
+
+        provider.SessionClient!.LastSessionId.ShouldBe("session-123");
+        messages[0].Type.ShouldBe("session.resumed");
+        messages[0].Content.GetProperty("session_id").GetString().ShouldBe("session-123");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_resumed_session_skips_replayed_history_and_keeps_the_current_turn_output()
+    {
+        var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(
+            emitReplayOnResume: true,
+            replayedAssistantText: "old-response",
+            currentAssistantChunkText: "new-response",
+            promptOutputText: "new-response"));
+        var messages = new List<CliMessage>();
+
+        await foreach (var message in provider.ExecuteAsync(
+                           new ReasonixOptions
+                           {
+                               SessionId = "session-123"
+                           },
+                           "hello"))
+        {
+            messages.Add(message);
+        }
+
+        messages.Select(static message => message.Type).ShouldBe(["session.resumed", "assistant", "terminal.completed"]);
+
+        var visibleAssistantText = string.Concat(
+            messages
+                .Where(static message => message.Type == "assistant")
+                .Select(static message => message.Content.TryGetProperty("text", out var textElement) ? textElement.GetString() : null)
+                .Where(static text => !string.IsNullOrWhiteSpace(text)));
+
+        visibleAssistantText.ShouldBe("new-response");
+        visibleAssistantText.ShouldNotContain("old-response");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_resumed_session_uses_latest_assistant_generation_when_replay_has_no_metadata()
+    {
+        var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(
+            emitReplayOnResume: true,
+            replayedAssistantText: "old-response",
+            currentAssistantChunkText: "new-response",
+            promptOutputText: "new-response",
+            includeThoughtChunks: true,
+            includeReplayMetadata: false,
+            includeCurrentAssistantMetadata: false));
+        var messages = new List<CliMessage>();
+
+        await foreach (var message in provider.ExecuteAsync(
+                           new ReasonixOptions
+                           {
+                               SessionId = "session-123"
+                           },
+                           "hello"))
+        {
+            messages.Add(message);
+        }
+
+        var visibleAssistantText = string.Concat(
+            messages
+                .Where(static message => message.Type == "assistant")
+                .Select(static message => message.Content.TryGetProperty("text", out var textElement) ? textElement.GetString() : null)
+                .Where(static text => !string.IsNullOrWhiteSpace(text)));
+
+        visibleAssistantText.ShouldBe("new-response");
+        visibleAssistantText.ShouldNotContain("old-response");
     }
 
     [Fact]
@@ -269,6 +344,72 @@ public sealed class ReasonixProviderTests
         visibleAssistantText.Trim().ShouldBe("PONG");
     }
 
+    [Fact]
+    [Trait("Category", "RealCli")]
+    public async Task ExecuteAsync_real_resumed_session_does_not_replay_previous_turn_output_when_opted_in()
+    {
+        if (!IsRealCliTestsEnabled())
+        {
+            return;
+        }
+
+        var resolver = new CliExecutableResolver();
+        var executablePath = resolver.ResolveFirstAvailablePath(ReasonixExecutableCandidates);
+        if (executablePath is null)
+        {
+            throw new InvalidOperationException("Reasonix CLI was not found on PATH even though the real CLI execution path was enabled.");
+        }
+
+        using var workspace = new TemporaryDirectory();
+        var provider = new ReasonixProvider(resolver, new CliProcessManager(), null);
+        var firstToken = $"FIRST-{Guid.NewGuid():N}";
+        var secondToken = $"SECOND-{Guid.NewGuid():N}";
+
+        var firstTurnMessages = new List<CliMessage>();
+        await foreach (var message in provider.ExecuteAsync(
+                           new ReasonixOptions
+                           {
+                               WorkingDirectory = workspace.Path,
+                               Model = "deepseek-v4-flash",
+                               StartupTimeout = TimeSpan.FromSeconds(20)
+                           },
+                           $"Reply with exactly: {firstToken}",
+                           CancellationToken.None))
+        {
+            firstTurnMessages.Add(message);
+        }
+
+        var sessionId = firstTurnMessages
+            .Select(static message => message.Content.TryGetProperty("session_id", out var sessionIdElement) ? sessionIdElement.GetString() : null)
+            .FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value));
+
+        sessionId.ShouldNotBeNullOrWhiteSpace();
+
+        var secondTurnMessages = new List<CliMessage>();
+        await foreach (var message in provider.ExecuteAsync(
+                           new ReasonixOptions
+                           {
+                               WorkingDirectory = workspace.Path,
+                               SessionId = sessionId,
+                               Model = "deepseek-v4-flash",
+                               StartupTimeout = TimeSpan.FromSeconds(20)
+                           },
+                           $"Reply with exactly: {secondToken}",
+                           CancellationToken.None))
+        {
+            secondTurnMessages.Add(message);
+        }
+
+        var secondTurnAssistantText = string.Concat(
+            secondTurnMessages
+                .Where(static message => message.Type == "assistant")
+                .Select(static message => message.Content.TryGetProperty("text", out var textElement) ? textElement.GetString() : null)
+                .Where(static text => !string.IsNullOrWhiteSpace(text)));
+
+        secondTurnAssistantText.ShouldContain(secondToken);
+        secondTurnAssistantText.ShouldNotContain(firstToken);
+    }
+
     private static TestReasonixProvider CreateProvider(
         CliExecutableResolver? executableResolver = null,
         FakeAcpSessionClient? sessionClient = null)
@@ -311,7 +452,12 @@ public sealed class ReasonixProviderTests
         bool emitNotifications = true,
         bool includeThoughtChunks = false,
         string? promptStopReason = "end_turn",
-        string promptOutputText = "pong") : IAcpSessionClient
+        string promptOutputText = "pong",
+        bool emitReplayOnResume = false,
+        string replayedAssistantText = "old-response",
+        string? currentAssistantChunkText = null,
+        bool includeReplayMetadata = true,
+        bool includeCurrentAssistantMetadata = true) : IAcpSessionClient
     {
         public int ConnectCalls { get; private set; }
         public int InitializeCalls { get; private set; }
@@ -332,7 +478,7 @@ public sealed class ReasonixProviderTests
             InitializeCalls++;
             return Task.FromResult(initializeResult ?? JsonSerializer.SerializeToElement(new
             {
-                agentInfo = new { name = "reasonix", version = "0.53.2" }
+                agentInfo = new { name = "reasonix", version = "1.2.0" }
             }));
         }
 
@@ -352,10 +498,12 @@ public sealed class ReasonixProviderTests
             LastSessionId = sessionId;
             LastModel = model;
 
+            var resolvedSessionId = string.IsNullOrWhiteSpace(sessionId) ? "session-new" : sessionId;
+
             return Task.FromResult(new AcpSessionHandle(
-                "session-new",
-                false,
-                JsonSerializer.SerializeToElement(new { sessionId = "session-new" })));
+                resolvedSessionId,
+                !string.IsNullOrWhiteSpace(sessionId),
+                JsonSerializer.SerializeToElement(new { sessionId = resolvedSessionId })));
         }
 
         public Task<JsonElement> SetModeAsync(string sessionId, string modeId, CancellationToken cancellationToken = default)
@@ -381,13 +529,46 @@ public sealed class ReasonixProviderTests
                 yield break;
             }
 
+            var sessionId = string.IsNullOrWhiteSpace(LastSessionId) ? "session-new" : LastSessionId;
+
+            if (emitReplayOnResume && !string.IsNullOrWhiteSpace(LastSessionId))
+            {
+                yield return new AcpNotification(
+                    "session/update",
+                    includeReplayMetadata
+                        ? JsonSerializer.SerializeToElement(new
+                        {
+                            sessionId,
+                            update = new
+                            {
+                                sessionUpdate = "agent_message_chunk",
+                                content = new { type = "text", text = replayedAssistantText }
+                            },
+                            _meta = new Dictionary<string, object?>
+                            {
+                                ["ai-coding/streamed"] = false,
+                                ["ai-coding/request-id"] = null,
+                                ["ai-coding/turn-id"] = null
+                            }
+                        })
+                        : JsonSerializer.SerializeToElement(new
+                        {
+                            sessionId,
+                            update = new
+                            {
+                                sessionUpdate = "agent_message_chunk",
+                                content = new { type = "text", text = replayedAssistantText }
+                            }
+                        }));
+            }
+
             if (includeThoughtChunks)
             {
                 yield return new AcpNotification(
                     "session/update",
                     JsonSerializer.SerializeToElement(new
                     {
-                        sessionId = "session-new",
+                        sessionId,
                         update = new
                         {
                             sessionUpdate = "agent_thought_chunk",
@@ -398,21 +579,37 @@ public sealed class ReasonixProviderTests
 
             yield return new AcpNotification(
                 "session/update",
-                JsonSerializer.SerializeToElement(new
-                {
-                    sessionId = "session-new",
-                    update = new
+                includeCurrentAssistantMetadata
+                    ? JsonSerializer.SerializeToElement(new
                     {
-                        sessionUpdate = "agent_message_chunk",
-                        content = new { type = "text", text = "pong" }
-                    }
-                }));
+                        sessionId,
+                        update = new
+                        {
+                            sessionUpdate = "agent_message_chunk",
+                            content = new { type = "text", text = currentAssistantChunkText ?? promptOutputText }
+                        },
+                        _meta = new Dictionary<string, object?>
+                        {
+                            ["ai-coding/streamed"] = true,
+                            ["ai-coding/request-id"] = "request-1",
+                            ["ai-coding/turn-id"] = "turn-1"
+                        }
+                    })
+                    : JsonSerializer.SerializeToElement(new
+                    {
+                        sessionId,
+                        update = new
+                        {
+                            sessionUpdate = "agent_message_chunk",
+                            content = new { type = "text", text = currentAssistantChunkText ?? promptOutputText }
+                        }
+                    }));
 
             yield return new AcpNotification(
                 "session/update",
                 JsonSerializer.SerializeToElement(new
                 {
-                    sessionId = "session-new",
+                    sessionId,
                     update = new
                     {
                         sessionUpdate = "prompt_completed",

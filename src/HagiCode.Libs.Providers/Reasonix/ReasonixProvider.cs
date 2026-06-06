@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using HagiCode.Libs.Core.Acp;
@@ -16,22 +15,40 @@ namespace HagiCode.Libs.Providers.Reasonix;
 public class ReasonixProvider : ICliProvider<ReasonixOptions>
 {
     private static readonly string[] DefaultExecutableCandidates = ["reasonix"];
-    private static readonly HashSet<string> ManagedFlags = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> FilteredBootstrapFlags = new(StringComparer.OrdinalIgnoreCase)
     {
+        "-model",
         "-m",
         "--model",
+        "-dir",
         "--dir",
+        "-effort",
         "--effort",
+        "-budget",
         "--budget",
+        "-transcript",
         "--transcript",
+        "-mcp",
         "--mcp",
-        "--mcp-prefix"
+        "-mcp-prefix",
+        "--mcp-prefix",
+        "-yolo",
+        "--yolo",
+        "--dangerously-skip-permissions",
+        "--no-proxy"
     };
     private static readonly TimeSpan DefaultStartupTimeout = TimeSpan.FromSeconds(15);
 
     private readonly CliExecutableResolver _executableResolver;
     private readonly CliProcessManager _processManager;
     private readonly IRuntimeEnvironmentResolver? _runtimeEnvironmentResolver;
+
+    private sealed record BufferedAssistantChunk(
+        CliMessage Message,
+        string? RequestId,
+        string? TurnId,
+        bool MessageEnd,
+        int Generation);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ReasonixProvider" /> class.
@@ -154,42 +171,11 @@ public class ReasonixProvider : ICliProvider<ReasonixOptions>
 
         var arguments = new List<string>
         {
-            "acp",
-            "--dir",
-            ResolveWorkingDirectory(options.WorkingDirectory)
+            "acp"
         };
 
-        AppendOption(arguments, "-m", options.Model);
-        AppendOption(arguments, "--effort", options.Effort);
-
-        if (options.BudgetUsd is { } budgetUsd)
-        {
-            arguments.Add("--budget");
-            arguments.Add(budgetUsd.ToString(CultureInfo.InvariantCulture));
-        }
-
-        var transcriptPath = ArgumentValueNormalizer.NormalizeOptionalValue(options.TranscriptPath);
-        if (transcriptPath is not null)
-        {
-            arguments.Add("--transcript");
-            arguments.Add(Path.GetFullPath(transcriptPath));
-        }
-
-        if (options.EnableYolo)
-        {
-            arguments.Add("--yolo");
-        }
-
-        foreach (var spec in options.McpServerSpecs
-                     .Select(ArgumentValueNormalizer.NormalizeOptionalValue)
-                     .Where(static spec => spec is not null)
-                     .Cast<string>())
-        {
-            arguments.Add("--mcp");
-            arguments.Add(spec);
-        }
-
-        AppendOption(arguments, "--mcp-prefix", options.McpPrefix);
+        // Reasonix 1.x reduced ACP bootstrap to a transport-scoped provider selector.
+        AppendOption(arguments, "-model", options.Model);
 
         foreach (var argument in NormalizeExtraArguments(options.ExtraArguments))
         {
@@ -243,7 +229,7 @@ public class ReasonixProvider : ICliProvider<ReasonixOptions>
         await sessionClient.InitializeAsync(startupCts.Token).ConfigureAwait(false);
         var sessionHandle = await sessionClient.StartSessionAsync(
             workingDirectory,
-            sessionId: null,
+            options.SessionId,
             model: null,
             startupCts.Token).ConfigureAwait(false);
 
@@ -252,6 +238,7 @@ public class ReasonixProvider : ICliProvider<ReasonixOptions>
         await foreach (var message in StreamPromptAttemptAsync(
                            sessionClient,
                            sessionHandle.SessionId,
+                           sessionHandle.IsResumed,
                            prompt,
                            cancellationToken).ConfigureAwait(false))
         {
@@ -314,8 +301,7 @@ public class ReasonixProvider : ICliProvider<ReasonixOptions>
             }
 
             if (string.Equals(normalizedArgument, "reasonix", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(normalizedArgument, "acp", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(normalizedArgument, "--yolo", StringComparison.OrdinalIgnoreCase))
+                string.Equals(normalizedArgument, "acp", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
@@ -341,7 +327,7 @@ public class ReasonixProvider : ICliProvider<ReasonixOptions>
         managedFlagName = null;
         var splitIndex = argument.IndexOf('=');
         var candidate = splitIndex >= 0 ? argument[..splitIndex] : argument;
-        if (!ManagedFlags.Contains(candidate))
+        if (!FilteredBootstrapFlags.Contains(candidate))
         {
             return false;
         }
@@ -388,10 +374,16 @@ public class ReasonixProvider : ICliProvider<ReasonixOptions>
     private static async IAsyncEnumerable<CliMessage> StreamPromptMessagesAsync(
         IAcpSessionClient sessionClient,
         string sessionId,
+        bool isResumedSession,
         Task<JsonElement> promptTask,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
+        var sawTerminalMessage = false;
         var sawAssistantText = false;
+        var bufferedAssistantMessages = isResumedSession ? new List<BufferedAssistantChunk>() : null;
+        CliMessage? terminalMessage = null;
+        var assistantGeneration = 0;
+        var lastBufferedMessageWasAssistant = false;
         using var receiveUpdatesCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _ = CancelReceiveLoopWhenPromptCompletesAsync(promptTask, receiveUpdatesCancellation);
         await using var updateEnumerator = sessionClient.ReceiveNotificationsAsync(receiveUpdatesCancellation.Token)
@@ -429,21 +421,61 @@ public class ReasonixProvider : ICliProvider<ReasonixOptions>
                 yield break;
             }
 
+            if (isResumedSession && ReasonixAcpMessageMapper.IsReplayAssistantNotification(notification))
+            {
+                continue;
+            }
+
+            var notificationRequestId = TryGetNotificationMetaString(notification, "ai-coding/request-id");
+            var notificationTurnId = TryGetNotificationMetaString(notification, "ai-coding/turn-id");
+            var notificationMessageEnd = TryGetNotificationMetaBoolean(notification, "ai-coding/message-end") == true;
+
             foreach (var message in ReasonixAcpMessageMapper.NormalizeNotification(notification))
             {
                 if (string.Equals(message.Type, "assistant", StringComparison.OrdinalIgnoreCase) &&
                     ReasonixAcpMessageMapper.TryExtractMessageText(message.Content, out _))
                 {
                     sawAssistantText = true;
+                    if (isResumedSession)
+                    {
+                        bufferedAssistantMessages!.Add(new BufferedAssistantChunk(
+                            message,
+                            notificationRequestId,
+                            notificationTurnId,
+                            notificationMessageEnd,
+                            assistantGeneration));
+                        lastBufferedMessageWasAssistant = true;
+                        continue;
+                    }
+                }
+
+                if (isResumedSession &&
+                    lastBufferedMessageWasAssistant &&
+                    !IsTerminalMessage(message.Type))
+                {
+                    assistantGeneration++;
+                    lastBufferedMessageWasAssistant = false;
                 }
 
                 if (IsTerminalMessage(message.Type))
                 {
+                    sawTerminalMessage = true;
+                    if (isResumedSession)
+                    {
+                        terminalMessage = message;
+                        break;
+                    }
+
                     yield return message;
                     yield break;
                 }
 
                 yield return message;
+            }
+
+            if (isResumedSession && sawTerminalMessage)
+            {
+                break;
             }
         }
 
@@ -466,6 +498,25 @@ public class ReasonixProvider : ICliProvider<ReasonixOptions>
         if (promptFailure is not null)
         {
             yield return ReasonixAcpMessageMapper.CreateTerminalFailureMessage(sessionId, promptFailure);
+            yield break;
+        }
+
+        if (isResumedSession)
+        {
+            foreach (var resumedMessage in BuildResumedSessionMessages(
+                         sessionId,
+                         promptResult,
+                         bufferedAssistantMessages ?? [],
+                         terminalMessage))
+            {
+                yield return resumedMessage;
+            }
+
+            yield break;
+        }
+
+        if (sawTerminalMessage)
+        {
             yield break;
         }
 
@@ -497,11 +548,12 @@ public class ReasonixProvider : ICliProvider<ReasonixOptions>
     private static IAsyncEnumerable<CliMessage> StreamPromptAttemptAsync(
         IAcpSessionClient sessionClient,
         string sessionId,
+        bool isResumedSession,
         string prompt,
         CancellationToken cancellationToken)
     {
         var promptTask = sessionClient.SendPromptAsync(sessionId, prompt, cancellationToken);
-        return StreamPromptMessagesAsync(sessionClient, sessionId, promptTask, cancellationToken);
+        return StreamPromptMessagesAsync(sessionClient, sessionId, isResumedSession, promptTask, cancellationToken);
     }
 
     private static IEnumerable<CliMessage> BuildFallbackMessages(
@@ -517,6 +569,185 @@ public class ReasonixProvider : ICliProvider<ReasonixOptions>
         }
 
         yield return ReasonixAcpMessageMapper.CreateTerminalMessage(sessionId, promptResult);
+    }
+
+    private static IEnumerable<CliMessage> BuildResumedSessionMessages(
+        string sessionId,
+        JsonElement promptResult,
+        IReadOnlyList<BufferedAssistantChunk> bufferedAssistantMessages,
+        CliMessage? terminalMessage)
+    {
+        foreach (var assistantMessage in ResolveResumedAssistantMessages(sessionId, promptResult, bufferedAssistantMessages))
+        {
+            yield return assistantMessage;
+        }
+
+        if (terminalMessage is not null)
+        {
+            yield return terminalMessage;
+            yield break;
+        }
+
+        yield return ReasonixAcpMessageMapper.CreateTerminalMessage(sessionId, promptResult);
+    }
+
+    private static IReadOnlyList<CliMessage> ResolveResumedAssistantMessages(
+        string sessionId,
+        JsonElement promptResult,
+        IReadOnlyList<BufferedAssistantChunk> bufferedAssistantMessages)
+    {
+        var selectedBufferedMessages = SelectCurrentTurnAssistantMessages(bufferedAssistantMessages);
+        var bufferedText = ConcatenateAssistantText(selectedBufferedMessages);
+        string? promptText = null;
+        var hasPromptText = !ReasonixAcpMessageMapper.IsFailurePromptResult(promptResult) &&
+                            ReasonixAcpMessageMapper.TryExtractPromptResultText(promptResult, out promptText) &&
+                            !string.IsNullOrWhiteSpace(promptText);
+
+        if (selectedBufferedMessages.Count > 0)
+        {
+            if (hasPromptText)
+            {
+                if (string.Equals(bufferedText, promptText, StringComparison.Ordinal) ||
+                    promptText!.Contains(bufferedText, StringComparison.Ordinal))
+                {
+                    return selectedBufferedMessages;
+                }
+
+                if (bufferedText.Contains(promptText!, StringComparison.Ordinal))
+                {
+                    return
+                    [
+                        ReasonixAcpMessageMapper.CreateAssistantMessage(sessionId, promptText, promptResult)
+                    ];
+                }
+            }
+
+            return selectedBufferedMessages;
+        }
+
+        if (hasPromptText)
+        {
+            return
+            [
+                ReasonixAcpMessageMapper.CreateAssistantMessage(sessionId, promptText, promptResult)
+            ];
+        }
+
+        return [];
+    }
+
+    private static IReadOnlyList<CliMessage> SelectCurrentTurnAssistantMessages(
+        IReadOnlyList<BufferedAssistantChunk> bufferedAssistantMessages)
+    {
+        if (bufferedAssistantMessages.Count == 0)
+        {
+            return [];
+        }
+
+        IReadOnlyList<BufferedAssistantChunk> selectedBufferedMessages = bufferedAssistantMessages;
+        var lastTurnKey = bufferedAssistantMessages
+            .Select(static chunk => CreateTurnKey(chunk.RequestId, chunk.TurnId))
+            .LastOrDefault(static key => key is not null);
+        if (!string.IsNullOrWhiteSpace(lastTurnKey))
+        {
+            var matchedMessages = bufferedAssistantMessages
+                .Where(chunk => string.Equals(CreateTurnKey(chunk.RequestId, chunk.TurnId), lastTurnKey, StringComparison.Ordinal))
+                .ToList();
+            if (matchedMessages.Count > 0)
+            {
+                selectedBufferedMessages = matchedMessages;
+            }
+        }
+        else
+        {
+            var latestGeneration = bufferedAssistantMessages.Max(static chunk => chunk.Generation);
+            var latestGenerationMessages = bufferedAssistantMessages
+                .Where(chunk => chunk.Generation == latestGeneration)
+                .ToList();
+            if (latestGenerationMessages.Count > 0)
+            {
+                selectedBufferedMessages = latestGenerationMessages;
+            }
+        }
+
+        var replayTrimmedMessages = TrimReplayChunksBeforeLatestCompletedBoundary(selectedBufferedMessages);
+        return replayTrimmedMessages.Select(static chunk => chunk.Message).ToList();
+    }
+
+    private static string ConcatenateAssistantText(IReadOnlyList<CliMessage> messages)
+    {
+        if (messages.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        return string.Concat(messages
+            .Select(static message => ReasonixAcpMessageMapper.TryExtractMessageText(message.Content, out var text) ? text : null)
+            .Where(static text => !string.IsNullOrEmpty(text)));
+    }
+
+    private static string? CreateTurnKey(string? requestId, string? turnId)
+    {
+        if (string.IsNullOrWhiteSpace(requestId) && string.IsNullOrWhiteSpace(turnId))
+        {
+            return null;
+        }
+
+        return $"{requestId ?? string.Empty}::{turnId ?? string.Empty}";
+    }
+
+    private static string? TryGetNotificationMetaString(AcpNotification notification, string propertyName)
+    {
+        if (!string.Equals(notification.Method, "session/update", StringComparison.OrdinalIgnoreCase) ||
+            notification.Parameters.ValueKind != JsonValueKind.Object ||
+            !notification.Parameters.TryGetProperty("_meta", out var metaElement) ||
+            metaElement.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        return metaElement.TryGetProperty(propertyName, out var propertyElement) &&
+               propertyElement.ValueKind == JsonValueKind.String
+            ? propertyElement.GetString()
+            : null;
+    }
+
+    private static bool? TryGetNotificationMetaBoolean(AcpNotification notification, string propertyName)
+    {
+        if (!string.Equals(notification.Method, "session/update", StringComparison.OrdinalIgnoreCase) ||
+            notification.Parameters.ValueKind != JsonValueKind.Object ||
+            !notification.Parameters.TryGetProperty("_meta", out var metaElement) ||
+            metaElement.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        return metaElement.TryGetProperty(propertyName, out var propertyElement) &&
+               (propertyElement.ValueKind == JsonValueKind.True || propertyElement.ValueKind == JsonValueKind.False)
+            ? propertyElement.GetBoolean()
+            : null;
+    }
+
+    private static IReadOnlyList<BufferedAssistantChunk> TrimReplayChunksBeforeLatestCompletedBoundary(
+        IReadOnlyList<BufferedAssistantChunk> bufferedAssistantMessages)
+    {
+        if (bufferedAssistantMessages.Count <= 1)
+        {
+            return bufferedAssistantMessages;
+        }
+
+        var lastCompletedBoundaryIndex = -1;
+        for (var index = 0; index < bufferedAssistantMessages.Count - 1; index++)
+        {
+            if (bufferedAssistantMessages[index].MessageEnd)
+            {
+                lastCompletedBoundaryIndex = index;
+            }
+        }
+
+        return lastCompletedBoundaryIndex >= 0
+            ? bufferedAssistantMessages.Skip(lastCompletedBoundaryIndex + 1).ToList()
+            : bufferedAssistantMessages;
     }
 
     private static bool IsTerminalMessage(string messageType)
