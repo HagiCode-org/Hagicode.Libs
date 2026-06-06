@@ -1,6 +1,6 @@
 # HagiCode.Libs.Providers
 
-`HagiCode.Libs.Providers` builds on `HagiCode.Libs.Core` and adds reusable provider abstractions plus built-in integrations for Claude Code, Copilot, Codex, DeepAgents, CodeBuddy, Hermes, Kimi, Kiro, QoderCLI, and Reasonix.
+`HagiCode.Libs.Providers` builds on `HagiCode.Libs.Core` and adds reusable provider abstractions plus built-in integrations for Claude Code, Copilot, Codex, DeepAgents, CodeBuddy, Gemini, Hermes, Kimi, Kiro, OpenCode, Pi, QoderCLI, and Reasonix.
 
 ## What is included
 
@@ -29,9 +29,12 @@ using HagiCode.Libs.Providers.Codebuddy;
 using HagiCode.Libs.Providers.Copilot;
 using HagiCode.Libs.Providers.Codex;
 using HagiCode.Libs.Providers.DeepAgents;
+using HagiCode.Libs.Providers.Gemini;
 using HagiCode.Libs.Providers.Hermes;
 using HagiCode.Libs.Providers.Kimi;
 using HagiCode.Libs.Providers.Kiro;
+using HagiCode.Libs.Providers.OpenCode;
+using HagiCode.Libs.Providers.Pi;
 using HagiCode.Libs.Providers.Reasonix;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -44,9 +47,12 @@ var codebuddy = serviceProvider.GetRequiredService<ICliProvider<CodebuddyOptions
 var copilot = serviceProvider.GetRequiredService<ICliProvider<CopilotOptions>>();
 var codex = serviceProvider.GetRequiredService<ICodexProvider>();
 var deepAgents = serviceProvider.GetRequiredService<ICliProvider<DeepAgentsOptions>>();
+var gemini = serviceProvider.GetRequiredService<ICliProvider<GeminiOptions>>();
 var hermes = serviceProvider.GetRequiredService<ICliProvider<HermesOptions>>();
 var kimi = serviceProvider.GetRequiredService<ICliProvider<KimiOptions>>();
 var kiro = serviceProvider.GetRequiredService<ICliProvider<KiroOptions>>();
+var openCode = serviceProvider.GetRequiredService<ICliProvider<OpenCodeOptions>>();
+var pi = serviceProvider.GetRequiredService<ICliProvider<PiOptions>>();
 var reasonix = serviceProvider.GetRequiredService<ICliProvider<ReasonixOptions>>();
 ```
 
@@ -66,13 +72,14 @@ var poolDefaults = serviceProvider.GetRequiredService<CliProviderPoolConfigurati
 - `Claude Code` 继续保留 raw stream / resume 语义，但 `ClaudeCodeProvider` 现在固定按次启动并回收本地 CLI 进程，不再做 warm transport reuse
 - `CodeBuddy` 的 tool update 归一化与 permission-mode 映射统一落在 `CodebuddyProvider`
 - `Hermes` 的 ACP session reuse、fallback 文本聚合与 lifecycle 诊断统一落在 `HermesProvider`
-- 自动重试调度属于 `hagicode-core` 的 backend wrapper；`HagiCode.Libs.Providers` 只负责单次执行并保留可恢复上下文
+- `HagiCode.Libs.Providers` 只负责单次执行并保留 provider-native 会话上下文；如果上层需要重试，必须在 provider 调用边界之外显式编排
 
 `ProviderRegistry` 的规范名称与兼容别名也已统一：
 
 - `claude-code` -> `claude`, `claudecode`, `anthropic-claude`
 - `codebuddy` -> `codebuddy-cli`
 - `hermes` -> `hermes-cli`
+- `pi` -> `pi-cli`
 
 ## Provider usage
 
@@ -84,6 +91,7 @@ using HagiCode.Libs.Providers.DeepAgents;
 using HagiCode.Libs.Providers.Hermes;
 using HagiCode.Libs.Providers.Kimi;
 using HagiCode.Libs.Providers.Kiro;
+using HagiCode.Libs.Providers.Pi;
 using HagiCode.Libs.Providers.Reasonix;
 
 var codebuddyOptions = new CodebuddyOptions
@@ -208,15 +216,29 @@ await foreach (var message in kiro.ExecuteAsync(kiroOptions, "Reply with exactly
     Console.WriteLine($"{message.Type}: {message.Content}");
 }
 
+var piOptions = new PiOptions
+{
+    WorkingDirectory = "/path/to/repo",
+    Provider = "omniroute",
+    Model = "glm/glm-4.7",
+    DisableAllTools = true,
+    NoSession = true,
+    EnvironmentVariables = new Dictionary<string, string?>
+    {
+        ["PI_OFFLINE"] = "1"
+    }
+};
+
+await foreach (var message in pi.ExecuteAsync(piOptions, "Plan a two-day Chongqing trip in three short bullet points."))
+{
+    Console.WriteLine($"{message.Type}: {message.Content}");
+}
+
 var reasonixOptions = new ReasonixOptions
 {
     WorkingDirectory = "/path/to/repo",
-    Model = "deepseek-v4-flash",
-    Effort = "high",
-    BudgetUsd = 1.5m,
-    EnableYolo = true,
-    McpServerSpecs = ["stdio:git"],
-    ExtraArguments = ["--no-proxy"]
+    Model = "deepseek-flash",
+    SessionId = "reasonix-session-123"
 };
 
 await foreach (var message in reasonix.ExecuteAsync(reasonixOptions, "Reply with exactly the word 'pong'"))
@@ -266,6 +288,7 @@ Practical boundaries:
 - `deepagents` is the canonical built-in provider name, and the managed runtime boots ACP through `deepagents --acp`.
 - `kimi` is the canonical built-in provider name; `ProviderRegistry` and the dedicated console also accept `kimi-cli` as an alias.
 - `kiro-cli` is the canonical built-in provider name across the shared provider registry and the dedicated console.
-- `reasonix` is the canonical built-in provider name and uses startup-time ACP flags for model, budget, MCP wiring, and `--yolo` behavior because the current Reasonix ACP runtime does not advertise `session/load` or `session/set_model` support.
+- `pi` is the canonical built-in provider name; `ProviderRegistry` also accepts `pi-cli` as a compatibility alias and the built-in provider runs Pi through `--mode json --print` one-shot execution.
+- `reasonix` is the canonical built-in provider name. Reasonix 1.x ACP now only accepts the startup-time `-model` selector; working directory and session resume flow through ACP `session/new` / `session/load`, while permissions, MCP plugins, proxying, and similar policy are expected to live in `reasonix.toml` instead of CLI bootstrap flags.
 - Kiro discovery is strict: the shared provider only supports `kiro-cli` executables. Generic `kiro` launchers are not accepted for implicit discovery, explicit `ExecutablePath`, or readiness checks.
 - `CliInstallRegistry` now treats DeepAgents as local-only validation metadata because the managed runtime expects a `deepagents` executable (or `uvx --from deepagents-cli deepagents --acp`) rather than the legacy `deepagents-acp` npm package.

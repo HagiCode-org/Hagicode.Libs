@@ -48,6 +48,13 @@ public static class CliInstallRegistry
             IsPubliclyInstallable: true),
 
         new CliInstallDescriptor(
+            ProviderName: "Pi",
+            NpmPackage: string.Empty,
+            PinnedVersion: string.Empty,
+            ExecutableCandidates: ["pi", "pi-cli"],
+            IsPubliclyInstallable: false),
+
+        new CliInstallDescriptor(
             ProviderName: "Codebuddy",
             NpmPackage: string.Empty,
             PinnedVersion: string.Empty,

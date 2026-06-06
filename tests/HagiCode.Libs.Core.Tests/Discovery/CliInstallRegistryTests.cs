@@ -72,6 +72,17 @@ public sealed class CliInstallRegistryTests
     }
 
     [Fact]
+    public void Descriptors_include_pi_with_explicit_local_only_metadata()
+    {
+        var descriptor = CliInstallRegistry.Descriptors.Single(d => d.ProviderName == "Pi");
+
+        descriptor.NpmPackage.ShouldBeEmpty();
+        descriptor.PinnedVersion.ShouldBeEmpty();
+        descriptor.ExecutableCandidates.ShouldBe(["pi", "pi-cli"]);
+        descriptor.IsPubliclyInstallable.ShouldBeFalse();
+    }
+
+    [Fact]
     public void Descriptors_include_opencode_with_public_install_metadata()
     {
         var descriptor = CliInstallRegistry.Descriptors.Single(d => d.ProviderName == "OpenCode");
