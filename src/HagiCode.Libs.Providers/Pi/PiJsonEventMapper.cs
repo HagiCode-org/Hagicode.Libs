@@ -149,7 +149,12 @@ internal sealed class PiJsonEventMapper
                             ClearPendingThinking();
                         }
 
-                        _terminalMessage = CreateTerminalMessage(_sessionId, _assistantText, turnMessage, sourceEventType: eventType);
+                        _terminalMessage = CreateTerminalMessage(
+                            _sessionId,
+                            _assistantText,
+                            _lastAssistantTextSnapshot,
+                            turnMessage,
+                            sourceEventType: eventType);
                     }
 
                     break;
@@ -166,7 +171,12 @@ internal sealed class PiJsonEventMapper
                             ref _assistantProvider,
                             ref _stopReason,
                             ref _errorText);
-                        _terminalMessage = CreateTerminalMessage(_sessionId, _assistantText, finalAssistantMessage, sourceEventType: eventType);
+                        _terminalMessage = CreateTerminalMessage(
+                            _sessionId,
+                            _assistantText,
+                            _lastAssistantTextSnapshot,
+                            finalAssistantMessage,
+                            sourceEventType: eventType);
                     }
 
                     break;
@@ -198,6 +208,7 @@ internal sealed class PiJsonEventMapper
                     _invalidOutputLines,
                     _sessionId,
                     _assistantText,
+                    _lastAssistantTextSnapshot,
                     _assistantModel,
                     _assistantProvider,
                     _stopReason,
@@ -450,6 +461,7 @@ internal sealed class PiJsonEventMapper
     private static CliMessage? CreateTerminalMessage(
         string? sessionId,
         string? assistantText,
+        string? lastAssistantTextSnapshot,
         JsonElement assistantMessage,
         string sourceEventType)
     {
@@ -466,7 +478,14 @@ internal sealed class PiJsonEventMapper
             return CreateTerminalFailedMessage(sessionId, errorText, model, provider, stopReason, exitCode: null, stderr: null, invalidOutputLines: null, sourceEventType, assistantMessage);
         }
 
-        return CreateTerminalCompletedMessage(sessionId, assistantText, model, provider, stopReason, sourceEventType, assistantMessage);
+        return CreateTerminalCompletedMessage(
+            sessionId,
+            ResolveTerminalCompletedText(assistantText, lastAssistantTextSnapshot),
+            model,
+            provider,
+            stopReason,
+            sourceEventType,
+            assistantMessage);
     }
 
     private static CliMessage CreateFallbackTerminalMessage(
@@ -475,6 +494,7 @@ internal sealed class PiJsonEventMapper
         IReadOnlyList<string> invalidOutputLines,
         string? sessionId,
         string? assistantText,
+        string? lastAssistantTextSnapshot,
         string? assistantModel,
         string? assistantProvider,
         string? stopReason,
@@ -505,7 +525,13 @@ internal sealed class PiJsonEventMapper
 
         if (!string.IsNullOrWhiteSpace(assistantText))
         {
-            return CreateTerminalCompletedMessage(sessionId, assistantText, assistantModel, assistantProvider, stopReason, sourceEventType: "fallback");
+            return CreateTerminalCompletedMessage(
+                sessionId,
+                ResolveTerminalCompletedText(assistantText, lastAssistantTextSnapshot),
+                assistantModel,
+                assistantProvider,
+                stopReason,
+                sourceEventType: "fallback");
         }
 
         return CreateTerminalFailedMessage(
@@ -607,6 +633,24 @@ internal sealed class PiJsonEventMapper
         AddJsonPropertyIfPresent(payload, "timestamp", sourceMessage, "timestamp");
 
         return new CliMessage("terminal.completed", JsonSerializer.SerializeToElement(payload));
+    }
+
+    private static string? ResolveTerminalCompletedText(string? terminalText, string? lastAssistantTextSnapshot)
+    {
+        var normalizedTerminalText = NormalizeOptional(terminalText);
+        if (normalizedTerminalText is null)
+        {
+            return null;
+        }
+
+        var normalizedAssistantSnapshot = NormalizeOptional(lastAssistantTextSnapshot);
+        if (normalizedAssistantSnapshot is not null &&
+            string.Equals(normalizedTerminalText, normalizedAssistantSnapshot, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return normalizedTerminalText;
     }
 
     private static CliMessage CreateTerminalFailedMessage(

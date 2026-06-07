@@ -107,7 +107,7 @@ public sealed class PiProviderTests
         messages[1].Content.GetProperty("timestamp").GetInt64().ShouldBe(1780750996887L);
         messages[1].Content.GetProperty("usage").GetProperty("input").GetInt32().ShouldBe(12);
         messages[1].Content.GetProperty("usage").GetProperty("output").GetInt32().ShouldBe(3);
-        messages[2].Content.GetProperty("text").GetString().ShouldBe("Trip outline");
+        messages[2].Content.TryGetProperty("text", out _).ShouldBeFalse();
         messages[2].Content.GetProperty("stop_reason").GetString().ShouldBe("stop");
         messages[2].Content.GetProperty("timestamp").GetInt64().ShouldBe(1780750996887L);
         messages[2].Content.GetProperty("usage").GetProperty("totalTokens").GetInt32().ShouldBe(15);
@@ -175,8 +175,8 @@ public sealed class PiProviderTests
         messages.Where(static message => message.Type == "assistant")
             .Select(static message => message.Content.GetProperty("text").GetString())
             .ShouldBe(["1", "2", "3"]);
-        messages.ShouldContain(static message => message.Type == "terminal.completed"
-            && message.Content.GetProperty("text").GetString() == "123");
+        var cumulativeTerminalMessage = messages.Single(static message => message.Type == "terminal.completed");
+        cumulativeTerminalMessage.Content.TryGetProperty("text", out _).ShouldBeFalse();
     }
 
     [Fact]
@@ -203,8 +203,8 @@ public sealed class PiProviderTests
             .ShouldBe(["Alpha", "Beta"]);
         messages.ShouldContain(static message => message.Type == "tool.call");
         messages.ShouldContain(static message => message.Type == "tool.completed");
-        messages.ShouldContain(static message => message.Type == "terminal.completed"
-            && message.Content.GetProperty("text").GetString() == "AlphaBeta");
+        var replayTerminalMessage = messages.Single(static message => message.Type == "terminal.completed");
+        replayTerminalMessage.Content.TryGetProperty("text", out _).ShouldBeFalse();
     }
 
     [Fact]
@@ -241,6 +241,32 @@ public sealed class PiProviderTests
         messages[2].Content.GetProperty("timestamp").GetInt64().ShouldBe(1780796361956L);
         messages[2].Content.GetProperty("update").GetProperty("rawOutput").ValueKind.ShouldBe(JsonValueKind.Array);
         messages[2].Content.GetProperty("update").GetProperty("rawOutput").EnumerateArray().First().GetProperty("text").GetString().ShouldContain("README.md");
+        messages[4].Content.TryGetProperty("text", out _).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_omits_terminal_completed_text_when_final_turn_replays_same_assistant_snapshot()
+    {
+        var processManager = new StubCliProcessManager
+        {
+            ExecuteResult = CreateSuccessfulExecutionResult("Trip outline")
+        };
+        var provider = CreateProvider(processManager: processManager);
+
+        var messages = await CollectMessagesAsync(
+            provider,
+            new PiOptions
+            {
+                WorkingDirectory = "/tmp/pi-project",
+                Model = "glm/glm-4.7",
+                DisableAllTools = true,
+                NoSession = true
+            },
+            "Plan a trip.");
+
+        messages[^1].Type.ShouldBe("terminal.completed");
+        messages[^1].Content.TryGetProperty("text", out _).ShouldBeFalse();
+        messages[^1].Content.GetProperty("stop_reason").GetString().ShouldBe("stop");
     }
 
     [Fact]
