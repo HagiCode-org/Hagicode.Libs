@@ -1,0 +1,5 @@
+action_recommendations:
+  - id: nuget-publish
+    watch: true
+    include: true
+    reason: "publish NuGet package"
