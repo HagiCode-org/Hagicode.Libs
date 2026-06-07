@@ -15,14 +15,14 @@ public static class CliInstallRegistry
         new CliInstallDescriptor(
             ProviderName: "ClaudeCode",
             NpmPackage: "@anthropic-ai/claude-code",
-            PinnedVersion: "2.1.79",
+            PinnedVersion: "2.1.168",
             ExecutableCandidates: ["claude", "claude-code"],
             IsPubliclyInstallable: true),
 
         new CliInstallDescriptor(
             ProviderName: "Copilot",
             NpmPackage: "@github/copilot",
-            PinnedVersion: "1.0.10",
+            PinnedVersion: "1.0.60",
             ExecutableCandidates: ["copilot"],
             IsPubliclyInstallable: true),
 

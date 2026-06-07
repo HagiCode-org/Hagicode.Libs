@@ -11,7 +11,7 @@ public sealed class CliInstallRegistryTests
         var descriptor = CliInstallRegistry.Descriptors.Single(d => d.ProviderName == "Copilot");
 
         descriptor.NpmPackage.ShouldBe("@github/copilot");
-        descriptor.PinnedVersion.ShouldBe("1.0.10");
+        descriptor.PinnedVersion.ShouldBe("1.0.60");
         descriptor.ExecutableCandidates.ShouldBe(["copilot"]);
         descriptor.IsPubliclyInstallable.ShouldBeTrue();
     }
