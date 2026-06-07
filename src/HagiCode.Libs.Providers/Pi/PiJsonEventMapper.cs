@@ -79,7 +79,6 @@ internal sealed class PiJsonEventMapper
             {
                 case "turn_start":
                     ClearPendingThinking();
-                    _lastAssistantTextSnapshot = null;
                     break;
 
                 case "session":

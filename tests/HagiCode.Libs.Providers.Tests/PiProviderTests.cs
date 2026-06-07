@@ -180,6 +180,34 @@ public sealed class PiProviderTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_deduplicates_replayed_assistant_prefix_after_tool_turns()
+    {
+        var processManager = new StubCliProcessManager
+        {
+            ExecuteResult = CreateCrossTurnReplayExecutionResult()
+        };
+        var provider = CreateProvider(processManager: processManager);
+
+        var messages = await CollectMessagesAsync(
+            provider,
+            new PiOptions
+            {
+                WorkingDirectory = "/tmp/pi-project",
+                Model = "glm/glm-4.7",
+                NoSession = true
+            },
+            "Analyze and commit changes.");
+
+        messages.Where(static message => message.Type == "assistant")
+            .Select(static message => message.Content.GetProperty("text").GetString())
+            .ShouldBe(["Alpha", "Beta"]);
+        messages.ShouldContain(static message => message.Type == "tool.call");
+        messages.ShouldContain(static message => message.Type == "tool.completed");
+        messages.ShouldContain(static message => message.Type == "terminal.completed"
+            && message.Content.GetProperty("text").GetString() == "AlphaBeta");
+    }
+
+    [Fact]
     public async Task ExecuteAsync_normalizes_toolcall_updates_and_results_into_shared_cli_messages()
     {
         var processManager = new StubCliProcessManager
@@ -726,6 +754,96 @@ public sealed class PiProviderTests
             JsonSerializer.Serialize(new { type = "message_end", message = toolUseAssistant }),
             JsonSerializer.Serialize(new { type = "message_end", message = toolResult }),
             JsonSerializer.Serialize(new { type = "turn_end", message = toolUseAssistant, toolResults = new object[] { toolResult } }),
+            JsonSerializer.Serialize(new { type = "message_end", message = finalAssistant }),
+            JsonSerializer.Serialize(new { type = "turn_end", message = finalAssistant, toolResults = Array.Empty<object>() }),
+            JsonSerializer.Serialize(new { type = "agent_end", messages = new object[] { toolUseAssistant, toolResult, finalAssistant }, willRetry = false })
+        };
+
+        return new ProcessResult(0, string.Join(Environment.NewLine, lines) + Environment.NewLine, string.Empty);
+    }
+
+    private static ProcessResult CreateCrossTurnReplayExecutionResult(string sessionId = "session-replay")
+    {
+        var toolUseAssistant = new
+        {
+            role = "assistant",
+            content = new object[]
+            {
+                new { type = "text", text = "Alpha" },
+                new
+                {
+                    type = "toolCall",
+                    id = "tool-1",
+                    name = "ls",
+                    arguments = new
+                    {
+                        path = "/tmp/pi-project"
+                    },
+                    partialArgs = "{\"path\":\"/tmp/pi-project\"}",
+                    streamIndex = 0
+                }
+            },
+            provider = "omniroute",
+            model = "glm/glm-4.7",
+            stopReason = "toolUse",
+            responseId = "response-replay-1",
+            responseModel = "glm-4.7"
+        };
+
+        var finalAssistant = new
+        {
+            role = "assistant",
+            content = new object[]
+            {
+                new { type = "text", text = "AlphaBeta" }
+            },
+            provider = "omniroute",
+            model = "glm/glm-4.7",
+            stopReason = "stop",
+            responseId = "response-replay-2",
+            responseModel = "glm-4.7"
+        };
+
+        var toolResult = new
+        {
+            role = "toolResult",
+            toolCallId = "tool-1",
+            toolName = "ls",
+            content = new object[]
+            {
+                new { type = "text", text = "README.md" }
+            },
+            isError = false,
+            timestamp = 1780796361956L
+        };
+
+        var lines = new[]
+        {
+            JsonSerializer.Serialize(new { type = "session", version = 3, id = sessionId, timestamp = "2026-06-07T13:00:00.000Z", cwd = "/tmp/pi-project" }),
+            JsonSerializer.Serialize(new
+            {
+                type = "message_update",
+                assistantMessageEvent = new
+                {
+                    type = "toolcall_start",
+                    partial = toolUseAssistant
+                },
+                message = toolUseAssistant
+            }),
+            JsonSerializer.Serialize(new { type = "message_end", message = toolUseAssistant }),
+            JsonSerializer.Serialize(new { type = "message_end", message = toolResult }),
+            JsonSerializer.Serialize(new { type = "turn_end", message = toolUseAssistant, toolResults = new object[] { toolResult } }),
+            JsonSerializer.Serialize(new { type = "turn_start" }),
+            JsonSerializer.Serialize(new
+            {
+                type = "message_update",
+                assistantMessageEvent = new
+                {
+                    type = "text_delta",
+                    partial = finalAssistant
+                },
+                message = finalAssistant
+            }),
             JsonSerializer.Serialize(new { type = "message_end", message = finalAssistant }),
             JsonSerializer.Serialize(new { type = "turn_end", message = finalAssistant, toolResults = Array.Empty<object>() }),
             JsonSerializer.Serialize(new { type = "agent_end", messages = new object[] { toolUseAssistant, toolResult, finalAssistant }, willRetry = false })
