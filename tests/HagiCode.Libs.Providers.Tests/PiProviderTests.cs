@@ -154,6 +154,32 @@ public sealed class PiProviderTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_converts_cumulative_text_snapshots_into_incremental_assistant_messages()
+    {
+        var processManager = new StubCliProcessManager
+        {
+            ExecuteResult = CreateCumulativeStreamingExecutionResult()
+        };
+        var provider = CreateProvider(processManager: processManager);
+
+        var messages = await CollectMessagesAsync(
+            provider,
+            new PiOptions
+            {
+                WorkingDirectory = "/tmp/pi-project",
+                Model = "glm/glm-4.7",
+                NoSession = true
+            },
+            "Reply with digits.");
+
+        messages.Where(static message => message.Type == "assistant")
+            .Select(static message => message.Content.GetProperty("text").GetString())
+            .ShouldBe(["1", "2", "3"]);
+        messages.ShouldContain(static message => message.Type == "terminal.completed"
+            && message.Content.GetProperty("text").GetString() == "123");
+    }
+
+    [Fact]
     public async Task ExecuteAsync_normalizes_toolcall_updates_and_results_into_shared_cli_messages()
     {
         var processManager = new StubCliProcessManager
@@ -534,6 +560,91 @@ public sealed class PiProviderTests
             JsonSerializer.Serialize(new { type = "message_end", message = textPartial }),
             JsonSerializer.Serialize(new { type = "turn_end", message = textPartial, toolResults = Array.Empty<object>() }),
             JsonSerializer.Serialize(new { type = "agent_end", messages = new object[] { textPartial }, willRetry = false })
+        };
+
+        return new ProcessResult(0, string.Join(Environment.NewLine, lines) + Environment.NewLine, string.Empty);
+    }
+
+    private static ProcessResult CreateCumulativeStreamingExecutionResult(string sessionId = "session-cumulative")
+    {
+        var textPartial1 = new
+        {
+            role = "assistant",
+            content = new object[]
+            {
+                new { type = "text", text = "1" }
+            },
+            provider = "omniroute",
+            model = "glm/glm-4.7",
+            stopReason = "stop",
+            responseId = "response-cumulative-1",
+            responseModel = "glm-4.7"
+        };
+
+        var textPartial2 = new
+        {
+            role = "assistant",
+            content = new object[]
+            {
+                new { type = "text", text = "12" }
+            },
+            provider = "omniroute",
+            model = "glm/glm-4.7",
+            stopReason = "stop",
+            responseId = "response-cumulative-1",
+            responseModel = "glm-4.7"
+        };
+
+        var textPartial3 = new
+        {
+            role = "assistant",
+            content = new object[]
+            {
+                new { type = "text", text = "123" }
+            },
+            provider = "omniroute",
+            model = "glm/glm-4.7",
+            stopReason = "stop",
+            responseId = "response-cumulative-1",
+            responseModel = "glm-4.7"
+        };
+
+        var lines = new[]
+        {
+            JsonSerializer.Serialize(new { type = "session", version = 3, id = sessionId, timestamp = "2026-06-07T12:00:00.000Z", cwd = "/tmp/pi-project" }),
+            JsonSerializer.Serialize(new
+            {
+                type = "message_update",
+                assistantMessageEvent = new
+                {
+                    type = "text_delta",
+                    partial = textPartial1
+                },
+                message = textPartial1
+            }),
+            JsonSerializer.Serialize(new
+            {
+                type = "message_update",
+                assistantMessageEvent = new
+                {
+                    type = "text_delta",
+                    partial = textPartial2
+                },
+                message = textPartial2
+            }),
+            JsonSerializer.Serialize(new
+            {
+                type = "message_update",
+                assistantMessageEvent = new
+                {
+                    type = "text_end",
+                    partial = textPartial3
+                },
+                message = textPartial3
+            }),
+            JsonSerializer.Serialize(new { type = "message_end", message = textPartial3 }),
+            JsonSerializer.Serialize(new { type = "turn_end", message = textPartial3, toolResults = Array.Empty<object>() }),
+            JsonSerializer.Serialize(new { type = "agent_end", messages = new object[] { textPartial3 }, willRetry = false })
         };
 
         return new ProcessResult(0, string.Join(Environment.NewLine, lines) + Environment.NewLine, string.Empty);

@@ -3,6 +3,7 @@ using System.Text.Json;
 using HagiCode.Libs.ConsoleTesting;
 using HagiCode.Libs.Core.Transport;
 using HagiCode.Libs.Pi.Console;
+using HagiCode.Libs.Pi.Console.Scenarios;
 using HagiCode.Libs.Providers;
 using HagiCode.Libs.Providers.Pi;
 using Shouldly;
@@ -44,6 +45,29 @@ public sealed class PiConsoleIntegrationTests
 
         exitCode.ShouldBe(0);
         output.ToString().ShouldContain("Summary: 4/4 passed");
+    }
+
+    [Fact]
+    public async Task PiScenarioMessageReader_deduplicates_cumulative_snapshots_and_reconciles_terminal_completion()
+    {
+        var provider = new ScriptedPiProvider(
+        [
+            CreateMessage("session.started", new { type = "session.started", session_id = "pi-session-1" }),
+            CreateMessage("assistant", new { type = "assistant", session_id = "pi-session-1", text = "1" }),
+            CreateMessage("assistant", new { type = "assistant", session_id = "pi-session-1", text = "12" }),
+            CreateMessage("assistant", new { type = "assistant", session_id = "pi-session-1", text = "123" }),
+            CreateMessage("terminal.completed", new { type = "terminal.completed", session_id = "pi-session-1", text = "1234" })
+        ]);
+
+        var result = await PiScenarioMessageReader.ReadExecutionResultAsync(
+            provider,
+            new PiOptions { NoSession = true },
+            "分析当前项目",
+            CancellationToken.None);
+
+        result.SessionId.ShouldBe("pi-session-1");
+        result.Messages.ShouldBe(["1", "2", "3", "4"]);
+        result.AssistantText.ShouldBe("1234");
     }
 
     [Fact]
@@ -236,6 +260,11 @@ public sealed class PiConsoleIntegrationTests
                || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static CliMessage CreateMessage(string type, object payload)
+    {
+        return new CliMessage(type, JsonSerializer.SerializeToElement(payload));
+    }
+
     private sealed class FakePiProvider : ICliProvider<PiOptions>
     {
         private readonly Dictionary<string, string> _sessionSecrets = [];
@@ -375,6 +404,39 @@ public sealed class PiConsoleIntegrationTests
             {
                 yield return response.Substring(index, Math.Min(chunkSize, response.Length - index));
             }
+        }
+    }
+
+    private sealed class ScriptedPiProvider(IReadOnlyList<CliMessage> messages) : ICliProvider<PiOptions>
+    {
+        public string Name => "pi";
+
+        public bool IsAvailable => true;
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+        public Task<CliProviderTestResult> PingAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(new CliProviderTestResult
+            {
+                ProviderName = Name,
+                Success = true,
+                Version = "pi-test-1.0.0"
+            });
+        }
+
+        public async IAsyncEnumerable<CliMessage> ExecuteAsync(
+            PiOptions options,
+            string prompt,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            foreach (var message in messages)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                yield return message;
+            }
+
+            await Task.Yield();
         }
     }
 }
