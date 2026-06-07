@@ -45,6 +45,7 @@ internal sealed class PiJsonEventMapper
         private CliMessage? _terminalMessage;
         private string? _pendingThinkingText;
         private JsonElement? _pendingThinkingMessage;
+        private string? _lastAssistantTextSnapshot;
 
         public IReadOnlyList<CliMessage> ProcessOutputLine(string? line)
         {
@@ -78,6 +79,7 @@ internal sealed class PiJsonEventMapper
             {
                 case "turn_start":
                     ClearPendingThinking();
+                    _lastAssistantTextSnapshot = null;
                     break;
 
                 case "session":
@@ -117,7 +119,10 @@ internal sealed class PiJsonEventMapper
 
                         if (!string.IsNullOrWhiteSpace(_assistantText))
                         {
-                            messages.Add(CreateAssistantMessage(_sessionId, _assistantText!, assistantMessage));
+                            if (TryCreateAssistantMessage(_assistantText!, assistantMessage) is { } assistantMessageDelta)
+                            {
+                                messages.Add(assistantMessageDelta);
+                            }
                         }
                     }
 
@@ -232,7 +237,10 @@ internal sealed class PiJsonEventMapper
                 var assistantText = ExtractAssistantText(assistantMessage);
                 if (!string.IsNullOrWhiteSpace(assistantText))
                 {
-                    messages.Add(CreateAssistantMessage(_sessionId, assistantText!, assistantMessage));
+                    if (TryCreateAssistantMessage(assistantText!, assistantMessage) is { } assistantMessageDelta)
+                    {
+                        messages.Add(assistantMessageDelta);
+                    }
                 }
             }
 
@@ -259,6 +267,41 @@ internal sealed class PiJsonEventMapper
             var thinkingMessage = CreateAssistantThoughtMessage(_sessionId, _pendingThinkingText!, pendingThinkingMessage);
             ClearPendingThinking();
             return [thinkingMessage];
+        }
+
+        private CliMessage? TryCreateAssistantMessage(string text, JsonElement assistantMessage)
+        {
+            var delta = ReconcileAssistantTextSnapshot(text);
+            if (string.IsNullOrEmpty(delta))
+            {
+                return null;
+            }
+
+            return CreateAssistantMessage(_sessionId, delta, assistantMessage);
+        }
+
+        private string? ReconcileAssistantTextSnapshot(string text)
+        {
+            if (_lastAssistantTextSnapshot is null)
+            {
+                _lastAssistantTextSnapshot = text;
+                return text;
+            }
+
+            if (text.StartsWith(_lastAssistantTextSnapshot, StringComparison.Ordinal))
+            {
+                var delta = text[_lastAssistantTextSnapshot.Length..];
+                _lastAssistantTextSnapshot = text;
+                return delta.Length == 0 ? null : delta;
+            }
+
+            if (_lastAssistantTextSnapshot.StartsWith(text, StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            _lastAssistantTextSnapshot = text;
+            return text;
         }
 
         private void ClearPendingThinking()
