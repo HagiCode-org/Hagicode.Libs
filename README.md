@@ -6,7 +6,7 @@
 
 - `src/HagiCode.Libs.Core` - transport, process management, executable discovery, and runtime environment resolution.
 - `src/HagiCode.Libs.Prompts` - file-backed Handlebars prompt catalog loading, override merging, locale fallback, diagnostics, and rendering.
-- `src/HagiCode.Libs.Providers` - provider abstractions, the Claude Code/Copilot/Codex/DeepAgents/CodeBuddy/Gemini/Hermes/Kimi/Kiro/OpenCode/QoderCLI/Reasonix providers, and optional DI registration.
+- `src/HagiCode.Libs.Providers` - provider abstractions, the Claude Code/Copilot/Codex/DeepAgents/CodeBuddy/Gemini/Hermes/Kimi/Kiro/OpenCode/Pi/QoderCLI/Reasonix providers, and optional DI registration.
 - `src/HagiCode.Libs.Skills` - skills-oriented infrastructure. Its first shipped capability is a typed online API client for search, well-known discovery, audit, telemetry, and GitHub metadata/tree requests.
 - `src/HagiCode.Libs.Exploration` - Git repository discovery and state inspection.
 - `tests/*` - xUnit coverage for each project.
@@ -86,7 +86,7 @@ The endpoint profile is provider-driven, so consumers can replace `IOnlineApiEnd
 
 ## Dedicated provider console
 
-`src/HagiCode.Libs.ClaudeCode.Console`, `src/HagiCode.Libs.Copilot.Console`, `src/HagiCode.Libs.Codex.Console`, `src/HagiCode.Libs.DeepAgents.Console`, `src/HagiCode.Libs.Codebuddy.Console`, `src/HagiCode.Libs.Gemini.Console`, `src/HagiCode.Libs.Hermes.Console`, `src/HagiCode.Libs.Kimi.Console`, `src/HagiCode.Libs.Kiro.Console`, `src/HagiCode.Libs.OpenCode.Console`, `src/HagiCode.Libs.QoderCli.Console`, and `src/HagiCode.Libs.Reasonix.Console` are dedicated provider consoles built on the shared `HagiCode.Libs.ConsoleTesting` harness.
+`src/HagiCode.Libs.ClaudeCode.Console`, `src/HagiCode.Libs.Copilot.Console`, `src/HagiCode.Libs.Codex.Console`, `src/HagiCode.Libs.DeepAgents.Console`, `src/HagiCode.Libs.Codebuddy.Console`, `src/HagiCode.Libs.Gemini.Console`, `src/HagiCode.Libs.Hermes.Console`, `src/HagiCode.Libs.Kimi.Console`, `src/HagiCode.Libs.Kiro.Console`, `src/HagiCode.Libs.OpenCode.Console`, `src/HagiCode.Libs.Pi.Console`, `src/HagiCode.Libs.QoderCli.Console`, and `src/HagiCode.Libs.Reasonix.Console` are dedicated provider consoles built on the shared `HagiCode.Libs.ConsoleTesting` harness.
 
 `src/HagiCode.Libs.Providers/OpenCode` now owns the canonical OpenCode typed runtime/session surface and the reusable `OpenCodeFixtureServer` test fixture. `hagicode-core` consumes that boundary through adapter-level tests and no longer ships a second OpenCode console or runtime project.
 
@@ -155,6 +155,12 @@ dotnet run --project src/HagiCode.Libs.Kiro.Console -- --test-provider-full --re
 dotnet run --project src/HagiCode.Libs.Kiro.Console -- --test-provider-full --model kiro-default --auth-method token --auth-token <token> --arg --profile
 dotnet run --project src/HagiCode.Libs.Kiro.Console -- --test-all kiro
 
+dotnet run --project src/HagiCode.Libs.Pi.Console -- --help
+dotnet run --project src/HagiCode.Libs.Pi.Console
+dotnet run --project src/HagiCode.Libs.Pi.Console -- --test-provider pi-cli
+dotnet run --project src/HagiCode.Libs.Pi.Console -- --test-provider-full --provider omniroute --model glm/glm-4.7 --repo .
+dotnet run --project src/HagiCode.Libs.Pi.Console -- --test-all pi
+
 dotnet run --project src/HagiCode.Libs.OpenCode.Console -- --help
 dotnet run --project src/HagiCode.Libs.OpenCode.Console
 dotnet run --project src/HagiCode.Libs.OpenCode.Console -- --test-provider open-code
@@ -219,6 +225,10 @@ dotnet run --project src/HagiCode.Libs.Reasonix.Console -- --test-all reasonix
 - Kiro 默认套件当前包含 `Ping`、`Simple Prompt`、`Complex Prompt` 和 `Session Resume`。
 - Kiro accepts `--model <model>`, `--executable <path>`, repeated `--arg <value>` overrides, and optional `--auth-method <id>` / `--auth-token <token>` / `--bootstrap-method <name>` bootstrap hints.
 - Kiro repository summary remains opt-in via `--repo <path>`, and `kiro-cli` remains a dedicated-console alias for the canonical `kiro` provider name.
+- No arguments also run the default Pi suite.
+- Pi 默认套件当前包含 `Ping`、`Simple Prompt`、`Complex Prompt` 和 `Session Resume`。
+- Pi accepts `--provider <name>`, `--model <model>`, `--session-dir <path>`, `--thinking <level>`, `--executable <path>`, and repeated `--arg <value>` overrides.
+- Pi repository summary remains opt-in via `--repo <path>`, and `pi-cli` remains a dedicated-console alias for the canonical `pi` provider name.
 - No arguments also run the default OpenCode suite.
 - OpenCode 默认套件当前包含 `Ping`、`Simple Prompt`、`Complex Prompt` 和 `Session Resume`。
 - OpenCode accepts `--model <model>`, `--executable <path>`, `--base-url <url>`, `--workspace <id>`, and repeated `--arg <value>`.
@@ -534,11 +544,12 @@ All CLI metadata is centralized in `HagiCode.Libs.Core.Discovery.CliInstallRegis
 | Gemini | (local / explicit validation) | — | No |
 | Hermes | (private) | — | No |
 | Kimi | (local / explicit validation) | — | No |
+| Pi | (local / explicit validation) | — | No |
 | QoderCLI | (private) | — | No |
 
 ### CI-covered vs. locally-installed CLIs
 
-CLIs with `IsPubliclyInstallable = true` are automatically installed and tested in CI. Today that public set is Claude Code, Copilot, and Codex. CLIs marked as not publicly installable (CodeBuddy, Gemini, Hermes, Kimi, QoderCLI) are skipped during CI setup and require local installation for validation.
+CLIs with `IsPubliclyInstallable = true` are automatically installed and tested in CI. Today that public set is Claude Code, Copilot, and Codex. CLIs marked as not publicly installable (CodeBuddy, Gemini, Hermes, Kimi, Pi, QoderCLI) are skipped during CI setup and require local installation for validation.
 
 ### Local reproduction
 
@@ -613,6 +624,14 @@ dotnet run --project src/HagiCode.Libs.Gemini.Console -- --test-provider-full --
 HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.Providers.Tests/HagiCode.Libs.Providers.Tests.csproj --filter "FullyQualifiedName~Kimi"
 HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.ConsoleTesting.Tests/HagiCode.Libs.ConsoleTesting.Tests.csproj --filter "FullyQualifiedName~Kimi"
 dotnet run --project src/HagiCode.Libs.Kimi.Console -- --test-provider-full --repo .
+```
+
+**Pi** (requires local installation):
+```bash
+HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.Providers.Tests/HagiCode.Libs.Providers.Tests.csproj --filter "FullyQualifiedName~PiProviderTests"
+HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.ConsoleTesting.Tests/HagiCode.Libs.ConsoleTesting.Tests.csproj --filter "FullyQualifiedName~Pi"
+dotnet run --project src/HagiCode.Libs.Pi.Console -- --test-provider pi-cli
+dotnet run --project src/HagiCode.Libs.Pi.Console -- --test-provider-full --provider omniroute --model glm/glm-4.7 --repo .
 ```
 
 **QoderCLI** (requires local installation):

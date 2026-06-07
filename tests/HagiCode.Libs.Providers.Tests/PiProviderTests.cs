@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Globalization;
 using System.Text.Json;
 using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Environment;
@@ -102,8 +104,89 @@ public sealed class PiProviderTests
         messages[0].Content.GetProperty("session_id").GetString().ShouldBe("session-1");
         messages[1].Content.GetProperty("text").GetString().ShouldBe("Trip outline");
         messages[1].Content.GetProperty("provider").GetString().ShouldBe("omniroute");
+        messages[1].Content.GetProperty("timestamp").GetInt64().ShouldBe(1780750996887L);
+        messages[1].Content.GetProperty("usage").GetProperty("input").GetInt32().ShouldBe(12);
+        messages[1].Content.GetProperty("usage").GetProperty("output").GetInt32().ShouldBe(3);
         messages[2].Content.GetProperty("text").GetString().ShouldBe("Trip outline");
         messages[2].Content.GetProperty("stop_reason").GetString().ShouldBe("stop");
+        messages[2].Content.GetProperty("timestamp").GetInt64().ShouldBe(1780750996887L);
+        messages[2].Content.GetProperty("usage").GetProperty("totalTokens").GetInt32().ShouldBe(15);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_streams_message_updates_before_process_exit()
+    {
+        var processManager = new StubCliProcessManager
+        {
+            ExecuteResult = CreateStreamingExecutionResult(),
+            OutputLineDelayMilliseconds = 450
+        };
+        var provider = CreateProvider(processManager: processManager);
+
+        await using var enumerator = provider.ExecuteAsync(
+                new PiOptions
+                {
+                    WorkingDirectory = "/tmp/pi-project",
+                    Model = "glm/glm-4.7",
+                    NoSession = true
+                },
+                "Reply with hello.")
+            .GetAsyncEnumerator();
+
+        var stopwatch = Stopwatch.StartNew();
+        (await enumerator.MoveNextAsync()).ShouldBeTrue();
+        stopwatch.Stop();
+
+        stopwatch.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(1.5));
+        enumerator.Current.Type.ShouldBe("session.started");
+
+        var messages = new List<CliMessage> { enumerator.Current };
+        while (await enumerator.MoveNextAsync())
+        {
+            messages.Add(enumerator.Current);
+        }
+
+        messages.ShouldContain(static message => message.Type == "assistant.thought");
+        messages.Where(static message => message.Type == "assistant")
+            .Select(static message => message.Content.GetProperty("text").GetString())
+            .ShouldContain("hello");
+        messages.ShouldContain(static message => message.Type == "terminal.completed");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_normalizes_toolcall_updates_and_results_into_shared_cli_messages()
+    {
+        var processManager = new StubCliProcessManager
+        {
+            ExecuteResult = CreateToolCallExecutionResult()
+        };
+        var provider = CreateProvider(processManager: processManager);
+
+        var messages = await CollectMessagesAsync(
+            provider,
+            new PiOptions
+            {
+                WorkingDirectory = "/tmp/pi-project",
+                Model = "glm/glm-4.7",
+                NoSession = true
+            },
+            "List the current directory.");
+
+        messages.Select(static message => message.Type).ShouldBe(
+        [
+            "session.started",
+            "tool.call",
+            "tool.completed",
+            "assistant",
+            "terminal.completed"
+        ]);
+        messages[1].Content.GetProperty("tool_call_id").GetString().ShouldBe("tool-1");
+        messages[1].Content.GetProperty("tool_name").GetString().ShouldBe("ls");
+        messages[2].Content.GetProperty("tool_call_id").GetString().ShouldBe("tool-1");
+        messages[2].Content.GetProperty("text").GetString().ShouldContain("README.md");
+        messages[2].Content.GetProperty("timestamp").GetInt64().ShouldBe(1780796361956L);
+        messages[2].Content.GetProperty("update").GetProperty("rawOutput").ValueKind.ShouldBe(JsonValueKind.Array);
+        messages[2].Content.GetProperty("update").GetProperty("rawOutput").EnumerateArray().First().GetProperty("text").GetString().ShouldContain("README.md");
     }
 
     [Fact]
@@ -394,6 +477,152 @@ public sealed class PiProviderTests
         return new ProcessResult(1, string.Join(Environment.NewLine, lines) + Environment.NewLine, standardError);
     }
 
+    private static ProcessResult CreateStreamingExecutionResult(string sessionId = "session-stream")
+    {
+        var thinkingPartial = new
+        {
+            role = "assistant",
+            content = new object[]
+            {
+                new { type = "thinking", thinking = "Plan" }
+            },
+            provider = "omniroute",
+            model = "glm/glm-4.7",
+            stopReason = "stop",
+            responseId = "response-stream-1",
+            responseModel = "glm-4.7"
+        };
+
+        var textPartial = new
+        {
+            role = "assistant",
+            content = new object[]
+            {
+                new { type = "thinking", thinking = "Plan" },
+                new { type = "text", text = "hello" }
+            },
+            provider = "omniroute",
+            model = "glm/glm-4.7",
+            stopReason = "stop",
+            responseId = "response-stream-1",
+            responseModel = "glm-4.7"
+        };
+
+        var lines = new[]
+        {
+            JsonSerializer.Serialize(new { type = "session", version = 3, id = sessionId, timestamp = "2026-06-07T09:22:21.958Z", cwd = "/tmp/pi-project" }),
+            JsonSerializer.Serialize(new
+            {
+                type = "message_update",
+                assistantMessageEvent = new
+                {
+                    type = "thinking_delta",
+                    partial = thinkingPartial
+                },
+                message = thinkingPartial
+            }),
+            JsonSerializer.Serialize(new
+            {
+                type = "message_update",
+                assistantMessageEvent = new
+                {
+                    type = "text_delta",
+                    partial = textPartial
+                },
+                message = textPartial
+            }),
+            JsonSerializer.Serialize(new { type = "message_end", message = textPartial }),
+            JsonSerializer.Serialize(new { type = "turn_end", message = textPartial, toolResults = Array.Empty<object>() }),
+            JsonSerializer.Serialize(new { type = "agent_end", messages = new object[] { textPartial }, willRetry = false })
+        };
+
+        return new ProcessResult(0, string.Join(Environment.NewLine, lines) + Environment.NewLine, string.Empty);
+    }
+
+    private static ProcessResult CreateToolCallExecutionResult(string sessionId = "session-tool")
+    {
+        var toolUseAssistant = new
+        {
+            role = "assistant",
+            content = new object[]
+            {
+                new
+                {
+                    type = "thinking",
+                    thinking = "我已经有足够信息来分析项目，接下来再确认几个细节。"
+                },
+                new
+                {
+                    type = "toolCall",
+                    id = "tool-1",
+                    name = "ls",
+                    arguments = new
+                    {
+                        path = "/tmp/pi-project"
+                    },
+                    partialArgs = "{\"path\":\"/tmp/pi-project\"}",
+                    streamIndex = 0
+                }
+            },
+            provider = "omniroute",
+            model = "glm/glm-4.7",
+            stopReason = "toolUse",
+            responseId = "response-tool-1",
+            responseModel = "glm-4.7"
+        };
+
+        var finalAssistant = new
+        {
+            role = "assistant",
+            content = new object[]
+            {
+                new { type = "text", text = "Listed the directory." }
+            },
+            provider = "omniroute",
+            model = "glm/glm-4.7",
+            stopReason = "stop",
+            responseId = "response-tool-2",
+            responseModel = "glm-4.7"
+        };
+
+        var toolResult = new
+        {
+            role = "toolResult",
+            toolCallId = "tool-1",
+            toolName = "ls",
+            content = new object[]
+            {
+                new { type = "text", text = "README.md\nrepos/\nscripts/" }
+            },
+            isError = false,
+            timestamp = 1780796361956L
+        };
+
+        var lines = new[]
+        {
+            JsonSerializer.Serialize(new { type = "session", version = 3, id = sessionId, timestamp = "2026-06-07T09:39:20.000Z", cwd = "/tmp/pi-project" }),
+            JsonSerializer.Serialize(new
+            {
+                type = "message_update",
+                assistantMessageEvent = new
+                {
+                    type = "toolcall_start",
+                    contentIndex = 0,
+                    partial = toolUseAssistant
+                },
+                message = toolUseAssistant
+            }),
+            JsonSerializer.Serialize(new { type = "message_end", message = toolUseAssistant }),
+            JsonSerializer.Serialize(new { type = "message_end", message = toolResult }),
+            JsonSerializer.Serialize(new { type = "turn_end", message = toolUseAssistant, toolResults = new object[] { toolResult } }),
+            JsonSerializer.Serialize(new { type = "message_end", message = finalAssistant }),
+            JsonSerializer.Serialize(new { type = "turn_end", message = finalAssistant, toolResults = Array.Empty<object>() }),
+            JsonSerializer.Serialize(new { type = "agent_end", messages = new object[] { toolUseAssistant, toolResult, finalAssistant }, willRetry = false })
+        };
+
+        return new ProcessResult(0, string.Join(Environment.NewLine, lines) + Environment.NewLine, string.Empty);
+    }
+
     private static IEnumerable<string> EnumerateStringValues(JsonElement element)
     {
         switch (element.ValueKind)
@@ -471,11 +700,81 @@ public sealed class PiProviderTests
     {
         public ProcessStartContext? LastContext { get; private set; }
         public ProcessResult ExecuteResult { get; init; } = new(0, string.Empty, string.Empty);
+        public int OutputLineDelayMilliseconds { get; init; }
 
         public override Task<ProcessResult> ExecuteAsync(ProcessStartContext context, CancellationToken cancellationToken = default)
         {
             LastContext = context;
             return Task.FromResult(ExecuteResult);
+        }
+
+        public override async ValueTask<CliProcessHandle> StartAsync(ProcessStartContext context, CancellationToken cancellationToken = default)
+        {
+            LastContext = context;
+            var launchContext = await CreateLaunchContextAsync(context, cancellationToken);
+            return await base.StartAsync(launchContext, cancellationToken);
+        }
+
+        private async Task<ProcessStartContext> CreateLaunchContextAsync(ProcessStartContext originalContext, CancellationToken cancellationToken)
+        {
+            var tempDirectory = Path.Combine(Path.GetTempPath(), $"hagicode-libs-pi-stub-{Guid.NewGuid():N}");
+            Directory.CreateDirectory(tempDirectory);
+            var launchWorkingDirectory = !string.IsNullOrWhiteSpace(originalContext.WorkingDirectory)
+                                         && Directory.Exists(originalContext.WorkingDirectory)
+                ? originalContext.WorkingDirectory
+                : tempDirectory;
+
+            var stdoutPath = Path.Combine(tempDirectory, "stdout.txt");
+            var stderrPath = Path.Combine(tempDirectory, "stderr.txt");
+            await File.WriteAllTextAsync(stdoutPath, ExecuteResult.StandardOutput ?? string.Empty, cancellationToken);
+            await File.WriteAllTextAsync(stderrPath, ExecuteResult.StandardError ?? string.Empty, cancellationToken);
+
+            if (OperatingSystem.IsWindows())
+            {
+                var scriptPath = Path.Combine(tempDirectory, "run.ps1");
+                var script = $@"
+$stdoutPath = '{EscapePowerShellLiteral(stdoutPath)}'
+$stderrPath = '{EscapePowerShellLiteral(stderrPath)}'
+$delayMs = {OutputLineDelayMilliseconds}
+Get-Content -LiteralPath $stdoutPath | ForEach-Object {{ Write-Output $_; if ($delayMs -gt 0) {{ Start-Sleep -Milliseconds $delayMs }} }}
+Get-Content -LiteralPath $stderrPath | ForEach-Object {{ [Console]::Error.WriteLine($_); if ($delayMs -gt 0) {{ Start-Sleep -Milliseconds $delayMs }} }}
+exit {ExecuteResult.ExitCode}
+";
+                await File.WriteAllTextAsync(scriptPath, script, cancellationToken);
+                return new ProcessStartContext
+                {
+                    ExecutablePath = "powershell",
+                    Arguments = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath],
+                    WorkingDirectory = launchWorkingDirectory,
+                    OutputEncoding = originalContext.OutputEncoding,
+                    InputEncoding = originalContext.InputEncoding
+                };
+            }
+
+            var scriptPathUnix = Path.Combine(tempDirectory, "run.sh");
+            var delaySeconds = (OutputLineDelayMilliseconds / 1000.0).ToString("0.###", CultureInfo.InvariantCulture);
+            var scriptUnix = $"#!/bin/sh\nstdout_path='{EscapeShellLiteral(stdoutPath)}'\nstderr_path='{EscapeShellLiteral(stderrPath)}'\ndelay_seconds='{delaySeconds}'\nwhile IFS= read -r line || [ -n \"$line\" ]; do\n  printf '%s\\n' \"$line\"\n  if [ \"$delay_seconds\" != '0' ]; then sleep \"$delay_seconds\"; fi\ndone < \"$stdout_path\"\nwhile IFS= read -r line || [ -n \"$line\" ]; do\n  printf '%s\\n' \"$line\" >&2\n  if [ \"$delay_seconds\" != '0' ]; then sleep \"$delay_seconds\"; fi\ndone < \"$stderr_path\"\nexit {ExecuteResult.ExitCode}\n";
+            await File.WriteAllTextAsync(scriptPathUnix, scriptUnix, cancellationToken);
+            File.SetUnixFileMode(scriptPathUnix, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+
+            return new ProcessStartContext
+            {
+                ExecutablePath = scriptPathUnix,
+                Arguments = [],
+                WorkingDirectory = launchWorkingDirectory,
+                OutputEncoding = originalContext.OutputEncoding,
+                InputEncoding = originalContext.InputEncoding
+            };
+        }
+
+        private static string EscapeShellLiteral(string value)
+        {
+            return value.Replace("'", "'\"'\"'");
+        }
+
+        private static string EscapePowerShellLiteral(string value)
+        {
+            return value.Replace("'", "''");
         }
     }
 

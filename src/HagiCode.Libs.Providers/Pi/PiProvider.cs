@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Text.Json;
 using HagiCode.Libs.Core.Discovery;
@@ -9,7 +10,7 @@ using HagiCode.Libs.Core.Transport;
 namespace HagiCode.Libs.Providers.Pi;
 
 /// <summary>
-/// Implements Pi CLI integration using one-shot JSON print mode.
+/// Implements Pi CLI integration using line-delimited JSON print mode.
 /// </summary>
 public class PiProvider : ICliProvider<PiOptions>
 {
@@ -49,15 +50,16 @@ public class PiProvider : ICliProvider<PiOptions>
         ArgumentNullException.ThrowIfNull(options);
         ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
 
-        var runtimeEnvironment = await ResolveRuntimeEnvironmentAsync(cancellationToken).ConfigureAwait(false);
+        ProcessStartContext? startContext = null;
+        string? startupFailure = null;
 
-        IReadOnlyList<CliMessage> messages;
         try
         {
+            var runtimeEnvironment = await ResolveRuntimeEnvironmentAsync(cancellationToken).ConfigureAwait(false);
             var executablePath = ResolveExecutablePath(options, runtimeEnvironment)
                                  ?? throw new FileNotFoundException("Unable to locate the Pi executable.");
 
-            var startContext = new ProcessStartContext
+            startContext = new ProcessStartContext
             {
                 ExecutablePath = executablePath,
                 Arguments = BuildCommandArguments(options, prompt),
@@ -68,8 +70,6 @@ public class PiProvider : ICliProvider<PiOptions>
                 Ownership = new CliProcessOwnershipRegistration { ProviderName = Name }
             };
 
-            var result = await _processManager.ExecuteAsync(startContext, cancellationToken).ConfigureAwait(false);
-            messages = _eventMapper.Normalize(result, options.SessionId);
         }
         catch (OperationCanceledException)
         {
@@ -77,10 +77,16 @@ public class PiProvider : ICliProvider<PiOptions>
         }
         catch (Exception ex)
         {
-            messages = [CreateProcessFailureMessage(ex.Message)];
+            startupFailure = ex.Message;
         }
 
-        foreach (var message in messages)
+        if (startupFailure is not null)
+        {
+            yield return CreateProcessFailureMessage(startupFailure);
+            yield break;
+        }
+
+        await foreach (var message in ExecuteProcessAsync(startContext!, options.SessionId, cancellationToken).ConfigureAwait(false))
         {
             yield return message;
         }
@@ -214,6 +220,69 @@ public class PiProvider : ICliProvider<PiOptions>
         return environment;
     }
 
+    internal virtual async IAsyncEnumerable<CliMessage> ExecuteProcessAsync(
+        ProcessStartContext startContext,
+        string? requestedSessionId,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var eventState = _eventMapper.CreateStreamingState(requestedSessionId);
+        await using var handle = await _processManager.StartAsync(startContext, cancellationToken).ConfigureAwait(false);
+
+        TryCloseInput(handle.StandardInput);
+        var standardErrorTask = ReadToEndAsync(handle.StandardError, cancellationToken);
+        ExceptionDispatchInfo? pendingException = null;
+        IReadOnlyList<CliMessage> terminalMessages = [];
+
+        while (true)
+        {
+            string? line;
+            try
+            {
+                line = await handle.StandardOutput.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                pendingException = ExceptionDispatchInfo.Capture(ex);
+                break;
+            }
+
+            if (line is null)
+            {
+                break;
+            }
+
+            foreach (var message in eventState.ProcessOutputLine(line))
+            {
+                yield return message;
+            }
+        }
+
+        if (pendingException is null)
+        {
+            try
+            {
+                await handle.Process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+                var standardError = await standardErrorTask.ConfigureAwait(false);
+                terminalMessages = eventState.Complete(handle.Process.ExitCode, standardError);
+            }
+            catch (Exception ex)
+            {
+                pendingException = ExceptionDispatchInfo.Capture(ex);
+            }
+        }
+
+        if (pendingException is not null)
+        {
+            await _processManager.StopAsync(handle, CancellationToken.None).ConfigureAwait(false);
+            pendingException.Throw();
+        }
+
+        foreach (var message in terminalMessages)
+        {
+            yield return message;
+        }
+    }
+
     private static void AddOption(List<string> arguments, string optionName, string? value)
     {
         var normalizedValue = ArgumentValueNormalizer.NormalizeOptionalValue(value);
@@ -281,6 +350,35 @@ public class PiProvider : ICliProvider<PiOptions>
         }
 
         return string.Empty;
+    }
+
+    private static void TryCloseInput(StreamWriter writer)
+    {
+        try
+        {
+            writer.Close();
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException)
+        {
+        }
+    }
+
+    private static async Task<string> ReadToEndAsync(StreamReader reader, CancellationToken cancellationToken)
+    {
+        var buffer = new char[1024];
+        var builder = new StringBuilder();
+        while (true)
+        {
+            var read = await reader.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false);
+            if (read <= 0)
+            {
+                break;
+            }
+
+            builder.Append(buffer, 0, read);
+        }
+
+        return builder.ToString();
     }
 
     private static CliMessage CreateProcessFailureMessage(string diagnosticText)

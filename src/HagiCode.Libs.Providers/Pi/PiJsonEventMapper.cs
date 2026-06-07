@@ -11,145 +11,383 @@ internal sealed class PiJsonEventMapper
     {
         ArgumentNullException.ThrowIfNull(result);
 
-        var events = ParseJsonEvents(result.StandardOutput, out var invalidOutputLines);
+        var state = CreateStreamingState(requestedSessionId);
         var messages = new List<CliMessage>();
 
-        string? sessionId = null;
-        string? assistantText = null;
-        string? assistantModel = null;
-        string? assistantProvider = null;
-        string? stopReason = null;
-        string? errorText = null;
-        CliMessage? terminalMessage = null;
-
-        foreach (var eventElement in events)
+        using var reader = new StringReader(result.StandardOutput ?? string.Empty);
+        while (reader.ReadLine() is { } line)
         {
-            var eventType = GetString(eventElement, "type");
-            switch (eventType)
-            {
-                case "session":
-                    sessionId ??= GetString(eventElement, "id");
-                    if (!string.IsNullOrWhiteSpace(sessionId))
-                    {
-                        messages.Add(CreateSessionLifecycleMessage(sessionId!, eventElement, requestedSessionId));
-                    }
-
-                    break;
-                case "message_end":
-                    if (TryGetAssistantMessage(eventElement, out var assistantMessage))
-                    {
-                        CaptureAssistantState(
-                            assistantMessage,
-                            ref assistantText,
-                            ref assistantModel,
-                            ref assistantProvider,
-                            ref stopReason,
-                            ref errorText);
-
-                        if (!string.IsNullOrWhiteSpace(assistantText))
-                        {
-                            messages.Add(CreateAssistantMessage(sessionId, assistantText!, assistantMessage));
-                        }
-                    }
-
-                    break;
-                case "turn_end":
-                    if (TryGetAssistantMessage(eventElement, out var turnMessage))
-                    {
-                        CaptureAssistantState(
-                            turnMessage,
-                            ref assistantText,
-                            ref assistantModel,
-                            ref assistantProvider,
-                            ref stopReason,
-                            ref errorText);
-                        terminalMessage = CreateTerminalMessage(sessionId, assistantText, turnMessage, sourceEventType: eventType);
-                    }
-
-                    break;
-                case "agent_end":
-                    if (terminalMessage is null && TryGetLastAssistantMessage(eventElement, out var finalAssistantMessage))
-                    {
-                        CaptureAssistantState(
-                            finalAssistantMessage,
-                            ref assistantText,
-                            ref assistantModel,
-                            ref assistantProvider,
-                            ref stopReason,
-                            ref errorText);
-                        terminalMessage = CreateTerminalMessage(sessionId, assistantText, finalAssistantMessage, sourceEventType: eventType);
-                    }
-
-                    break;
-            }
+            messages.AddRange(state.ProcessOutputLine(line));
         }
 
-        if (result.ExitCode != 0)
-        {
-            terminalMessage = CreateTerminalFailedMessage(
-                sessionId,
-                BuildProcessFailureText(result, invalidOutputLines, errorText),
-                assistantModel,
-                assistantProvider,
-                stopReason ?? "exit_code",
-                result.ExitCode,
-                result.StandardError,
-                invalidOutputLines);
-        }
-        else if (terminalMessage is null)
-        {
-            terminalMessage = CreateFallbackTerminalMessage(
-                result,
-                invalidOutputLines,
-                sessionId,
-                assistantText,
-                assistantModel,
-                assistantProvider,
-                stopReason,
-                errorText);
-        }
-
-        if (terminalMessage is not null)
-        {
-            messages.Add(terminalMessage);
-        }
-
+        messages.AddRange(state.Complete(result.ExitCode, result.StandardError));
         return messages;
     }
 
-    private static IReadOnlyList<JsonElement> ParseJsonEvents(string stdout, out IReadOnlyList<string> invalidOutputLines)
+    internal StreamingState CreateStreamingState(string? requestedSessionId = null)
     {
-        var events = new List<JsonElement>();
-        var invalidLines = new List<string>();
+        return new StreamingState(requestedSessionId);
+    }
 
-        using var reader = new StringReader(stdout ?? string.Empty);
-        while (reader.ReadLine() is { } line)
+    internal sealed class StreamingState(string? requestedSessionId)
+    {
+        private readonly string? _requestedSessionId = NormalizeOptional(requestedSessionId);
+        private readonly List<string> _invalidOutputLines = [];
+        private readonly Dictionary<string, ToolCallSnapshot> _toolCallSnapshots = new(StringComparer.Ordinal);
+        private readonly HashSet<string> _emittedToolResultKeys = new(StringComparer.Ordinal);
+
+        private string? _sessionId;
+        private string? _assistantText;
+        private string? _assistantModel;
+        private string? _assistantProvider;
+        private string? _stopReason;
+        private string? _errorText;
+        private CliMessage? _terminalMessage;
+        private string? _pendingThinkingText;
+        private JsonElement? _pendingThinkingMessage;
+
+        public IReadOnlyList<CliMessage> ProcessOutputLine(string? line)
         {
             if (string.IsNullOrWhiteSpace(line))
             {
-                continue;
+                return [];
             }
 
+            JsonElement eventElement;
             try
             {
                 using var document = JsonDocument.Parse(line);
                 var rootElement = document.RootElement;
                 if (rootElement.ValueKind != JsonValueKind.Object || !rootElement.TryGetProperty("type", out _))
                 {
-                    invalidLines.Add(line);
-                    continue;
+                    _invalidOutputLines.Add(line);
+                    return [];
                 }
 
-                events.Add(JsonSerializer.SerializeToElement(rootElement));
+                eventElement = JsonSerializer.SerializeToElement(rootElement);
             }
             catch (JsonException)
             {
-                invalidLines.Add(line);
+                _invalidOutputLines.Add(line);
+                return [];
+            }
+
+            var messages = new List<CliMessage>();
+            var eventType = GetString(eventElement, "type");
+            switch (eventType)
+            {
+                case "turn_start":
+                    ClearPendingThinking();
+                    break;
+
+                case "session":
+                    _sessionId ??= GetString(eventElement, "id");
+                    if (!string.IsNullOrWhiteSpace(_sessionId))
+                    {
+                        messages.Add(CreateSessionLifecycleMessage(_sessionId!, eventElement, _requestedSessionId));
+                    }
+
+                    break;
+
+                case "message_update":
+                    ProcessMessageUpdate(eventElement, messages);
+                    break;
+
+                case "message_end":
+                    messages.AddRange(ProcessToolResultMessageEnd(eventElement));
+
+                    if (TryGetAssistantMessage(eventElement, out var assistantMessage))
+                    {
+                        CaptureAssistantState(
+                            assistantMessage,
+                            ref _assistantText,
+                            ref _assistantModel,
+                            ref _assistantProvider,
+                            ref _stopReason,
+                            ref _errorText);
+
+                        if (!string.Equals(GetString(assistantMessage, "stopReason"), "toolUse", StringComparison.OrdinalIgnoreCase))
+                        {
+                            messages.AddRange(DrainBufferedThinkingMessages());
+                        }
+                        else
+                        {
+                            ClearPendingThinking();
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(_assistantText))
+                        {
+                            messages.Add(CreateAssistantMessage(_sessionId, _assistantText!, assistantMessage));
+                        }
+                    }
+
+                    break;
+
+                case "turn_end":
+                    messages.AddRange(ProcessTurnEndToolResults(eventElement));
+
+                    if (TryGetAssistantMessage(eventElement, out var turnMessage))
+                    {
+                        CaptureAssistantState(
+                            turnMessage,
+                            ref _assistantText,
+                            ref _assistantModel,
+                            ref _assistantProvider,
+                            ref _stopReason,
+                            ref _errorText);
+
+                        if (!string.Equals(GetString(turnMessage, "stopReason"), "toolUse", StringComparison.OrdinalIgnoreCase))
+                        {
+                            messages.AddRange(DrainBufferedThinkingMessages());
+                        }
+                        else
+                        {
+                            ClearPendingThinking();
+                        }
+
+                        _terminalMessage = CreateTerminalMessage(_sessionId, _assistantText, turnMessage, sourceEventType: eventType);
+                    }
+
+                    break;
+
+                case "agent_end":
+                    messages.AddRange(DrainBufferedThinkingMessages());
+
+                    if (_terminalMessage is null && TryGetLastAssistantMessage(eventElement, out var finalAssistantMessage))
+                    {
+                        CaptureAssistantState(
+                            finalAssistantMessage,
+                            ref _assistantText,
+                            ref _assistantModel,
+                            ref _assistantProvider,
+                            ref _stopReason,
+                            ref _errorText);
+                        _terminalMessage = CreateTerminalMessage(_sessionId, _assistantText, finalAssistantMessage, sourceEventType: eventType);
+                    }
+
+                    break;
+            }
+
+            return messages;
+        }
+
+        public IReadOnlyList<CliMessage> Complete(int exitCode, string? standardError)
+        {
+            CliMessage? terminalMessage = _terminalMessage;
+            if (exitCode != 0)
+            {
+                terminalMessage = CreateTerminalFailedMessage(
+                    _sessionId,
+                    BuildProcessFailureText(exitCode, standardError, _invalidOutputLines, _errorText),
+                    _assistantModel,
+                    _assistantProvider,
+                    _stopReason ?? "exit_code",
+                    exitCode,
+                    standardError,
+                    _invalidOutputLines);
+            }
+            else if (terminalMessage is null)
+            {
+                terminalMessage = CreateFallbackTerminalMessage(
+                    exitCode,
+                    standardError,
+                    _invalidOutputLines,
+                    _sessionId,
+                    _assistantText,
+                    _assistantModel,
+                    _assistantProvider,
+                    _stopReason,
+                    _errorText);
+            }
+
+            return terminalMessage is null ? [] : [terminalMessage];
+        }
+
+        private void ProcessMessageUpdate(JsonElement eventElement, List<CliMessage> messages)
+        {
+            if (!TryGetAssistantMessageUpdate(eventElement, out var assistantMessage, out var updateType))
+            {
+                return;
+            }
+
+            CaptureAssistantState(
+                assistantMessage,
+                ref _assistantText,
+                ref _assistantModel,
+                ref _assistantProvider,
+                ref _stopReason,
+                ref _errorText);
+
+            if (IsThinkingUpdateType(updateType))
+            {
+                var thinkingText = ExtractAssistantThinking(assistantMessage);
+                if (!string.IsNullOrWhiteSpace(thinkingText))
+                {
+                    BufferThinkingSnapshot(thinkingText!, assistantMessage);
+                }
+            }
+
+            if (IsTextUpdateType(updateType))
+            {
+                var assistantText = ExtractAssistantText(assistantMessage);
+                if (!string.IsNullOrWhiteSpace(assistantText))
+                {
+                    messages.Add(CreateAssistantMessage(_sessionId, assistantText!, assistantMessage));
+                }
+            }
+
+            if (IsToolCallUpdateType(updateType))
+            {
+                messages.AddRange(ProcessToolCallUpdate(assistantMessage));
             }
         }
 
-        invalidOutputLines = invalidLines;
-        return events;
+        private void BufferThinkingSnapshot(string thinkingText, JsonElement assistantMessage)
+        {
+            _pendingThinkingText = thinkingText;
+            _pendingThinkingMessage = JsonSerializer.SerializeToElement(assistantMessage);
+        }
+
+        private IReadOnlyList<CliMessage> DrainBufferedThinkingMessages()
+        {
+            if (string.IsNullOrWhiteSpace(_pendingThinkingText) || _pendingThinkingMessage is not { } pendingThinkingMessage)
+            {
+                ClearPendingThinking();
+                return [];
+            }
+
+            var thinkingMessage = CreateAssistantThoughtMessage(_sessionId, _pendingThinkingText!, pendingThinkingMessage);
+            ClearPendingThinking();
+            return [thinkingMessage];
+        }
+
+        private void ClearPendingThinking()
+        {
+            _pendingThinkingText = null;
+            _pendingThinkingMessage = null;
+        }
+
+        private IReadOnlyList<CliMessage> ProcessToolCallUpdate(JsonElement assistantMessage)
+        {
+            var messages = new List<CliMessage>();
+
+            foreach (var toolCall in EnumerateToolCalls(assistantMessage))
+            {
+                var toolCallId = NormalizeOptional(GetString(toolCall, "id"));
+                if (toolCallId is null)
+                {
+                    continue;
+                }
+
+                var toolName = NormalizeOptional(GetString(toolCall, "name")) ?? "tool_call";
+                var argumentsJson = ResolveToolCallArguments(toolCall);
+                var isFirstObservation = !_toolCallSnapshots.TryGetValue(toolCallId, out var previousSnapshot);
+                var hasChanged = !isFirstObservation &&
+                                 (!string.Equals(previousSnapshot!.Name, toolName, StringComparison.Ordinal) ||
+                                  !string.Equals(previousSnapshot.ArgumentsJson, argumentsJson, StringComparison.Ordinal));
+
+                if (!isFirstObservation && !hasChanged)
+                {
+                    continue;
+                }
+
+                _toolCallSnapshots[toolCallId] = new ToolCallSnapshot(toolName, argumentsJson);
+                messages.Add(CreateToolLifecycleMessage(
+                    isFirstObservation ? "tool.call" : "tool.update",
+                    _sessionId,
+                    toolCallId,
+                    toolName,
+                    "running",
+                    rawInput: ParseJsonOrString(argumentsJson),
+                    rawOutput: null,
+                    text: null,
+                    sourceMessage: assistantMessage));
+            }
+
+            return messages;
+        }
+
+        private IReadOnlyList<CliMessage> ProcessToolResultMessageEnd(JsonElement eventElement)
+        {
+            if (!TryGetToolResultMessage(eventElement, out var toolResultMessage))
+            {
+                return [];
+            }
+
+            return ProcessToolResult(toolResultMessage);
+        }
+
+        private IReadOnlyList<CliMessage> ProcessTurnEndToolResults(JsonElement eventElement)
+        {
+            if (!eventElement.TryGetProperty("toolResults", out var toolResultsElement) ||
+                toolResultsElement.ValueKind != JsonValueKind.Array)
+            {
+                return [];
+            }
+
+            var messages = new List<CliMessage>();
+            foreach (var toolResult in toolResultsElement.EnumerateArray())
+            {
+                if (toolResult.ValueKind != JsonValueKind.Object ||
+                    !string.Equals(GetString(toolResult, "role"), "toolResult", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                messages.AddRange(ProcessToolResult(toolResult));
+            }
+
+            return messages;
+        }
+
+        private IReadOnlyList<CliMessage> ProcessToolResult(JsonElement toolResultMessage)
+        {
+            var toolResultKey = BuildToolResultKey(toolResultMessage);
+            if (!_emittedToolResultKeys.Add(toolResultKey))
+            {
+                return [];
+            }
+
+            var toolCallId = NormalizeOptional(GetString(toolResultMessage, "toolCallId"));
+            var toolName = NormalizeOptional(GetString(toolResultMessage, "toolName"));
+            if (toolCallId is not null && _toolCallSnapshots.TryGetValue(toolCallId, out var snapshot))
+            {
+                toolName ??= snapshot.Name;
+                _toolCallSnapshots.Remove(toolCallId);
+            }
+
+            var status = TryGetBoolean(toolResultMessage, "isError") == true ? "failed" : "completed";
+            var extractedText = ExtractToolResultText(toolResultMessage);
+            var rawOutput = ResolveToolResultOutput(toolResultMessage, extractedText);
+            return
+            [
+                CreateToolLifecycleMessage(
+                    string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase) ? "tool.failed" : "tool.completed",
+                    _sessionId,
+                    toolCallId,
+                    toolName ?? "tool_call",
+                    status,
+                    rawInput: null,
+                    rawOutput: rawOutput,
+                    text: extractedText,
+                    sourceMessage: toolResultMessage)
+            ];
+        }
+    }
+
+    private static bool IsThinkingUpdateType(string? updateType)
+    {
+        return updateType?.StartsWith("thinking_", StringComparison.OrdinalIgnoreCase) == true;
+    }
+
+    private static bool IsTextUpdateType(string? updateType)
+    {
+        return updateType?.StartsWith("text_", StringComparison.OrdinalIgnoreCase) == true;
+    }
+
+    private static bool IsToolCallUpdateType(string? updateType)
+    {
+        return updateType?.StartsWith("toolcall_", StringComparison.OrdinalIgnoreCase) == true;
     }
 
     private static void CaptureAssistantState(
@@ -183,14 +421,15 @@ internal sealed class PiJsonEventMapper
                             ?? assistantText
                             ?? "Pi reported a failed assistant turn.";
 
-            return CreateTerminalFailedMessage(sessionId, errorText, model, provider, stopReason, exitCode: null, stderr: null, invalidOutputLines: null, sourceEventType);
+            return CreateTerminalFailedMessage(sessionId, errorText, model, provider, stopReason, exitCode: null, stderr: null, invalidOutputLines: null, sourceEventType, assistantMessage);
         }
 
-        return CreateTerminalCompletedMessage(sessionId, assistantText, model, provider, stopReason, sourceEventType);
+        return CreateTerminalCompletedMessage(sessionId, assistantText, model, provider, stopReason, sourceEventType, assistantMessage);
     }
 
     private static CliMessage CreateFallbackTerminalMessage(
-        ProcessResult result,
+        int exitCode,
+        string? standardError,
         IReadOnlyList<string> invalidOutputLines,
         string? sessionId,
         string? assistantText,
@@ -201,12 +440,12 @@ internal sealed class PiJsonEventMapper
     {
         if (!string.IsNullOrWhiteSpace(errorText))
         {
-            return CreateTerminalFailedMessage(sessionId, errorText!, assistantModel, assistantProvider, stopReason ?? "error", result.ExitCode, result.StandardError, invalidOutputLines);
+            return CreateTerminalFailedMessage(sessionId, errorText!, assistantModel, assistantProvider, stopReason ?? "error", exitCode, standardError, invalidOutputLines);
         }
 
-        if (!string.IsNullOrWhiteSpace(result.StandardError))
+        if (!string.IsNullOrWhiteSpace(standardError))
         {
-            return CreateTerminalFailedMessage(sessionId, result.StandardError.Trim(), assistantModel, assistantProvider, stopReason ?? "stderr", result.ExitCode, result.StandardError, invalidOutputLines);
+            return CreateTerminalFailedMessage(sessionId, standardError.Trim(), assistantModel, assistantProvider, stopReason ?? "stderr", exitCode, standardError, invalidOutputLines);
         }
 
         if (invalidOutputLines.Count > 0)
@@ -217,8 +456,8 @@ internal sealed class PiJsonEventMapper
                 assistantModel,
                 assistantProvider,
                 stopReason ?? "invalid_json",
-                result.ExitCode,
-                result.StandardError,
+                exitCode,
+                standardError,
                 invalidOutputLines);
         }
 
@@ -233,14 +472,14 @@ internal sealed class PiJsonEventMapper
             assistantModel,
             assistantProvider,
             stopReason ?? "missing_terminal_event",
-            result.ExitCode,
-            result.StandardError,
+            exitCode,
+            standardError,
             invalidOutputLines);
     }
 
     private static CliMessage CreateSessionLifecycleMessage(string sessionId, JsonElement sessionEvent, string? requestedSessionId)
     {
-        var requested = string.IsNullOrWhiteSpace(requestedSessionId) ? null : requestedSessionId.Trim();
+        var requested = NormalizeOptional(requestedSessionId);
         var isResumed = requested is not null && string.Equals(sessionId, requested, StringComparison.Ordinal);
         var isRestarted = requested is not null && !isResumed;
         var messageType = isResumed ? "session.resumed" : "session.started";
@@ -270,9 +509,23 @@ internal sealed class PiJsonEventMapper
 
     private static CliMessage CreateAssistantMessage(string? sessionId, string text, JsonElement assistantMessage)
     {
+        return CreateAssistantSnapshotMessage("assistant", sessionId, text, assistantMessage);
+    }
+
+    private static CliMessage CreateAssistantThoughtMessage(string? sessionId, string text, JsonElement assistantMessage)
+    {
+        return CreateAssistantSnapshotMessage("assistant.thought", sessionId, text, assistantMessage);
+    }
+
+    private static CliMessage CreateAssistantSnapshotMessage(
+        string messageType,
+        string? sessionId,
+        string text,
+        JsonElement assistantMessage)
+    {
         var payload = new Dictionary<string, object?>
         {
-            ["type"] = "assistant",
+            ["type"] = messageType,
             ["text"] = text,
         };
 
@@ -282,8 +535,10 @@ internal sealed class PiJsonEventMapper
         AddIfNotEmpty(payload, "response_model", GetString(assistantMessage, "responseModel"));
         AddIfNotEmpty(payload, "response_id", GetString(assistantMessage, "responseId"));
         AddIfNotEmpty(payload, "stop_reason", GetString(assistantMessage, "stopReason"));
+        AddJsonPropertyIfPresent(payload, "usage", assistantMessage, "usage");
+        AddJsonPropertyIfPresent(payload, "timestamp", assistantMessage, "timestamp");
 
-        return new CliMessage("assistant", JsonSerializer.SerializeToElement(payload));
+        return new CliMessage(messageType, JsonSerializer.SerializeToElement(payload));
     }
 
     private static CliMessage CreateTerminalCompletedMessage(
@@ -292,7 +547,8 @@ internal sealed class PiJsonEventMapper
         string? model,
         string? provider,
         string? stopReason,
-        string? sourceEventType)
+        string? sourceEventType,
+        JsonElement? sourceMessage = null)
     {
         var payload = new Dictionary<string, object?>
         {
@@ -305,6 +561,8 @@ internal sealed class PiJsonEventMapper
         AddIfNotEmpty(payload, "provider", provider);
         AddIfNotEmpty(payload, "stop_reason", stopReason);
         AddIfNotEmpty(payload, "source_event_type", sourceEventType);
+        AddJsonPropertyIfPresent(payload, "usage", sourceMessage, "usage");
+        AddJsonPropertyIfPresent(payload, "timestamp", sourceMessage, "timestamp");
 
         return new CliMessage("terminal.completed", JsonSerializer.SerializeToElement(payload));
     }
@@ -318,7 +576,8 @@ internal sealed class PiJsonEventMapper
         int? exitCode,
         string? stderr,
         IReadOnlyList<string>? invalidOutputLines,
-        string? sourceEventType = null)
+        string? sourceEventType = null,
+        JsonElement? sourceMessage = null)
     {
         var payload = new Dictionary<string, object?>
         {
@@ -332,9 +591,11 @@ internal sealed class PiJsonEventMapper
         AddIfNotEmpty(payload, "model", model);
         AddIfNotEmpty(payload, "provider", provider);
         AddIfNotEmpty(payload, "stop_reason", stopReason);
-        AddIfNotEmpty(payload, "stderr", string.IsNullOrWhiteSpace(stderr) ? null : stderr.Trim());
+        AddIfNotEmpty(payload, "stderr", NormalizeOptional(stderr));
         AddIfNotEmpty(payload, "source_event_type", sourceEventType);
         AddIfPresent(payload, "exit_code", exitCode);
+        AddJsonPropertyIfPresent(payload, "usage", sourceMessage, "usage");
+        AddJsonPropertyIfPresent(payload, "timestamp", sourceMessage, "timestamp");
 
         if (invalidOutputLines is { Count: > 0 })
         {
@@ -344,7 +605,11 @@ internal sealed class PiJsonEventMapper
         return new CliMessage("terminal.failed", JsonSerializer.SerializeToElement(payload));
     }
 
-    private static string BuildProcessFailureText(ProcessResult result, IReadOnlyList<string> invalidOutputLines, string? errorText)
+    private static string BuildProcessFailureText(
+        int exitCode,
+        string? standardError,
+        IReadOnlyList<string> invalidOutputLines,
+        string? errorText)
     {
         var builder = new StringBuilder();
 
@@ -353,9 +618,9 @@ internal sealed class PiJsonEventMapper
             builder.Append(errorText.Trim());
         }
 
-        if (!string.IsNullOrWhiteSpace(result.StandardError))
+        if (!string.IsNullOrWhiteSpace(standardError))
         {
-            AppendDiagnosticLine(builder, result.StandardError.Trim());
+            AppendDiagnosticLine(builder, standardError.Trim());
         }
 
         if (invalidOutputLines.Count > 0)
@@ -365,11 +630,11 @@ internal sealed class PiJsonEventMapper
 
         if (builder.Length == 0)
         {
-            builder.Append($"Pi exited with code {result.ExitCode}.");
+            builder.Append($"Pi exited with code {exitCode}.");
         }
         else
         {
-            AppendDiagnosticLine(builder, $"Pi exited with code {result.ExitCode}.");
+            AppendDiagnosticLine(builder, $"Pi exited with code {exitCode}.");
         }
 
         return builder.ToString();
@@ -392,6 +657,42 @@ internal sealed class PiJsonEventMapper
 
     private static string? ExtractAssistantText(JsonElement assistantMessage)
     {
+        return ExtractAssistantContentByType(assistantMessage, "text", "text");
+    }
+
+    private static string? ExtractAssistantThinking(JsonElement assistantMessage)
+    {
+        return ExtractAssistantContentByType(assistantMessage, "thinking", "thinking");
+    }
+
+    private static string? ExtractToolResultText(JsonElement toolResultMessage)
+    {
+        if (!toolResultMessage.TryGetProperty("content", out var contentElement) || contentElement.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var builder = new StringBuilder();
+        foreach (var contentItem in contentElement.EnumerateArray())
+        {
+            if (string.Equals(GetString(contentItem, "type"), "text", StringComparison.OrdinalIgnoreCase))
+            {
+                var text = GetString(contentItem, "text");
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    builder.Append(text);
+                }
+            }
+        }
+
+        return builder.Length == 0 ? null : builder.ToString();
+    }
+
+    private static string? ExtractAssistantContentByType(
+        JsonElement assistantMessage,
+        string contentType,
+        string contentPropertyName)
+    {
         if (!assistantMessage.TryGetProperty("content", out var contentElement) || contentElement.ValueKind != JsonValueKind.Array)
         {
             return null;
@@ -400,12 +701,12 @@ internal sealed class PiJsonEventMapper
         var builder = new StringBuilder();
         foreach (var contentItem in contentElement.EnumerateArray())
         {
-            if (!string.Equals(GetString(contentItem, "type"), "text", StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(GetString(contentItem, "type"), contentType, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
 
-            var text = GetString(contentItem, "text");
+            var text = GetString(contentItem, contentPropertyName);
             if (string.IsNullOrWhiteSpace(text))
             {
                 continue;
@@ -428,6 +729,166 @@ internal sealed class PiJsonEventMapper
 
         assistantMessage = default;
         return false;
+    }
+
+    private static bool TryGetAssistantMessageUpdate(
+        JsonElement eventElement,
+        out JsonElement assistantMessage,
+        out string? updateType)
+    {
+        updateType = null;
+        if (!eventElement.TryGetProperty("assistantMessageEvent", out var assistantEvent)
+            || assistantEvent.ValueKind != JsonValueKind.Object)
+        {
+            assistantMessage = default;
+            return false;
+        }
+
+        updateType = GetString(assistantEvent, "type");
+        if (assistantEvent.TryGetProperty("partial", out assistantMessage)
+            && assistantMessage.ValueKind == JsonValueKind.Object
+            && string.Equals(GetString(assistantMessage, "role"), "assistant", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return TryGetAssistantMessage(eventElement, out assistantMessage);
+    }
+
+    private static bool TryGetToolResultMessage(JsonElement eventElement, out JsonElement toolResultMessage)
+    {
+        if (eventElement.TryGetProperty("message", out toolResultMessage)
+            && toolResultMessage.ValueKind == JsonValueKind.Object
+            && string.Equals(GetString(toolResultMessage, "role"), "toolResult", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        toolResultMessage = default;
+        return false;
+    }
+
+    private static IEnumerable<JsonElement> EnumerateToolCalls(JsonElement assistantMessage)
+    {
+        if (!assistantMessage.TryGetProperty("content", out var contentElement) || contentElement.ValueKind != JsonValueKind.Array)
+        {
+            yield break;
+        }
+
+        foreach (var contentItem in contentElement.EnumerateArray())
+        {
+            if (contentItem.ValueKind == JsonValueKind.Object &&
+                string.Equals(GetString(contentItem, "type"), "toolCall", StringComparison.OrdinalIgnoreCase))
+            {
+                yield return contentItem;
+            }
+        }
+    }
+
+    private static string? ResolveToolCallArguments(JsonElement toolCall)
+    {
+        if (toolCall.TryGetProperty("arguments", out var argumentsElement) &&
+            argumentsElement.ValueKind is not JsonValueKind.Null and not JsonValueKind.Undefined)
+        {
+            return argumentsElement.GetRawText();
+        }
+
+        return NormalizeOptional(GetString(toolCall, "partialArgs"));
+    }
+
+    private static object? ResolveToolResultOutput(JsonElement toolResultMessage, string? extractedText)
+    {
+        if (toolResultMessage.TryGetProperty("content", out var contentElement) &&
+            contentElement.ValueKind is not JsonValueKind.Null and not JsonValueKind.Undefined)
+        {
+            return contentElement;
+        }
+
+        if (!string.IsNullOrWhiteSpace(extractedText))
+        {
+            return extractedText;
+        }
+
+        return null;
+    }
+
+    private static string BuildToolResultKey(JsonElement toolResultMessage)
+    {
+        var toolCallId = NormalizeOptional(GetString(toolResultMessage, "toolCallId"));
+        if (toolCallId is not null)
+        {
+            return toolCallId;
+        }
+
+        var toolName = NormalizeOptional(GetString(toolResultMessage, "toolName")) ?? "tool";
+        var timestamp = TryGetScalarString(toolResultMessage, "timestamp") ?? Guid.NewGuid().ToString("N");
+        return $"{toolName}:{timestamp}";
+    }
+
+    private static CliMessage CreateToolLifecycleMessage(
+        string messageType,
+        string? sessionId,
+        string? toolCallId,
+        string toolName,
+        string status,
+        object? rawInput,
+        object? rawOutput,
+        string? text,
+        JsonElement? sourceMessage = null)
+    {
+        var update = new Dictionary<string, object?>
+        {
+            ["title"] = toolName,
+            ["kind"] = toolName,
+            ["status"] = status,
+        };
+
+        AddIfNotEmpty(update, "toolCallId", toolCallId);
+        if (rawInput != null)
+        {
+            update["rawInput"] = rawInput;
+        }
+
+        if (rawOutput != null)
+        {
+            update["rawOutput"] = rawOutput;
+        }
+
+        AddIfNotEmpty(update, "message", text);
+        AddJsonPropertyIfPresent(update, "timestamp", sourceMessage, "timestamp");
+
+        var payload = new Dictionary<string, object?>
+        {
+            ["type"] = messageType,
+            ["tool_name"] = toolName,
+            ["status"] = status,
+            ["update"] = update,
+        };
+
+        AddSessionId(payload, sessionId);
+        AddIfNotEmpty(payload, "tool_call_id", toolCallId);
+        AddIfNotEmpty(payload, "text", text);
+        AddJsonPropertyIfPresent(payload, "timestamp", sourceMessage, "timestamp");
+
+        return new CliMessage(messageType, JsonSerializer.SerializeToElement(payload));
+    }
+
+    private static object? ParseJsonOrString(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(value);
+            return JsonSerializer.SerializeToElement(document.RootElement);
+        }
+        catch (JsonException)
+        {
+            return value;
+        }
     }
 
     private static bool TryGetLastAssistantMessage(JsonElement eventElement, out JsonElement assistantMessage)
@@ -462,6 +923,21 @@ internal sealed class PiJsonEventMapper
         return null;
     }
 
+    private static string? TryGetScalarString(JsonElement element, string propertyName)
+    {
+        if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(propertyName, out var valueElement))
+        {
+            return null;
+        }
+
+        return valueElement.ValueKind switch
+        {
+            JsonValueKind.String => valueElement.GetString(),
+            JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False => valueElement.GetRawText(),
+            _ => null
+        };
+    }
+
     private static int? TryGetInt32(JsonElement element, string propertyName)
     {
         if (element.ValueKind == JsonValueKind.Object
@@ -473,6 +949,23 @@ internal sealed class PiJsonEventMapper
         }
 
         return null;
+    }
+
+    private static bool? TryGetBoolean(JsonElement element, string propertyName)
+    {
+        if (element.ValueKind == JsonValueKind.Object
+            && element.TryGetProperty(propertyName, out var valueElement)
+            && (valueElement.ValueKind == JsonValueKind.True || valueElement.ValueKind == JsonValueKind.False))
+        {
+            return valueElement.GetBoolean();
+        }
+
+        return null;
+    }
+
+    private static string? NormalizeOptional(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     }
 
     private static void AddSessionId(Dictionary<string, object?> payload, string? sessionId)
@@ -497,4 +990,22 @@ internal sealed class PiJsonEventMapper
             payload[key] = value.Value;
         }
     }
+
+    private static void AddJsonPropertyIfPresent(
+        Dictionary<string, object?> payload,
+        string targetKey,
+        JsonElement? source,
+        string sourcePropertyName)
+    {
+        if (source is not { ValueKind: JsonValueKind.Object } sourceElement
+            || !sourceElement.TryGetProperty(sourcePropertyName, out var valueElement)
+            || valueElement.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return;
+        }
+
+        payload[targetKey] = JsonSerializer.SerializeToElement(valueElement);
+    }
+
+    private sealed record ToolCallSnapshot(string Name, string? ArgumentsJson);
 }
