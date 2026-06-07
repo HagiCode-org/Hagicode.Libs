@@ -15,6 +15,7 @@ internal static class PiScenarioMessageReader
     {
         var messages = new List<string>();
         var assistantTextBuilder = new StringBuilder();
+        var accumulator = new AssistantSnapshotAccumulator();
         string? sessionId = null;
 
         await foreach (var message in provider.ExecuteAsync(options, prompt, cancellationToken))
@@ -33,18 +34,25 @@ internal static class PiScenarioMessageReader
                 TryGetText(message.Content, out var assistantText) &&
                 !string.IsNullOrWhiteSpace(assistantText))
             {
-                messages.Add(assistantText);
-                assistantTextBuilder.Append(assistantText);
+                var delta = accumulator.ReconcileSnapshot(assistantText);
+                if (!string.IsNullOrEmpty(delta))
+                {
+                    messages.Add(delta);
+                    assistantTextBuilder.Append(delta);
+                }
             }
 
             if (string.Equals(message.Type, "terminal.completed", StringComparison.OrdinalIgnoreCase))
             {
-                if (assistantTextBuilder.Length == 0
-                    && TryGetText(message.Content, out var terminalText)
-                    && !string.IsNullOrWhiteSpace(terminalText))
+                if (TryGetText(message.Content, out var terminalText) &&
+                    !string.IsNullOrWhiteSpace(terminalText))
                 {
-                    messages.Add(terminalText);
-                    assistantTextBuilder.Append(terminalText);
+                    var completionDelta = accumulator.ReconcileCompletion(terminalText);
+                    if (!string.IsNullOrEmpty(completionDelta))
+                    {
+                        messages.Add(completionDelta);
+                        assistantTextBuilder.Append(completionDelta);
+                    }
                 }
 
                 break;
@@ -107,6 +115,63 @@ internal static class PiScenarioMessageReader
         }
 
         return false;
+    }
+
+    private sealed class AssistantSnapshotAccumulator
+    {
+        private string? _currentSnapshot;
+
+        public string ReconcileSnapshot(string text)
+        {
+            ArgumentNullException.ThrowIfNull(text);
+
+            if (_currentSnapshot is null)
+            {
+                _currentSnapshot = text;
+                return text;
+            }
+
+            if (text.StartsWith(_currentSnapshot, StringComparison.Ordinal))
+            {
+                var delta = text[_currentSnapshot.Length..];
+                _currentSnapshot = text;
+                return delta;
+            }
+
+            if (_currentSnapshot.StartsWith(text, StringComparison.Ordinal))
+            {
+                return string.Empty;
+            }
+
+            _currentSnapshot += text;
+            return text;
+        }
+
+        public string ReconcileCompletion(string text)
+        {
+            ArgumentNullException.ThrowIfNull(text);
+
+            if (_currentSnapshot is null)
+            {
+                _currentSnapshot = text;
+                return text;
+            }
+
+            if (text.StartsWith(_currentSnapshot, StringComparison.Ordinal))
+            {
+                var delta = text[_currentSnapshot.Length..];
+                _currentSnapshot = text;
+                return delta;
+            }
+
+            if (_currentSnapshot.StartsWith(text, StringComparison.Ordinal))
+            {
+                return string.Empty;
+            }
+
+            _currentSnapshot = text;
+            return text;
+        }
     }
 }
 

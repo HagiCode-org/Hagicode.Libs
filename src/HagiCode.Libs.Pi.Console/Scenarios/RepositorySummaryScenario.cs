@@ -45,7 +45,7 @@ public static class RepositorySummaryScenario
             DisableAllTools = false,
         };
 
-        var prompt = "Provide a brief repository summary. Mention key project names, notable directories, and the technologies in use.";
+        var prompt = "分析当前项目，并给出简短的仓库摘要。提到关键项目名、重要目录，以及正在使用的主要技术。";
         var result = await PiScenarioMessageReader.ReadExecutionResultAsync(provider, options, prompt, cancellationToken);
 
         if (result.Messages.Count == 0)
