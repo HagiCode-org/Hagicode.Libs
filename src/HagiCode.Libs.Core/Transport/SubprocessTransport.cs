@@ -75,7 +75,7 @@ public sealed class SubprocessTransport : ICliTransport
             var line = await handle.StandardOutput.ReadLineAsync(cancellationToken);
             if (line is null)
             {
-                await WaitBrieflyForExitAsync(handle, cancellationToken).ConfigureAwait(false);
+                await WaitForExitAfterOutputClosureAsync(handle, cancellationToken).ConfigureAwait(false);
 
                 if (handle.Process.HasExited && handle.Process.ExitCode != 0)
                 {
@@ -249,5 +249,15 @@ public sealed class SubprocessTransport : ICliTransport
         {
             await waitForExitTask.ConfigureAwait(false);
         }
+    }
+
+    private static async Task WaitForExitAfterOutputClosureAsync(CliProcessHandle handle, CancellationToken cancellationToken)
+    {
+        if (handle.Process.HasExited)
+        {
+            return;
+        }
+
+        await handle.Process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
     }
 }

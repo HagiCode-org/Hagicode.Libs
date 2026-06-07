@@ -131,6 +131,29 @@ public sealed class SubprocessTransportTests
     }
 
     [Fact]
+    public async Task SubprocessTransport_waits_for_non_zero_exit_after_stdout_closes()
+    {
+        var manager = new CliProcessManager();
+        await using var transport = new SubprocessTransport(manager, new ProcessStartContext
+        {
+            ExecutablePath = "/bin/sh",
+            Arguments = ["-lc", "exec 1>&-; sleep 0.5; printf 'auth required' >&2; exit 23"]
+        });
+
+        await transport.ConnectAsync();
+
+        var exception = await Should.ThrowAsync<InvalidOperationException>(async () =>
+        {
+            await foreach (var _ in transport.ReceiveAsync())
+            {
+            }
+        });
+
+        exception.Message.ShouldContain("code 23");
+        exception.Message.ShouldContain("auth required");
+    }
+
+    [Fact]
     public async Task SubprocessTransport_surfaces_exit_diagnostics_when_send_fails_after_process_exits()
     {
         var manager = new CliProcessManager();
