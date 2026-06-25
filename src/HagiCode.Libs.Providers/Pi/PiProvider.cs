@@ -17,6 +17,14 @@ public class PiProvider : ICliProvider<PiOptions>
     private static readonly string[] DefaultExecutableCandidates = ["pi", "pi-cli"];
     private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
+    /// <summary>
+    /// The set of thinking levels accepted by the Pi <c>--thinking</c> flag.
+    /// Values are compared case-insensitively.
+    /// </summary>
+    internal static readonly IReadOnlySet<string> AllowedThinkingLevels = new HashSet<string>(
+        ["off", "minimal", "low", "medium", "high", "xhigh"],
+        StringComparer.OrdinalIgnoreCase);
+
     private readonly CliExecutableResolver _executableResolver;
     private readonly CliProcessManager _processManager;
     private readonly IRuntimeEnvironmentResolver? _runtimeEnvironmentResolver;
@@ -52,6 +60,8 @@ public class PiProvider : ICliProvider<PiOptions>
 
         ProcessStartContext? startContext = null;
         string? startupFailure = null;
+
+        ValidateThinkingLevel(options.Thinking);
 
         try
         {
@@ -310,6 +320,22 @@ public class PiProvider : ICliProvider<PiOptions>
 
         arguments.Add(optionName);
         arguments.Add(string.Join(',', normalizedValues));
+    }
+
+    private static void ValidateThinkingLevel(string? thinking)
+    {
+        var normalizedThinking = ArgumentValueNormalizer.NormalizeOptionalValue(thinking);
+        if (normalizedThinking is null)
+        {
+            return;
+        }
+
+        if (!AllowedThinkingLevels.Contains(normalizedThinking))
+        {
+            throw new ArgumentException(
+                $"Invalid Pi thinking level '{normalizedThinking}'. " +
+                $"Valid values: {string.Join(", ", AllowedThinkingLevels.OrderBy(level => level, StringComparer.Ordinal))}.");
+        }
     }
 
     private async Task<IReadOnlyDictionary<string, string?>> ResolveRuntimeEnvironmentAsync(CancellationToken cancellationToken)

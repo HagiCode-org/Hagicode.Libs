@@ -81,6 +81,67 @@ public sealed class PiProviderTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_rejects_invalid_thinking_level_without_starting_a_process()
+    {
+        var processManager = new StubCliProcessManager
+        {
+            ExecuteResult = CreateSuccessfulExecutionResult("Trip outline")
+        };
+        var provider = CreateProvider(processManager: processManager);
+
+        var act = async () => await CollectMessagesAsync(
+            provider,
+            new PiOptions
+            {
+                WorkingDirectory = "/tmp/pi-project",
+                Model = "glm/glm-4.7",
+                Thinking = "balanced"
+            },
+            "Plan a trip.");
+
+        var exception = await Should.ThrowAsync<ArgumentException>(act);
+        exception.Message.ShouldContain("Invalid Pi thinking level 'balanced'");
+        exception.Message.ShouldContain("medium");
+        processManager.LastContext.ShouldBeNull();
+    }
+
+    [Theory]
+    [InlineData("off")]
+    [InlineData("minimal")]
+    [InlineData("low")]
+    [InlineData("medium")]
+    [InlineData("high")]
+    [InlineData("xhigh")]
+    [InlineData("HIGH")]
+    public async Task ExecuteAsync_accepts_documented_thinking_levels(string thinking)
+    {
+        var processManager = new StubCliProcessManager
+        {
+            ExecuteResult = CreateSuccessfulExecutionResult("Trip outline")
+        };
+        var provider = CreateProvider(processManager: processManager);
+
+        await CollectMessagesAsync(
+            provider,
+            new PiOptions
+            {
+                WorkingDirectory = "/tmp/pi-project",
+                Model = "glm/glm-4.7",
+                Thinking = thinking,
+                NoSession = true
+            },
+            "Plan a trip.");
+
+        processManager.LastContext.ShouldNotBeNull();
+        processManager.LastContext.Arguments.ShouldContain("--thinking");
+        var normalizedThinking = processManager.LastContext.Arguments
+            .SkipWhile(arg => arg != "--thinking")
+            .Skip(1)
+            .FirstOrDefault();
+        normalizedThinking.ShouldBe(thinking, StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_normalizes_pi_json_events_into_shared_cli_messages()
     {
         var processManager = new StubCliProcessManager
