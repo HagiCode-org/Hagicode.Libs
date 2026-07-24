@@ -12,6 +12,7 @@ using HagiCode.Libs.Providers.Hermes;
 using HagiCode.Libs.Providers.Kimi;
 using HagiCode.Libs.Providers.Kiro;
 using HagiCode.Libs.Providers.OpenCode;
+using HagiCode.Libs.Providers.Omp;
 using HagiCode.Libs.Providers.Pi;
 using HagiCode.Libs.Providers.QoderCli;
 using HagiCode.Libs.Providers.Reasonix;
@@ -43,6 +44,7 @@ public sealed class DependencyInjectionTests
         var kiroProvider = serviceProvider.GetRequiredService<ICliProvider<KiroOptions>>();
         var openCodeProvider = serviceProvider.GetRequiredService<ICliProvider<OpenCodeOptions>>();
         var piProvider = serviceProvider.GetRequiredService<ICliProvider<PiOptions>>();
+        var ompProvider = serviceProvider.GetRequiredService<ICliProvider<OmpOptions>>();
         var qoderCliProvider = serviceProvider.GetRequiredService<ICliProvider<QoderCliOptions>>();
         var reasonixProvider = serviceProvider.GetRequiredService<ICliProvider<ReasonixOptions>>();
         var allProviders = serviceProvider.GetServices<ICliProvider>().ToArray();
@@ -61,6 +63,7 @@ public sealed class DependencyInjectionTests
         poolConfiguration.HasSettings("kiro-cli").ShouldBeFalse();
         poolConfiguration.HasSettings("qodercli").ShouldBeFalse();
         poolConfiguration.HasSettings("reasonix").ShouldBeFalse();
+        poolConfiguration.HasSettings("omp").ShouldBeFalse();
         poolConfiguration.HasSettings("opencode").ShouldBeFalse();
         registry.GetProvider("claude-code").ShouldNotBeNull();
         registry.GetProvider("claude").ShouldNotBeNull();
@@ -87,6 +90,8 @@ public sealed class DependencyInjectionTests
         registry.GetProvider("opencode-cli").ShouldNotBeNull();
         registry.GetProvider("pi").ShouldNotBeNull();
         registry.GetProvider("pi-cli").ShouldNotBeNull();
+        registry.GetProvider("omp").ShouldNotBeNull();
+        registry.GetProvider("omp-cli").ShouldNotBeNull();
         registry.GetProvider("qodercli").ShouldNotBeNull();
         registry.GetProvider("reasonix").ShouldNotBeNull();
         claudeProvider.ShouldBeOfType<ClaudeCodeProvider>();
@@ -100,6 +105,7 @@ public sealed class DependencyInjectionTests
         kiroProvider.ShouldBeOfType<KiroProvider>();
         openCodeProvider.ShouldBeOfType<OpenCodeProvider>();
         piProvider.ShouldBeOfType<PiProvider>();
+        ompProvider.ShouldBeOfType<OmpProvider>();
         qoderCliProvider.ShouldBeOfType<QoderCliProvider>();
         reasonixProvider.ShouldBeOfType<ReasonixProvider>();
         allProviders.ShouldContain(provider => provider is CodexProvider);
@@ -109,6 +115,7 @@ public sealed class DependencyInjectionTests
         allProviders.ShouldContain(provider => provider is KiroProvider);
         allProviders.ShouldContain(provider => provider is OpenCodeProvider);
         allProviders.ShouldContain(provider => provider is PiProvider);
+        allProviders.ShouldContain(provider => provider is OmpProvider);
         allProviders.ShouldContain(provider => provider is DeepAgentsProvider);
         allProviders.ShouldContain(provider => provider is ReasonixProvider);
         registry.GetProvider<CopilotOptions>("copilot").ShouldBeOfType<CopilotProvider>();
@@ -131,8 +138,10 @@ public sealed class DependencyInjectionTests
         registry.GetProvider<OpenCodeOptions>("opencode-cli").ShouldBeOfType<OpenCodeProvider>();
         registry.GetProvider<PiOptions>("pi").ShouldBeOfType<PiProvider>();
         registry.GetProvider<PiOptions>("pi-cli").ShouldBeOfType<PiProvider>();
+        registry.GetProvider<OmpOptions>("omp").ShouldBeOfType<OmpProvider>();
+        registry.GetProvider<OmpOptions>("omp-cli").ShouldBeOfType<OmpProvider>();
         registry.GetProvider<QoderCliOptions>("qodercli").ShouldBeOfType<QoderCliProvider>();
         registry.GetProvider<ReasonixOptions>("reasonix").ShouldBeOfType<ReasonixProvider>();
-        registry.GetAllProviders().Select(static provider => provider.Name).ShouldBe(["claude-code", "codebuddy", "copilot", "codex", "deepagents", "gemini", "hermes", "kimi", "kiro-cli", "opencode", "pi", "qodercli", "reasonix"], ignoreOrder: true);
+        registry.GetAllProviders().Select(static provider => provider.Name).ShouldBe(["claude-code", "codebuddy", "copilot", "codex", "deepagents", "gemini", "hermes", "kimi", "kiro-cli", "opencode", "pi", "omp", "qodercli", "reasonix"], ignoreOrder: true);
     }
 }

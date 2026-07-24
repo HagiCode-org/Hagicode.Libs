@@ -5,6 +5,7 @@ using HagiCode.Libs.Providers.Codebuddy;
 using HagiCode.Libs.Providers.DeepAgents;
 using HagiCode.Libs.Providers.Gemini;
 using HagiCode.Libs.Providers.OpenCode;
+using HagiCode.Libs.Providers.Omp;
 using HagiCode.Libs.Providers.Pi;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -118,6 +119,21 @@ public sealed class ProviderRegistryTests
         registry.GetProvider("pi-cli").ShouldBeOfType<PiProvider>();
         registry.GetProvider<PiOptions>("pi").ShouldBeOfType<PiProvider>();
         registry.GetProvider<PiOptions>("pi-cli").ShouldBeOfType<PiProvider>();
+    }
+
+    [Fact]
+    public async Task AddHagiCodeLibs_registers_omp_alias_in_provider_registry()
+    {
+        var services = new ServiceCollection();
+        services.AddHagiCodeLibs();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var registry = serviceProvider.GetRequiredService<ProviderRegistry>();
+
+        registry.GetProvider("omp").ShouldBeOfType<OmpProvider>();
+        registry.GetProvider("omp-cli").ShouldBeOfType<OmpProvider>();
+        registry.GetProvider<OmpOptions>("omp").ShouldBeOfType<OmpProvider>();
+        registry.GetProvider<OmpOptions>("omp-cli").ShouldBeOfType<OmpProvider>();
     }
 
     private sealed class StubProvider(string name, bool isAvailable) : ICliProvider
