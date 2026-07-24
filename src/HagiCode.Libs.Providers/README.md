@@ -1,6 +1,6 @@
 # HagiCode.Libs.Providers
 
-`HagiCode.Libs.Providers` builds on `HagiCode.Libs.Core` and adds reusable provider abstractions plus built-in integrations for Claude Code, Copilot, Codex, DeepAgents, CodeBuddy, Gemini, Hermes, Kimi, Kiro, OpenCode, Pi, QoderCLI, and Reasonix.
+`HagiCode.Libs.Providers` builds on `HagiCode.Libs.Core` and adds reusable provider abstractions plus built-in integrations for Claude Code, Copilot, Codex, DeepAgents, CodeBuddy, Gemini, Hermes, Kimi, Kiro, OpenCode, Pi, OMP, QoderCLI, and Reasonix.
 
 ## What is included
 
@@ -34,6 +34,7 @@ using HagiCode.Libs.Providers.Hermes;
 using HagiCode.Libs.Providers.Kimi;
 using HagiCode.Libs.Providers.Kiro;
 using HagiCode.Libs.Providers.OpenCode;
+using HagiCode.Libs.Providers.Omp;
 using HagiCode.Libs.Providers.Pi;
 using HagiCode.Libs.Providers.Reasonix;
 using Microsoft.Extensions.DependencyInjection;
@@ -53,6 +54,7 @@ var kimi = serviceProvider.GetRequiredService<ICliProvider<KimiOptions>>();
 var kiro = serviceProvider.GetRequiredService<ICliProvider<KiroOptions>>();
 var openCode = serviceProvider.GetRequiredService<ICliProvider<OpenCodeOptions>>();
 var pi = serviceProvider.GetRequiredService<ICliProvider<PiOptions>>();
+var omp = serviceProvider.GetRequiredService<ICliProvider<OmpOptions>>();
 var reasonix = serviceProvider.GetRequiredService<ICliProvider<ReasonixOptions>>();
 ```
 
@@ -91,6 +93,7 @@ using HagiCode.Libs.Providers.DeepAgents;
 using HagiCode.Libs.Providers.Hermes;
 using HagiCode.Libs.Providers.Kimi;
 using HagiCode.Libs.Providers.Kiro;
+using HagiCode.Libs.Providers.Omp;
 using HagiCode.Libs.Providers.Pi;
 using HagiCode.Libs.Providers.Reasonix;
 
@@ -289,6 +292,7 @@ Practical boundaries:
 - `kimi` is the canonical built-in provider name; `ProviderRegistry` and the dedicated console also accept `kimi-cli` as an alias.
 - `kiro-cli` is the canonical built-in provider name across the shared provider registry and the dedicated console.
 - `pi` is the canonical built-in provider name; `ProviderRegistry` also accepts `pi-cli` as a compatibility alias and the built-in provider runs Pi through `--mode json --print` one-shot execution.
+- `omp` is the canonical built-in provider name; `ProviderRegistry` also accepts `omp-cli` as a compatibility alias and the built-in provider runs OMP through `--mode json --print` one-shot execution.
 - `reasonix` is the canonical built-in provider name. Reasonix 1.x ACP now only accepts the startup-time `-model` selector; working directory and session resume flow through ACP `session/new` / `session/load`, while permissions, MCP plugins, proxying, and similar policy are expected to live in `reasonix.toml` instead of CLI bootstrap flags.
 - Kiro discovery is strict: the shared provider only supports `kiro-cli` executables. Generic `kiro` launchers are not accepted for implicit discovery, explicit `ExecutablePath`, or readiness checks.
 - `CliInstallRegistry` now treats DeepAgents as local-only validation metadata because the managed runtime expects a `deepagents` executable (or `uvx --from deepagents-cli deepagents --acp`) rather than the legacy `deepagents-acp` npm package.
