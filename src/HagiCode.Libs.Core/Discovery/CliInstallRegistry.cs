@@ -55,6 +55,13 @@ public static class CliInstallRegistry
             IsPubliclyInstallable: false),
 
         new CliInstallDescriptor(
+            ProviderName: "Omp",
+            NpmPackage: string.Empty,
+            PinnedVersion: string.Empty,
+            ExecutableCandidates: ["omp", "omp-cli"],
+            IsPubliclyInstallable: false),
+
+        new CliInstallDescriptor(
             ProviderName: "Codebuddy",
             NpmPackage: string.Empty,
             PinnedVersion: string.Empty,

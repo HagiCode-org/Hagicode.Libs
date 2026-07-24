@@ -13,6 +13,7 @@ using HagiCode.Libs.Providers.Hermes;
 using HagiCode.Libs.Providers.Kimi;
 using HagiCode.Libs.Providers.Kiro;
 using HagiCode.Libs.Providers.OpenCode;
+using HagiCode.Libs.Providers.Omp;
 using HagiCode.Libs.Providers.Pi;
 using HagiCode.Libs.Providers.Pooling;
 using HagiCode.Libs.Providers.QoderCli;
@@ -70,6 +71,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IOpenCodeStandaloneServerClient>(serviceProvider => serviceProvider.GetRequiredService<OpenCodeStandaloneServerHost>());
         services.AddSingleton<OpenCodeProvider>();
         services.AddSingleton<PiProvider>();
+        services.AddSingleton<OmpProvider>();
         services.AddSingleton<QoderCliProvider>();
         services.AddSingleton<ReasonixProvider>();
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<ClaudeCodeProvider>());
@@ -83,6 +85,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<KiroProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<OpenCodeProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<PiProvider>());
+        services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<OmpProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<QoderCliProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<ReasonixProvider>());
         services.AddSingleton<ICliProvider<ClaudeCodeOptions>>(serviceProvider => serviceProvider.GetRequiredService<ClaudeCodeProvider>());
@@ -95,6 +98,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICliProvider<KiroOptions>>(serviceProvider => serviceProvider.GetRequiredService<KiroProvider>());
         services.AddSingleton<ICliProvider<OpenCodeOptions>>(serviceProvider => serviceProvider.GetRequiredService<OpenCodeProvider>());
         services.AddSingleton<ICliProvider<PiOptions>>(serviceProvider => serviceProvider.GetRequiredService<PiProvider>());
+        services.AddSingleton<ICliProvider<OmpOptions>>(serviceProvider => serviceProvider.GetRequiredService<OmpProvider>());
         services.AddSingleton<ICliProvider<QoderCliOptions>>(serviceProvider => serviceProvider.GetRequiredService<QoderCliProvider>());
         services.AddSingleton<ICliProvider<ReasonixOptions>>(serviceProvider => serviceProvider.GetRequiredService<ReasonixProvider>());
         services.AddSingleton(static serviceProvider =>
@@ -159,6 +163,12 @@ public static class ServiceCollectionExtensions
                 if (provider is PiProvider)
                 {
                     registry.Register(provider.Name, provider, ["pi-cli"]);
+                    continue;
+                }
+
+                if (provider is OmpProvider)
+                {
+                    registry.Register(provider.Name, provider, ["omp-cli"]);
                     continue;
                 }
 
