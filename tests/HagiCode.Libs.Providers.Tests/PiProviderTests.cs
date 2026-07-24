@@ -241,6 +241,68 @@ public sealed class PiProviderTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_preserves_whitespace_only_assistant_text_deltas()
+    {
+        var processManager = new StubCliProcessManager
+        {
+            ExecuteResult = CreateWhitespaceStreamingExecutionResult()
+        };
+        var provider = CreateProvider(processManager: processManager);
+
+        var messages = await CollectMessagesAsync(
+            provider,
+            new PiOptions
+            {
+                WorkingDirectory = "/tmp/pi-project",
+                Model = "glm/glm-4.7",
+                NoSession = true
+            },
+            "Preserve whitespace.");
+
+        var assistantTexts = messages
+            .Where(static message => message.Type == "assistant")
+            .Select(static message => message.Content.GetProperty("text").GetString())
+            .ToArray();
+
+        assistantTexts.ShouldBe(["## Heading", "\n\n", "- [x] 1.1 item", " ", "tail"]);
+        string.Concat(assistantTexts).ShouldBe("## Heading\n\n- [x] 1.1 item tail");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_preserves_golden_markdown_structure_at_mapper_boundary()
+    {
+        const string golden =
+            "## H2\n\n### H3\n\n- [x] 1.1–1.4\n- item\n\n| col | val |\n| --- | --- |\n| a | b |\n\n**bold** 中文Latin\n\nSummary done.\n\nSystem follow-up";
+
+        var processManager = new StubCliProcessManager
+        {
+            ExecuteResult = CreateSuccessfulExecutionResult(golden)
+        };
+        var provider = CreateProvider(processManager: processManager);
+
+        var messages = await CollectMessagesAsync(
+            provider,
+            new PiOptions
+            {
+                WorkingDirectory = "/tmp/pi-project",
+                Model = "glm/glm-4.7",
+                NoSession = true
+            },
+            "Golden markdown.");
+
+        var assistantText = messages
+            .Where(static message => message.Type == "assistant")
+            .Select(static message => message.Content.GetProperty("text").GetString())
+            .Single();
+
+        assistantText.ShouldBe(golden);
+        assistantText.ShouldContain("- [x] 1.1–1.4");
+        assistantText.ShouldContain("| col | val |\n| --- | --- |\n| a | b |");
+        assistantText.ShouldContain("**bold** 中文Latin");
+        assistantText.ShouldContain("Summary done.\n\nSystem follow-up");
+    }
+
+    [Fact]
     public async Task ExecuteAsync_deduplicates_replayed_assistant_prefix_after_tool_turns()
     {
         var processManager = new StubCliProcessManager
@@ -676,6 +738,59 @@ public sealed class PiProviderTests
             JsonSerializer.Serialize(new { type = "turn_end", message = textPartial, toolResults = Array.Empty<object>() }),
             JsonSerializer.Serialize(new { type = "agent_end", messages = new object[] { textPartial }, willRetry = false })
         };
+
+        return new ProcessResult(0, string.Join(Environment.NewLine, lines) + Environment.NewLine, string.Empty);
+    }
+
+    private static ProcessResult CreateWhitespaceStreamingExecutionResult(string sessionId = "session-whitespace")
+    {
+        object Partial(string text) => new
+        {
+            role = "assistant",
+            content = new object[]
+            {
+                new { type = "text", text }
+            },
+            provider = "omniroute",
+            model = "glm/glm-4.7",
+            stopReason = "stop",
+            responseId = "response-whitespace-1",
+            responseModel = "glm-4.7"
+        };
+
+        var snapshots = new[]
+        {
+            "## Heading",
+            "## Heading\n\n",
+            "## Heading\n\n- [x] 1.1 item",
+            "## Heading\n\n- [x] 1.1 item ",
+            "## Heading\n\n- [x] 1.1 item tail"
+        };
+
+        var lines = new List<string>
+        {
+            JsonSerializer.Serialize(new { type = "session", version = 3, id = sessionId, timestamp = "2026-06-07T12:00:00.000Z", cwd = "/tmp/pi-project" })
+        };
+
+        foreach (var snapshot in snapshots)
+        {
+            var partial = Partial(snapshot);
+            lines.Add(JsonSerializer.Serialize(new
+            {
+                type = "message_update",
+                assistantMessageEvent = new
+                {
+                    type = "text_delta",
+                    partial
+                },
+                message = partial
+            }));
+        }
+
+        var finalPartial = Partial(snapshots[^1]);
+        lines.Add(JsonSerializer.Serialize(new { type = "message_end", message = finalPartial }));
+        lines.Add(JsonSerializer.Serialize(new { type = "turn_end", message = finalPartial, toolResults = Array.Empty<object>() }));
+        lines.Add(JsonSerializer.Serialize(new { type = "agent_end", messages = new object[] { finalPartial }, willRetry = false }));
 
         return new ProcessResult(0, string.Join(Environment.NewLine, lines) + Environment.NewLine, string.Empty);
     }

@@ -116,7 +116,8 @@ internal sealed class PiJsonEventMapper
                             ClearPendingThinking();
                         }
 
-                        if (!string.IsNullOrWhiteSpace(_assistantText))
+                        // Keep whitespace-only assistant snapshots: "\n"/" " are Markdown block boundaries.
+                        if (!string.IsNullOrEmpty(_assistantText))
                         {
                             if (TryCreateAssistantMessage(_assistantText!, assistantMessage) is { } assistantMessageDelta)
                             {
@@ -236,7 +237,8 @@ internal sealed class PiJsonEventMapper
             if (IsThinkingUpdateType(updateType))
             {
                 var thinkingText = ExtractAssistantThinking(assistantMessage);
-                if (!string.IsNullOrWhiteSpace(thinkingText))
+                // Preserve whitespace-only thinking fragments for parity with other providers.
+                if (!string.IsNullOrEmpty(thinkingText))
                 {
                     BufferThinkingSnapshot(thinkingText!, assistantMessage);
                 }
@@ -245,7 +247,8 @@ internal sealed class PiJsonEventMapper
             if (IsTextUpdateType(updateType))
             {
                 var assistantText = ExtractAssistantText(assistantMessage);
-                if (!string.IsNullOrWhiteSpace(assistantText))
+                // Preserve whitespace-only assistant text (newlines/spaces) required by Markdown.
+                if (!string.IsNullOrEmpty(assistantText))
                 {
                     if (TryCreateAssistantMessage(assistantText!, assistantMessage) is { } assistantMessageDelta)
                     {
@@ -268,7 +271,8 @@ internal sealed class PiJsonEventMapper
 
         private IReadOnlyList<CliMessage> DrainBufferedThinkingMessages()
         {
-            if (string.IsNullOrWhiteSpace(_pendingThinkingText) || _pendingThinkingMessage is not { } pendingThinkingMessage)
+            // Whitespace-only thinking is still a real fragment; only drop null/empty.
+            if (string.IsNullOrEmpty(_pendingThinkingText) || _pendingThinkingMessage is not { } pendingThinkingMessage)
             {
                 ClearPendingThinking();
                 return [];
@@ -523,7 +527,8 @@ internal sealed class PiJsonEventMapper
                 invalidOutputLines);
         }
 
-        if (!string.IsNullOrWhiteSpace(assistantText))
+        // Whitespace-only assistant text is still a successful completion payload.
+        if (!string.IsNullOrEmpty(assistantText))
         {
             return CreateTerminalCompletedMessage(
                 sessionId,
@@ -793,7 +798,8 @@ internal sealed class PiJsonEventMapper
             }
 
             var text = GetString(contentItem, contentPropertyName);
-            if (string.IsNullOrWhiteSpace(text))
+            // Keep non-empty whitespace fragments ("\n", " ") so Markdown block/list/table structure survives.
+            if (string.IsNullOrEmpty(text))
             {
                 continue;
             }
