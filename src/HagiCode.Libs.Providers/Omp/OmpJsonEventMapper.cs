@@ -34,6 +34,7 @@ internal sealed class OmpJsonEventMapper
         private readonly string? _requestedSessionId = NormalizeOptional(requestedSessionId);
         private readonly List<string> _invalidOutputLines = [];
         private readonly Dictionary<string, ToolCallSnapshot> _toolCallSnapshots = new(StringComparer.Ordinal);
+        private readonly Dictionary<int, PendingToolCallDelta> _pendingToolCallDeltas = new();
         private readonly HashSet<string> _emittedToolResultKeys = new(StringComparer.Ordinal);
 
         private string? _sessionId;
@@ -79,6 +80,7 @@ internal sealed class OmpJsonEventMapper
             {
                 case "turn_start":
                     ClearPendingThinking();
+                    _pendingToolCallDeltas.Clear();
                     break;
 
                 case "session":
@@ -221,45 +223,105 @@ internal sealed class OmpJsonEventMapper
 
         private void ProcessMessageUpdate(JsonElement eventElement, List<CliMessage> messages)
         {
-            if (!TryGetAssistantMessageUpdate(eventElement, out var assistantMessage, out var updateType))
+            if (!eventElement.TryGetProperty("assistantMessageEvent", out var assistantEvent)
+                || assistantEvent.ValueKind != JsonValueKind.Object)
             {
                 return;
             }
 
-            CaptureAssistantState(
-                assistantMessage,
-                ref _assistantText,
-                ref _assistantModel,
-                ref _assistantProvider,
-                ref _stopReason,
-                ref _errorText);
+            var updateType = GetString(assistantEvent, "type");
+            var hasSnapshot = TryResolveAssistantSnapshot(eventElement, assistantEvent, out var assistantMessage);
+            if (hasSnapshot)
+            {
+                CaptureAssistantState(
+                    assistantMessage,
+                    ref _assistantText,
+                    ref _assistantModel,
+                    ref _assistantProvider,
+                    ref _stopReason,
+                    ref _errorText);
+            }
+            else
+            {
+                assistantMessage = CreateSyntheticAssistantMessage(
+                    _assistantModel,
+                    _assistantProvider);
+            }
 
             if (IsThinkingUpdateType(updateType))
             {
-                var thinkingText = ExtractAssistantThinking(assistantMessage);
-                // Preserve whitespace-only thinking fragments for parity with other providers.
-                if (!string.IsNullOrEmpty(thinkingText))
+                // Real OMP print/json streams thinking as incremental deltas without a partial snapshot.
+                var thinkingDelta = GetString(assistantEvent, "delta");
+                if (!string.IsNullOrEmpty(thinkingDelta))
                 {
-                    BufferThinkingSnapshot(thinkingText!, assistantMessage);
+                    BufferThinkingSnapshot((_pendingThinkingText ?? string.Empty) + thinkingDelta, assistantMessage);
+                }
+                else if (IsEndUpdateType(updateType, "thinking")
+                         && !string.IsNullOrEmpty(GetString(assistantEvent, "content")))
+                {
+                    BufferThinkingSnapshot(GetString(assistantEvent, "content")!, assistantMessage);
+                }
+                else if (hasSnapshot)
+                {
+                    var thinkingText = ExtractAssistantThinking(assistantMessage);
+                    // Preserve whitespace-only thinking fragments for parity with other providers.
+                    if (!string.IsNullOrEmpty(thinkingText))
+                    {
+                        BufferThinkingSnapshot(thinkingText!, assistantMessage);
+                    }
                 }
             }
 
             if (IsTextUpdateType(updateType))
             {
-                var assistantText = ExtractAssistantText(assistantMessage);
-                // Preserve whitespace-only assistant text (newlines/spaces) required by Markdown.
-                if (!string.IsNullOrEmpty(assistantText))
+                var textDelta = GetString(assistantEvent, "delta");
+                if (!string.IsNullOrEmpty(textDelta))
                 {
-                    if (TryCreateAssistantMessage(assistantText!, assistantMessage) is { } assistantMessageDelta)
+                    // Emit the raw delta immediately so consumers see stream progress.
+                    _assistantText = (_assistantText ?? string.Empty) + textDelta;
+                    _lastAssistantTextSnapshot = _assistantText;
+                    messages.Add(CreateAssistantMessage(_sessionId, textDelta!, assistantMessage));
+                }
+                else if (IsEndUpdateType(updateType, "text")
+                         && !string.IsNullOrEmpty(GetString(assistantEvent, "content")))
+                {
+                    var completedText = GetString(assistantEvent, "content")!;
+                    _assistantText = completedText;
+                    if (TryCreateAssistantMessage(completedText, assistantMessage) is { } completedDelta)
                     {
-                        messages.Add(assistantMessageDelta);
+                        messages.Add(completedDelta);
+                    }
+                }
+                else if (hasSnapshot)
+                {
+                    var assistantText = ExtractAssistantText(assistantMessage);
+                    // Preserve whitespace-only assistant text (newlines/spaces) required by Markdown.
+                    if (!string.IsNullOrEmpty(assistantText))
+                    {
+                        if (TryCreateAssistantMessage(assistantText!, assistantMessage) is { } assistantMessageDelta)
+                        {
+                            messages.Add(assistantMessageDelta);
+                        }
                     }
                 }
             }
 
             if (IsToolCallUpdateType(updateType))
             {
-                messages.AddRange(ProcessToolCallUpdate(assistantMessage));
+                if (hasSnapshot)
+                {
+                    messages.AddRange(ProcessToolCallUpdate(assistantMessage));
+                }
+                else if (assistantEvent.TryGetProperty("toolCall", out var toolCallElement)
+                         && toolCallElement.ValueKind == JsonValueKind.Object)
+                {
+                    messages.AddRange(ProcessToolCallUpdate(WrapToolCallAsAssistantMessage(toolCallElement, assistantMessage)));
+                }
+                else if (!string.IsNullOrEmpty(GetString(assistantEvent, "delta")))
+                {
+                    // toolcall_delta without partial: keep accumulating args text by contentIndex.
+                    messages.AddRange(ProcessToolCallDeltaEvent(assistantEvent, assistantMessage));
+                }
             }
         }
 
@@ -322,6 +384,56 @@ internal sealed class OmpJsonEventMapper
         {
             _pendingThinkingText = null;
             _pendingThinkingMessage = null;
+        }
+
+        private IReadOnlyList<CliMessage> ProcessToolCallDeltaEvent(
+            JsonElement assistantEvent,
+            JsonElement assistantMessage)
+        {
+            var contentIndex = TryGetInt32(assistantEvent, "contentIndex");
+            var delta = GetString(assistantEvent, "delta");
+            if (contentIndex is null || string.IsNullOrEmpty(delta))
+            {
+                return [];
+            }
+
+            if (!_pendingToolCallDeltas.TryGetValue(contentIndex.Value, out var pending))
+            {
+                pending = new PendingToolCallDelta();
+                _pendingToolCallDeltas[contentIndex.Value] = pending;
+            }
+
+            pending.ArgumentsJson = (pending.ArgumentsJson ?? string.Empty) + delta;
+            // Prefer toolCall payload if present on later events.
+            if (assistantEvent.TryGetProperty("toolCall", out var toolCallElement)
+                && toolCallElement.ValueKind == JsonValueKind.Object)
+            {
+                pending.ToolCallId = NormalizeOptional(GetString(toolCallElement, "id")) ?? pending.ToolCallId;
+                pending.ToolName = NormalizeOptional(GetString(toolCallElement, "name")) ?? pending.ToolName;
+                var resolvedArgs = ResolveToolCallArguments(toolCallElement);
+                if (!string.IsNullOrEmpty(resolvedArgs))
+                {
+                    pending.ArgumentsJson = resolvedArgs;
+                }
+            }
+
+            var toolCallId = pending.ToolCallId ?? $"omp-tool-{contentIndex.Value}";
+            var toolName = pending.ToolName ?? "tool_call";
+            var isFirstObservation = !_toolCallSnapshots.ContainsKey(toolCallId);
+            _toolCallSnapshots[toolCallId] = new ToolCallSnapshot(toolName, pending.ArgumentsJson);
+            return
+            [
+                CreateToolLifecycleMessage(
+                    isFirstObservation ? "tool.call" : "tool.update",
+                    _sessionId,
+                    toolCallId,
+                    toolName,
+                    "running",
+                    rawInput: ParseJsonOrString(pending.ArgumentsJson),
+                    rawOutput: null,
+                    text: null,
+                    sourceMessage: assistantMessage)
+            ];
         }
 
         private IReadOnlyList<CliMessage> ProcessToolCallUpdate(JsonElement assistantMessage)
@@ -823,20 +935,11 @@ internal sealed class OmpJsonEventMapper
         return false;
     }
 
-    private static bool TryGetAssistantMessageUpdate(
+    private static bool TryResolveAssistantSnapshot(
         JsonElement eventElement,
-        out JsonElement assistantMessage,
-        out string? updateType)
+        JsonElement assistantEvent,
+        out JsonElement assistantMessage)
     {
-        updateType = null;
-        if (!eventElement.TryGetProperty("assistantMessageEvent", out var assistantEvent)
-            || assistantEvent.ValueKind != JsonValueKind.Object)
-        {
-            assistantMessage = default;
-            return false;
-        }
-
-        updateType = GetString(assistantEvent, "type");
         if (assistantEvent.TryGetProperty("partial", out assistantMessage)
             && assistantMessage.ValueKind == JsonValueKind.Object
             && string.Equals(GetString(assistantMessage, "role"), "assistant", StringComparison.OrdinalIgnoreCase))
@@ -845,6 +948,40 @@ internal sealed class OmpJsonEventMapper
         }
 
         return TryGetAssistantMessage(eventElement, out assistantMessage);
+    }
+
+    private static bool IsEndUpdateType(string? updateType, string contentKind)
+    {
+        return string.Equals(updateType, $"{contentKind}_end", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static JsonElement CreateSyntheticAssistantMessage(string? model, string? provider)
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["role"] = "assistant",
+            ["content"] = Array.Empty<object>(),
+        };
+
+        AddIfNotEmpty(payload, "model", model);
+        AddIfNotEmpty(payload, "provider", provider);
+        return JsonSerializer.SerializeToElement(payload);
+    }
+
+    private static JsonElement WrapToolCallAsAssistantMessage(JsonElement toolCall, JsonElement fallbackAssistantMessage)
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["role"] = "assistant",
+            ["content"] = new object[] { toolCall },
+        };
+
+        AddIfNotEmpty(payload, "provider", GetString(fallbackAssistantMessage, "provider"));
+        AddIfNotEmpty(payload, "model", GetString(fallbackAssistantMessage, "model"));
+        AddIfNotEmpty(payload, "responseModel", GetString(fallbackAssistantMessage, "responseModel"));
+        AddIfNotEmpty(payload, "responseId", GetString(fallbackAssistantMessage, "responseId"));
+        AddIfNotEmpty(payload, "stopReason", GetString(fallbackAssistantMessage, "stopReason"));
+        return JsonSerializer.SerializeToElement(payload);
     }
 
     private static bool TryGetToolResultMessage(JsonElement eventElement, out JsonElement toolResultMessage)
@@ -1100,4 +1237,11 @@ internal sealed class OmpJsonEventMapper
     }
 
     private sealed record ToolCallSnapshot(string Name, string? ArgumentsJson);
+
+    private sealed class PendingToolCallDelta
+    {
+        public string? ToolCallId { get; set; }
+        public string? ToolName { get; set; }
+        public string? ArgumentsJson { get; set; }
+    }
 }

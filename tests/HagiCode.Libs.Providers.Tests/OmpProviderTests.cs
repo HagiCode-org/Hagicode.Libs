@@ -212,6 +212,68 @@ public sealed class OmpProviderTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_streams_real_omp_delta_only_message_updates()
+    {
+        var processManager = new StubCliProcessManager
+        {
+            ExecuteResult = CreateRealOmpDeltaOnlyExecutionResult()
+        };
+        var provider = CreateProvider(processManager: processManager);
+
+        var messages = await CollectMessagesAsync(
+            provider,
+            new OmpOptions
+            {
+                WorkingDirectory = "/tmp/omp-project",
+                Model = "omniroute/meng/gpt-5.5",
+                NoSession = true
+            },
+            "Reply with hello.");
+
+        messages.Select(static message => message.Type).ShouldBe(
+        [
+            "session.started",
+            "assistant",
+            "assistant",
+            "assistant",
+            "assistant.thought",
+            "terminal.completed"
+        ]);
+        messages.Where(static message => message.Type == "assistant")
+            .Select(static message => message.Content.GetProperty("text").GetString())
+            .ShouldBe(["hello", " from", " omp"]);
+        messages.Single(static message => message.Type == "assistant.thought")
+            .Content.GetProperty("text").GetString().ShouldContain("exactly three words");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_streams_real_omp_toolcall_delta_events()
+    {
+        var processManager = new StubCliProcessManager
+        {
+            ExecuteResult = CreateRealOmpToolCallDeltaExecutionResult()
+        };
+        var provider = CreateProvider(processManager: processManager);
+
+        var messages = await CollectMessagesAsync(
+            provider,
+            new OmpOptions
+            {
+                WorkingDirectory = "/tmp/omp-project",
+                Model = "omniroute/meng/gpt-5.5",
+                NoSession = true
+            },
+            "Use bash.");
+
+        messages.ShouldContain(static message => message.Type == "tool.call");
+        messages.ShouldContain(static message => message.Type == "tool.completed");
+        messages.ShouldContain(static message => message.Type == "assistant");
+        var toolCall = messages.First(static message => message.Type == "tool.call");
+        toolCall.Content.GetProperty("tool_name").GetString().ShouldBe("bash");
+        toolCall.Content.GetProperty("tool_call_id").GetString().ShouldBe("tool-bash-1");
+    }
+
+    [Fact]
     public async Task ExecuteAsync_converts_cumulative_text_snapshots_into_incremental_assistant_messages()
     {
         var processManager = new StubCliProcessManager
@@ -675,6 +737,143 @@ public sealed class OmpProviderTests
         };
 
         return new ProcessResult(1, string.Join(Environment.NewLine, lines) + Environment.NewLine, standardError);
+    }
+
+
+    private static ProcessResult CreateRealOmpDeltaOnlyExecutionResult(string sessionId = "session-real-delta")
+    {
+        var finalAssistant = new
+        {
+            role = "assistant",
+            content = new object[]
+            {
+                new { type = "thinking", thinking = "The user wants me to reply with exactly three words: \"hello from omp\"\n" },
+                new { type = "text", text = "hello from omp" }
+            },
+            provider = "omniroute",
+            model = "meng/gpt-5.5",
+            stopReason = "stop",
+            responseId = "response-real-1",
+            responseModel = "meng/gpt-5.5",
+            timestamp = 1785063797805L
+        };
+
+        var lines = new[]
+        {
+            JsonSerializer.Serialize(new { type = "session", version = 3, id = sessionId, timestamp = "2026-07-26T10:00:00.000Z", cwd = "/tmp/omp-project" }),
+            JsonSerializer.Serialize(new { type = "turn_start" }),
+            JsonSerializer.Serialize(new { type = "message_update", assistantMessageEvent = new { type = "thinking_start", contentIndex = 0 } }),
+            JsonSerializer.Serialize(new { type = "message_update", assistantMessageEvent = new { type = "thinking_delta", contentIndex = 0, delta = "The user wants me to reply with " } }),
+            JsonSerializer.Serialize(new { type = "message_update", assistantMessageEvent = new { type = "thinking_delta", contentIndex = 0, delta = "exactly three words" } }),
+            JsonSerializer.Serialize(new { type = "message_update", assistantMessageEvent = new { type = "thinking_end", contentIndex = 0, content = "The user wants me to reply with exactly three words: \"hello from omp\"\n" } }),
+            JsonSerializer.Serialize(new { type = "message_update", assistantMessageEvent = new { type = "text_start", contentIndex = 1 } }),
+            JsonSerializer.Serialize(new { type = "message_update", assistantMessageEvent = new { type = "text_delta", contentIndex = 1, delta = "hello" } }),
+            JsonSerializer.Serialize(new { type = "message_update", assistantMessageEvent = new { type = "text_delta", contentIndex = 1, delta = " from" } }),
+            JsonSerializer.Serialize(new { type = "message_update", assistantMessageEvent = new { type = "text_delta", contentIndex = 1, delta = " omp" } }),
+            JsonSerializer.Serialize(new { type = "message_update", assistantMessageEvent = new { type = "text_end", contentIndex = 1, content = "hello from omp" } }),
+            JsonSerializer.Serialize(new { type = "message_end", message = finalAssistant }),
+            JsonSerializer.Serialize(new { type = "turn_end", message = finalAssistant, toolResults = Array.Empty<object>() }),
+            JsonSerializer.Serialize(new { type = "agent_end", messages = new object[] { finalAssistant }, willRetry = false })
+        };
+
+        return new ProcessResult(0, string.Join(Environment.NewLine, lines) + Environment.NewLine, string.Empty);
+    }
+
+    private static ProcessResult CreateRealOmpToolCallDeltaExecutionResult(string sessionId = "session-real-tool")
+    {
+        var toolCall = new
+        {
+            type = "toolCall",
+            id = "tool-bash-1",
+            name = "bash",
+            arguments = new { command = "echo hello-from-tool" },
+            partialArgs = "{\"command\":\"echo hello-from-tool\"}",
+            streamIndex = 0
+        };
+
+        var toolUseAssistant = new
+        {
+            role = "assistant",
+            content = new object[] { toolCall },
+            provider = "omniroute",
+            model = "meng/gpt-5.5",
+            stopReason = "toolUse",
+            responseId = "response-tool-real-1",
+            responseModel = "meng/gpt-5.5"
+        };
+
+        var toolResult = new
+        {
+            role = "toolResult",
+            toolCallId = "tool-bash-1",
+            toolName = "bash",
+            content = new object[]
+            {
+                new { type = "text", text = "hello-from-tool" }
+            },
+            isError = false,
+            timestamp = 1780796361956L
+        };
+
+        var finalAssistant = new
+        {
+            role = "assistant",
+            content = new object[]
+            {
+                new { type = "text", text = "DONE" }
+            },
+            provider = "omniroute",
+            model = "meng/gpt-5.5",
+            stopReason = "stop",
+            responseId = "response-tool-real-2",
+            responseModel = "meng/gpt-5.5"
+        };
+
+        var lines = new[]
+        {
+            JsonSerializer.Serialize(new { type = "session", version = 3, id = sessionId, timestamp = "2026-07-26T10:00:00.000Z", cwd = "/tmp/omp-project" }),
+            JsonSerializer.Serialize(new { type = "turn_start" }),
+            JsonSerializer.Serialize(new
+            {
+                type = "message_update",
+                assistantMessageEvent = new
+                {
+                    type = "toolcall_start",
+                    contentIndex = 0,
+                    partial = toolUseAssistant
+                }
+            }),
+            JsonSerializer.Serialize(new
+            {
+                type = "message_update",
+                assistantMessageEvent = new
+                {
+                    type = "toolcall_delta",
+                    contentIndex = 0,
+                    delta = "{\"command\":\"echo hello-from-tool\"}",
+                    partial = toolUseAssistant
+                }
+            }),
+            JsonSerializer.Serialize(new
+            {
+                type = "message_update",
+                assistantMessageEvent = new
+                {
+                    type = "toolcall_end",
+                    contentIndex = 0,
+                    toolCall = toolCall,
+                    partial = toolUseAssistant
+                }
+            }),
+            JsonSerializer.Serialize(new { type = "message_end", message = toolUseAssistant }),
+            JsonSerializer.Serialize(new { type = "message_end", message = toolResult }),
+            JsonSerializer.Serialize(new { type = "turn_end", message = toolUseAssistant, toolResults = new object[] { toolResult } }),
+            JsonSerializer.Serialize(new { type = "message_end", message = finalAssistant }),
+            JsonSerializer.Serialize(new { type = "turn_end", message = finalAssistant, toolResults = Array.Empty<object>() }),
+            JsonSerializer.Serialize(new { type = "agent_end", messages = new object[] { toolUseAssistant, toolResult, finalAssistant }, willRetry = false })
+        };
+
+        return new ProcessResult(0, string.Join(Environment.NewLine, lines) + Environment.NewLine, string.Empty);
     }
 
     private static ProcessResult CreateStreamingExecutionResult(string sessionId = "session-stream")
