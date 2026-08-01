@@ -53,10 +53,8 @@ public sealed class OmpProviderTests
             "--mode",
             "json",
             "--print",
-            "--provider",
-            "omniroute",
             "--model",
-            "glm/glm-4.7",
+            "omniroute/glm/glm-4.7",
             "--system-prompt",
             "You are a trip planner.",
             "--append-system-prompt",
@@ -225,7 +223,7 @@ public sealed class OmpProviderTests
             new OmpOptions
             {
                 WorkingDirectory = "/tmp/omp-project",
-                Model = "omniroute/meng/gpt-5.5",
+                Model = "meng/gpt-5.5",
                 NoSession = true
             },
             "Reply with hello.");
@@ -260,7 +258,7 @@ public sealed class OmpProviderTests
             new OmpOptions
             {
                 WorkingDirectory = "/tmp/omp-project",
-                Model = "omniroute/meng/gpt-5.5",
+                Model = "meng/gpt-5.5",
                 NoSession = true
             },
             "Use bash.");
@@ -570,6 +568,98 @@ public sealed class OmpProviderTests
         result.Success.ShouldBeFalse();
         result.ErrorMessage.ShouldNotBeNullOrWhiteSpace();
         result.ErrorMessage.ShouldContain("not found");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_uses_three_segment_selector_for_omniroute_models()
+    {
+        var processManager = new StubCliProcessManager
+        {
+            ExecuteResult = CreateSuccessfulExecutionResult("ok")
+        };
+        var provider = CreateProvider(processManager: processManager);
+
+        await CollectMessagesAsync(
+            provider,
+            new OmpOptions
+            {
+                Provider = "omniroute",
+                Model = "omniroute/deepseek/deepseek-v4-flash",
+                NoSession = true
+            },
+            "hello");
+
+        processManager.LastContext.ShouldNotBeNull();
+        processManager.LastContext.Arguments.ShouldNotContain("--provider");
+        processManager.LastContext.Arguments.ShouldContain("--model");
+        processManager.LastContext.Arguments.ShouldContain("omniroute/deepseek/deepseek-v4-flash");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_converts_two_segment_to_omniroute_selector_when_provider_is_omniroute()
+    {
+        var processManager = new StubCliProcessManager
+        {
+            ExecuteResult = CreateSuccessfulExecutionResult("ok")
+        };
+        var provider = CreateProvider(processManager: processManager);
+
+        await CollectMessagesAsync(
+            provider,
+            new OmpOptions
+            {
+                Provider = "omniroute",
+                Model = "deepseek/deepseek-v4-flash",
+                NoSession = true
+            },
+            "hello");
+
+        processManager.LastContext.ShouldNotBeNull();
+        processManager.LastContext.Arguments.ShouldNotContain("--provider");
+        processManager.LastContext.Arguments.ShouldContain("--model");
+        processManager.LastContext.Arguments.ShouldContain("omniroute/deepseek/deepseek-v4-flash");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_model_without_omniroute_prefix_unchanged_with_non_omniroute_provider()
+    {
+        var processManager = new StubCliProcessManager
+        {
+            ExecuteResult = CreateSuccessfulExecutionResult("ok")
+        };
+        var provider = CreateProvider(processManager: processManager);
+
+        await CollectMessagesAsync(
+            provider,
+            new OmpOptions
+            {
+                Provider = "openai",
+                Model = "glm/glm-4.7",
+                NoSession = true
+            },
+            "hello");
+
+        processManager.LastContext.ShouldNotBeNull();
+        processManager.LastContext.Arguments.ShouldContain("--provider");
+        processManager.LastContext.Arguments.ShouldContain("openai");
+        processManager.LastContext.Arguments.ShouldContain("--model");
+        processManager.LastContext.Arguments.ShouldContain("glm/glm-4.7");
+    }
+
+    [Theory]
+    [InlineData("omniroute/deepseek/deepseek-v4-flash", "omniroute/deepseek/deepseek-v4-flash")]
+    [InlineData("OmniRoute/deepseek/deepseek-v4-flash", "OmniRoute/deepseek/deepseek-v4-flash")]
+    [InlineData("OMNIROUTE/meng/gpt-5.5", "OMNIROUTE/meng/gpt-5.5")]
+    [InlineData("deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-flash")]
+    [InlineData("glm/glm-4.7", "glm/glm-4.7")]
+    [InlineData(null, "")]
+    [InlineData("", "")]
+    [InlineData("  ", "  ")]
+    [InlineData("omniroute/", "omniroute/")]
+    [InlineData("omniroute/omniroute/x/y", "omniroute/omniroute/x/y")]
+    public void NormalizeModelName_produces_expected_result(string? input, string expected)
+    {
+        OmpProvider.NormalizeModelName(input).ShouldBe(expected);
     }
 
     [Fact]

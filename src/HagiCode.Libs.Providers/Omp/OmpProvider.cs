@@ -153,6 +153,36 @@ public class OmpProvider : ICliProvider<OmpOptions>
     /// <inheritdoc />
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
+    /// <summary>
+    /// Normalizes a model name for omniroute: strips a redundant <c>omniroute/</c> selector prefix
+    /// when present (case-insensitive) so the CLI receives the two-segment native id that
+    /// omniroute can route.  If the remainder is empty or itself starts with <c>omniroute/</c>
+    /// (nested prefix) the original value is kept and a debug-level message is logged.
+    /// </summary>
+    public static string NormalizeModelName(string? model, Action<string>? logDebug = null)
+    {
+        if (string.IsNullOrEmpty(model))
+        {
+            return model ?? string.Empty;
+        }
+
+        const string prefix = "omniroute/";
+        if (!model.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return model;
+        }
+
+        var remainder = model[prefix.Length..];
+        if (remainder.Length == 0 || remainder.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            logDebug?.Invoke($"OmpProvider: keeping omniroute model name '{model}' unchanged (empty or nested prefix after strip).");
+            return model;
+        }
+
+        // Keep the full three-segment omniroute selector so that omp CLI can resolve it.
+        return model;
+    }
+
     internal virtual IReadOnlyList<string> BuildCommandArguments(OmpOptions options, string prompt)
     {
         var arguments = new List<string>
@@ -162,8 +192,20 @@ public class OmpProvider : ICliProvider<OmpOptions>
             "--print"
         };
 
-        AddOption(arguments, "--provider", options.Provider);
-        AddOption(arguments, "--model", options.Model);
+        var normalizedModel = NormalizeModelName(options.Model);
+        var isOmniRouteSelector = normalizedModel.StartsWith("omniroute/", StringComparison.OrdinalIgnoreCase);
+        var providerIsOmniRoute = string.Equals(options.Provider, "omniroute", StringComparison.OrdinalIgnoreCase);
+
+        if (isOmniRouteSelector || providerIsOmniRoute)
+        {
+            var selector = isOmniRouteSelector ? normalizedModel : $"omniroute/{normalizedModel}";
+            AddOption(arguments, "--model", selector);
+        }
+        else
+        {
+            AddOption(arguments, "--provider", options.Provider);
+            AddOption(arguments, "--model", normalizedModel);
+        }
         AddOption(arguments, "--system-prompt", options.SystemPrompt);
 
         foreach (var appendSystemPrompt in options.AppendSystemPrompts)
