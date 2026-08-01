@@ -6,6 +6,7 @@ using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Environment;
 using HagiCode.Libs.Core.Process;
 using HagiCode.Libs.Core.Transport;
+using HagiCode.Libs.Providers.Omp;
 
 namespace HagiCode.Libs.Providers.Pi;
 
@@ -162,8 +163,20 @@ public class PiProvider : ICliProvider<PiOptions>
             "--print"
         };
 
-        AddOption(arguments, "--provider", options.Provider);
-        AddOption(arguments, "--model", options.Model);
+        var normalizedModel = OmpProvider.NormalizeModelName(options.Model);
+        var isOmniRouteSelector = normalizedModel.StartsWith("omniroute/", StringComparison.OrdinalIgnoreCase);
+        var providerIsOmniRoute = string.Equals(options.Provider, "omniroute", StringComparison.OrdinalIgnoreCase);
+
+        if (isOmniRouteSelector || providerIsOmniRoute)
+        {
+            var selector = isOmniRouteSelector ? normalizedModel : $"omniroute/{normalizedModel}";
+            AddOption(arguments, "--model", selector);
+        }
+        else
+        {
+            AddOption(arguments, "--provider", options.Provider);
+            AddOption(arguments, "--model", normalizedModel);
+        }
         AddOption(arguments, "--system-prompt", options.SystemPrompt);
 
         foreach (var appendSystemPrompt in options.AppendSystemPrompts)

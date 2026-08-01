@@ -5,6 +5,7 @@ using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Environment;
 using HagiCode.Libs.Core.Process;
 using HagiCode.Libs.Core.Transport;
+using HagiCode.Libs.Providers.Omp;
 using HagiCode.Libs.Providers.Pi;
 using Shouldly;
 
@@ -55,10 +56,8 @@ public sealed class PiProviderTests
             "--mode",
             "json",
             "--print",
-            "--provider",
-            "omniroute",
             "--model",
-            "glm/glm-4.7",
+            "omniroute/glm/glm-4.7",
             "--system-prompt",
             "You are a trip planner.",
             "--append-system-prompt",
@@ -78,6 +77,69 @@ public sealed class PiProviderTests
         ]);
         processManager.LastContext.EnvironmentVariables!.ShouldContainKeyAndValue("PI_OFFLINE", "1");
         processManager.LastContext.EnvironmentVariables.ShouldContainKeyAndValue("PATH", "/tmp/bin");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_uses_three_segment_selector_for_omniroute_models()
+    {
+        var processManager = new StubCliProcessManager
+        {
+            ExecuteResult = CreateSuccessfulExecutionResult("ok")
+        };
+        var provider = CreateProvider(processManager: processManager);
+
+        await CollectMessagesAsync(
+            provider,
+            new PiOptions
+            {
+                Provider = "omniroute",
+                Model = "omniroute/ds/deepseek-v4-flash",
+                NoSession = true
+            },
+            "hello");
+
+        processManager.LastContext.ShouldNotBeNull();
+        processManager.LastContext.Arguments.ShouldNotContain("--provider");
+        processManager.LastContext.Arguments.ShouldContain("--model");
+        processManager.LastContext.Arguments.ShouldContain("omniroute/ds/deepseek-v4-flash");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_converts_two_segment_to_omniroute_selector_when_provider_is_omniroute()
+    {
+        var processManager = new StubCliProcessManager
+        {
+            ExecuteResult = CreateSuccessfulExecutionResult("ok")
+        };
+        var provider = CreateProvider(processManager: processManager);
+
+        await CollectMessagesAsync(
+            provider,
+            new PiOptions
+            {
+                Provider = "omniroute",
+                Model = "ds/deepseek-v4-flash",
+                NoSession = true
+            },
+            "hello");
+
+        processManager.LastContext.ShouldNotBeNull();
+        processManager.LastContext.Arguments.ShouldNotContain("--provider");
+        processManager.LastContext.Arguments.ShouldContain("--model");
+        processManager.LastContext.Arguments.ShouldContain("omniroute/ds/deepseek-v4-flash");
+    }
+
+    [Theory]
+    [InlineData("omniroute/ds/deepseek-v4-flash", "omniroute/ds/deepseek-v4-flash")]
+    [InlineData("OmniRoute/glm/glm-4.7", "OmniRoute/glm/glm-4.7")]
+    [InlineData("ds/deepseek-v4-flash", "ds/deepseek-v4-flash")]
+    [InlineData(null, "")]
+    [InlineData("", "")]
+    [InlineData("omniroute/", "omniroute/")]
+    [InlineData("omniroute/omniroute/x/y", "omniroute/omniroute/x/y")]
+    public void NormalizeModelName_produces_expected_result(string? input, string expected)
+    {
+        OmpProvider.NormalizeModelName(input).ShouldBe(expected);
     }
 
     [Fact]
