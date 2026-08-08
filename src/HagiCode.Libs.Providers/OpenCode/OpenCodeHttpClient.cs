@@ -149,14 +149,8 @@ public sealed class OpenCodeHttpClient : IDisposable
         string? eventName = null;
         var dataBuilder = new StringBuilder();
 
-        while (!reader.EndOfStream)
+        while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
         {
-            var line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
-            if (line is null)
-            {
-                break;
-            }
-
             if (line.Length == 0)
             {
                 if (eventName is not null || dataBuilder.Length > 0)
