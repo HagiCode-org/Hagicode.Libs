@@ -32,6 +32,8 @@ public class HermesProvider : ICliProvider<HermesOptions>
     /// <param name="executableResolver">The executable resolver.</param>
     /// <param name="processManager">The process manager.</param>
     /// <param name="runtimeEnvironmentResolver">The optional runtime environment resolver.</param>
+    /// <param name="poolCoordinator">The optional provider pool coordinator; a new instance is created when omitted.</param>
+    /// <param name="poolConfiguration">The optional provider pool configuration registry; a new instance is created when omitted.</param>
     public HermesProvider(
         CliExecutableResolver executableResolver,
         CliProcessManager processManager,
