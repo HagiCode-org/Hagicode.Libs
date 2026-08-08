@@ -343,7 +343,8 @@ public class CopilotProvider : ICliProvider<CopilotOptions>
                     ["tool_name"] = eventData.ToolName,
                     ["tool_call_id"] = eventData.ToolCallId,
                     ["text"] = eventData.Content,
-                    ["failed"] = LooksLikeToolFailure(eventData.Content)
+                    ["failed"] = eventData.ToolSucceeded is false
+                        || (eventData.ToolSucceeded is null && LooksLikeToolFailure(eventData.Content))
                 }),
             CopilotSdkStreamEventType.Error =>
                 CreateMessage("error", new Dictionary<string, object?>

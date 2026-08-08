@@ -241,6 +241,38 @@ public sealed class CopilotProviderTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_uses_authoritative_tool_success_over_result_text_heuristics()
+    {
+        var provider = CreateProvider(gateway: new StubCopilotSdkGateway(
+        [
+            new CopilotSdkStreamEvent(
+                CopilotSdkStreamEventType.ToolExecutionEnd,
+                Content: "error is part of the requested file content",
+                ToolName: "view",
+                ToolCallId: "tool-success",
+                ToolSucceeded: true),
+            new CopilotSdkStreamEvent(
+                CopilotSdkStreamEventType.ToolExecutionEnd,
+                Content: "completed",
+                ToolName: "view",
+                ToolCallId: "tool-failure",
+                ToolSucceeded: false),
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.Completed)
+        ]));
+        var messages = new List<CliMessage>();
+
+        await foreach (var message in provider.ExecuteAsync(new CopilotOptions(), "hello"))
+        {
+            messages.Add(message);
+        }
+
+        var completedTools = messages.Where(static message => message.Type == "tool.completed").ToArray();
+        completedTools.Length.ShouldBe(2);
+        completedTools[0].Content.GetProperty("failed").GetBoolean().ShouldBeFalse();
+        completedTools[1].Content.GetProperty("failed").GetBoolean().ShouldBeTrue();
+    }
+
+    [Fact]
     public void DispatchSessionEvent_normalizes_reasoning_delta_before_raw_fallback()
     {
         var result = GitHubCopilotSdkGateway.DispatchSessionEvent(
@@ -549,6 +581,87 @@ public sealed class CopilotProviderTests
     }
 
     [Fact]
+    public void NormalizeFailureMessage_marks_github_cli_login_auth_failure()
+    {
+        var rawMessage =
+            "Request session.resume failed with message: Authentication failed: " +
+            "Failed to fetch GitHub CLI user login: network fetch failed: error sending request for url ()";
+
+        var message = GitHubCopilotSdkGateway.NormalizeFailureMessage(rawMessage);
+
+        message.ShouldStartWith("[copilot_auth_failed]");
+        message.ShouldContain("gh auth login");
+        message.ShouldContain("AuthSource = GitHubToken");
+    }
+
+    [Fact]
+    public async Task CreateRuntime_falls_back_to_fresh_session_on_non_auth_resume_failure_without_token()
+    {
+        var gateway = new GitHubCopilotSdkGateway(
+            new ThrowingResumeStubClientFactory("Request session.resume failed with message: session not found"),
+            new CopilotSdkEnvironmentLeaseCoordinator());
+        var provider = CreateProvider(gateway: gateway);
+
+        var messages = new List<CliMessage>();
+        await foreach (var message in provider.ExecuteAsync(
+                           new CopilotOptions { SessionId = "resume-session" },
+                           "resume me"))
+        {
+            messages.Add(message);
+        }
+
+        messages.Select(static m => m.Type).ShouldContain("session.started");
+        messages.Select(static m => m.Type).ShouldNotContain("error");
+    }
+
+    [Fact]
+    public async Task CreateRuntime_falls_back_to_fresh_session_on_auth_resume_failure_when_token_is_set()
+    {
+        var gateway = new GitHubCopilotSdkGateway(
+            new ThrowingResumeStubClientFactory(
+                "Request session.resume failed with message: Authentication failed: Failed to fetch GitHub CLI user login"),
+            new CopilotSdkEnvironmentLeaseCoordinator());
+        var provider = CreateProvider(gateway: gateway);
+
+        var messages = new List<CliMessage>();
+        await foreach (var message in provider.ExecuteAsync(
+                           new CopilotOptions
+                           {
+                               SessionId = "resume-session",
+                               AuthSource = CopilotAuthSource.GitHubToken,
+                               GitHubToken = "ghp_token"
+                           },
+                           "resume me"))
+        {
+            messages.Add(message);
+        }
+
+        messages.Select(static m => m.Type).ShouldContain("session.started");
+        messages.Select(static m => m.Type).ShouldNotContain("error");
+    }
+
+    [Fact]
+    public async Task CreateRuntime_fails_fast_with_auth_marker_on_auth_resume_failure_without_token()
+    {
+        var gateway = new GitHubCopilotSdkGateway(
+            new ThrowingResumeStubClientFactory(
+                "Request session.resume failed with message: Authentication failed: Failed to fetch GitHub CLI user login: network fetch failed"),
+            new CopilotSdkEnvironmentLeaseCoordinator());
+        var provider = CreateProvider(gateway: gateway);
+
+        var exception = await Should.ThrowAsync<InvalidOperationException>(async () =>
+        {
+            await foreach (var _ in provider.ExecuteAsync(
+                               new CopilotOptions { SessionId = "resume-session" },
+                               "resume me"))
+            {
+            }
+        });
+
+        exception.Message.ShouldStartWith("[copilot_auth_failed]");
+    }
+
+    [Fact]
     public async Task ExecuteAsync_uses_explicit_session_id_for_provider_native_resume_contract()
     {
         var gateway = new StubCopilotSdkGateway(
@@ -851,7 +964,7 @@ public sealed class CopilotProviderTests
     }
 
     [Fact]
-    public async Task CreateRuntimeAsync_falls_back_to_fresh_session_when_resume_lacks_authentication_info()
+    public async Task CreateRuntimeAsync_fails_fast_with_auth_marker_when_resume_lacks_authentication_info_and_no_token()
     {
         var factory = new ResumeFailureCopilotSdkClientFactory(
             new IOException(
@@ -873,19 +986,14 @@ public sealed class CopilotProviderTests
             CliArgs: [],
             EnvironmentVariables: new Dictionary<string, string?>());
 
-        await using var runtime = await gateway.CreateRuntimeAsync(request);
-        var events = new List<CopilotSdkStreamEvent>();
-
-        await foreach (var eventData in runtime.SendPromptAsync(request))
-        {
-            events.Add(eventData);
-        }
+        // Without an explicit GitHub token the broken GitHub CLI login cannot be recovered by a
+        // fresh session, so the gateway fails fast with an actionable auth marker instead of
+        // silently retrying/falling back to the same failing auth path.
+        var exception = await Should.ThrowAsync<InvalidOperationException>(async () => await gateway.CreateRuntimeAsync(request));
 
         factory.ResumeAttemptCount.ShouldBe(1);
-        factory.CreateAttemptCount.ShouldBe(1);
-        events.First().Type.ShouldBe(CopilotSdkStreamEventType.SessionStarted);
-        events.First().RequestedSessionId.ShouldBe("resume-session");
-        runtime.SessionId.ShouldBe("resume-session");
+        factory.CreateAttemptCount.ShouldBe(0);
+        exception.Message.ShouldStartWith("[copilot_auth_failed]");
     }
 
     [Fact]
@@ -1290,6 +1398,41 @@ public sealed class CopilotProviderTests
             }
 
             public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class ThrowingResumeStubClientFactory(string resumeErrorMessage) : ICopilotSdkClientFactory
+    {
+        public ICopilotSdkClient Create(CopilotClientOptions options) => new ThrowingResumeStubClient(resumeErrorMessage);
+    }
+
+    private sealed class ThrowingResumeStubClient(string resumeErrorMessage) : ICopilotSdkClient
+    {
+        public Task<ICopilotSdkSession> CreateSessionAsync(SessionConfig config, CancellationToken cancellationToken)
+            => Task.FromResult<ICopilotSdkSession>(new ThrowingResumeStubSession("created-session"));
+
+        public Task<ICopilotSdkSession> ResumeSessionAsync(string sessionId, ResumeSessionConfig config, CancellationToken cancellationToken)
+            => throw new InvalidOperationException(resumeErrorMessage);
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class ThrowingResumeStubSession(string sessionId) : ICopilotSdkSession
+    {
+        public string SessionId => sessionId;
+
+        public IDisposable On(Action<SessionEvent> handler) => new NoopDisposable();
+
+        public Task SendAndWaitAsync(MessageOptions options, TimeSpan timeout, CancellationToken cancellationToken)
+            => Task.CompletedTask;
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class NoopDisposable : IDisposable
+    {
+        public void Dispose()
+        {
         }
     }
 

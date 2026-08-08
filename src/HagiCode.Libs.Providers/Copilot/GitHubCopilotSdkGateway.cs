@@ -9,6 +9,8 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
 {
     private static readonly TimeSpan IdleCancellationGracePeriod = TimeSpan.FromSeconds(10);
     private static readonly CopilotSdkEnvironmentLeaseCoordinator SharedEnvironmentLeaseCoordinator = new();
+    private static readonly TimeSpan ResumeRetryBaseDelay = TimeSpan.FromSeconds(2);
+    private static readonly int ResumeRetryMaxAttempts = 3;
 
     private readonly ICopilotSdkClientFactory _clientFactory;
     private readonly CopilotSdkEnvironmentLeaseCoordinator _environmentLeaseCoordinator;
@@ -45,17 +47,24 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
             {
                 try
                 {
-                    session = await client.ResumeSessionAsync(
-                        request.SessionId,
-                        BuildResumeSessionConfig(request),
-                        startupCancellationTokenSource.Token).ConfigureAwait(false);
+                    session = await ResumeWithRetryAsync(client, request, startupCancellationTokenSource.Token)
+                        .ConfigureAwait(false);
                     lifecycleEvent = new CopilotSdkStreamEvent(
                         CopilotSdkStreamEventType.SessionResumed,
                         SessionId: session.SessionId,
                         RequestedSessionId: request.SessionId);
                 }
-                catch (Exception ex) when (ShouldFallbackToFreshSession(ex))
+                catch (Exception ex) when (EnumerateExceptionMessages(ex).Any(IsAuthenticationFailure) && string.IsNullOrWhiteSpace(request.GitHubToken))
                 {
+                    // A broken GitHub CLI login cannot be recovered by a fresh session, so fail
+                    // fast with an actionable message instead of silently retrying the same path.
+                    throw new InvalidOperationException(NormalizeFailureMessage(ex.Message), ex);
+                }
+                catch (Exception ex) when (ShouldFallbackToFreshSession(ex, request))
+                {
+                    // Resume failed for a recoverable reason (session gone/expired or a transient
+                    // network blip). Fall back to a fresh session so the request still executes.
+                    // When an explicit GitHub token is configured, this also recovers auth failures.
                     session = await client.CreateSessionAsync(
                         BuildSessionConfig(request),
                         startupCancellationTokenSource.Token).ConfigureAwait(false);
@@ -131,26 +140,84 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
             return $"[idle_timeout] Copilot CLI stream timed out after {timeout.TotalSeconds:0} seconds without any session events.";
         }
 
-        if (!string.IsNullOrWhiteSpace(rawMessage) && CopilotCliCompatibility.TryExtractRejectedOption(rawMessage) is not null)
+        if (!string.IsNullOrWhiteSpace(rawMessage))
         {
-            return CopilotCliCompatibility.DescribeUnknownOption(rawMessage);
+            if (IsAuthenticationFailure(rawMessage))
+            {
+                return $"[copilot_auth_failed] GitHub Copilot could not authenticate through the logged-in GitHub CLI user. " +
+                       $"Original error: {rawMessage}. " +
+                       "Set CopilotOptions.AuthSource = GitHubToken with a valid GitHubToken, or run 'gh auth login' in the runtime environment.";
+            }
+
+            if (CopilotCliCompatibility.TryExtractRejectedOption(rawMessage) is not null)
+            {
+                return CopilotCliCompatibility.DescribeUnknownOption(rawMessage);
+            }
         }
 
         return rawMessage ?? "GitHub Copilot stream failed.";
     }
 
-    private static bool ShouldFallbackToFreshSession(Exception exception)
+    private static bool ShouldFallbackToFreshSession(Exception exception, CopilotSdkRequest request)
     {
         if (exception is InvalidOperationException)
         {
             return true;
         }
 
-        return EnumerateExceptionMessages(exception).Any(static message =>
-            message.Contains("Request session.resume failed with message: No authentication info available", StringComparison.OrdinalIgnoreCase)
-            || (message.Contains("session.resume", StringComparison.OrdinalIgnoreCase)
-                && message.Contains("no authentication info available", StringComparison.OrdinalIgnoreCase)));
+        var messages = EnumerateExceptionMessages(exception).ToList();
+
+        // Authentication failures can only be recovered by a fresh session when we can
+        // authenticate independently of the broken GitHub CLI login, i.e. via an explicit token.
+        if (messages.Any(IsAuthenticationFailure))
+        {
+            return !string.IsNullOrWhiteSpace(request.GitHubToken);
+        }
+
+        // Recoverable resume failures (session gone/expired, transient network blips) are worth
+        // retrying or falling back to a fresh session.
+        return messages.Any(IsResumeFailure);
     }
+
+    private async Task<ICopilotSdkSession> ResumeWithRetryAsync(
+        ICopilotSdkClient client,
+        CopilotSdkRequest request,
+        CancellationToken cancellationToken)
+    {
+        Exception? lastException = null;
+        for (var attempt = 0; attempt < ResumeRetryMaxAttempts; attempt++)
+        {
+            if (attempt > 0)
+            {
+                await Task.Delay(ResumeRetryBaseDelay * attempt, cancellationToken).ConfigureAwait(false);
+            }
+
+            try
+            {
+                return await client.ResumeSessionAsync(
+                    request.SessionId!,
+                    BuildResumeSessionConfig(request),
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!EnumerateExceptionMessages(ex).Any(IsAuthenticationFailure))
+            {
+                // Authentication failures are deterministic and not worth retrying; transient or
+                // unknown resume failures get another attempt before we fall back to a fresh session.
+                lastException = ex;
+            }
+        }
+
+        throw lastException ?? new InvalidOperationException("Copilot session resume failed after retries.");
+    }
+
+    private static bool IsAuthenticationFailure(string message)
+        => message.Contains("no authentication info available", StringComparison.OrdinalIgnoreCase)
+           || message.Contains("authentication failed", StringComparison.OrdinalIgnoreCase)
+           || message.Contains("failed to fetch github cli user login", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsResumeFailure(string message)
+        => message.Contains("session.resume", StringComparison.OrdinalIgnoreCase)
+           || message.Contains("request session.resume failed", StringComparison.OrdinalIgnoreCase);
 
     private static IEnumerable<string> EnumerateExceptionMessages(Exception exception)
     {
@@ -256,7 +323,8 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
                     CopilotSdkStreamEventType.ToolExecutionEnd,
                     SessionId: sessionId,
                     Content: ExtractToolExecutionContent(toolCompleteEvent),
-                    ToolCallId: toolCompleteEvent.Data.ToolCallId));
+                    ToolCallId: toolCompleteEvent.Data.ToolCallId,
+                    ToolSucceeded: toolCompleteEvent.Data.Success));
                 break;
 
             case SessionErrorEvent errorEvent:
