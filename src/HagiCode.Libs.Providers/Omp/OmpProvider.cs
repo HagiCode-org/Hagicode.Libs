@@ -222,7 +222,6 @@ public class OmpProvider : ICliProvider<OmpOptions>
         else
         {
             AddOption(arguments, "--resume", options.SessionId);
-            AddOption(arguments, "--session-dir", options.SessionDirectory);
         }
 
         if (options.DisableAllTools)

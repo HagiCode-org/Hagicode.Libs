@@ -41,11 +41,6 @@ public sealed record OmpOptions
     public string? SessionId { get; init; }
 
     /// <summary>
-    /// Gets or sets the OMP session directory.
-    /// </summary>
-    public string? SessionDirectory { get; init; }
-
-    /// <summary>
     /// Gets or sets a value indicating whether session persistence should be disabled.
     /// </summary>
     public bool NoSession { get; init; }
