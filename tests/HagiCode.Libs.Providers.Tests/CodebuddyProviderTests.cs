@@ -223,6 +223,72 @@ public sealed class CodebuddyProviderTests
     }
 
     [Fact]
+    public void NormalizeNotification_decodes_json_encoded_content_string()
+    {
+        var notification = new AcpNotification(
+            "session/update",
+            JsonSerializer.SerializeToElement(new
+            {
+                sessionId = "session-1",
+                update = new
+                {
+                    sessionUpdate = "agent_message_chunk",
+                    content = "{\"type\":\"text\",\"text\":\"Hello\"}"
+                }
+            }));
+
+        var messages = CodebuddyAcpMessageMapper.NormalizeNotification(notification);
+
+        messages.ShouldHaveSingleItem();
+        messages[0].Type.ShouldBe("assistant");
+        messages[0].Content.GetProperty("text").GetString().ShouldBe("Hello");
+    }
+
+    [Fact]
+    public void NormalizeNotification_decodes_json_encoded_content_string_with_multiple_blocks()
+    {
+        var notification = new AcpNotification(
+            "session/update",
+            JsonSerializer.SerializeToElement(new
+            {
+                sessionId = "session-1",
+                update = new
+                {
+                    sessionUpdate = "agent_message_chunk",
+                    content = "{\"type\":\"text\",\"text\":\"BLUEPRINT-123\"}"
+                }
+            }));
+
+        var messages = CodebuddyAcpMessageMapper.NormalizeNotification(notification);
+
+        messages.ShouldHaveSingleItem();
+        messages[0].Type.ShouldBe("assistant");
+        messages[0].Content.GetProperty("text").GetString().ShouldBe("BLUEPRINT-123");
+    }
+
+    [Fact]
+    public void NormalizeNotification_preserves_plain_text_content_string()
+    {
+        var notification = new AcpNotification(
+            "session/update",
+            JsonSerializer.SerializeToElement(new
+            {
+                sessionId = "session-1",
+                update = new
+                {
+                    sessionUpdate = "agent_message_chunk",
+                    content = "Hello"
+                }
+            }));
+
+        var messages = CodebuddyAcpMessageMapper.NormalizeNotification(notification);
+
+        messages.ShouldHaveSingleItem();
+        messages[0].Type.ShouldBe("assistant");
+        messages[0].Content.GetProperty("text").GetString().ShouldBe("Hello");
+    }
+
+    [Fact]
     public void NormalizeNotification_preserves_chunk_boundaries_without_inserting_spaces()
     {
         var notification = new AcpNotification(

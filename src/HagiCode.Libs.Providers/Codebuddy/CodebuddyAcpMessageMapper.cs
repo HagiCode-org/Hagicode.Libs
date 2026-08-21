@@ -208,11 +208,45 @@ internal static class CodebuddyAcpMessageMapper
     {
         return contentElement.ValueKind switch
         {
-            JsonValueKind.String => contentElement.GetString(),
+            JsonValueKind.String => ExtractTextFromEncodedString(contentElement),
             JsonValueKind.Object => ExtractTextFromObject(contentElement),
             JsonValueKind.Array => ExtractTextFromArray(contentElement),
             _ => null
         };
+    }
+
+    /// <summary>
+    /// The CodeBuddy CLI may deliver chunk content as a JSON-encoded string
+    /// (e.g. "{\"type\":\"text\",\"text\":\"Hello\"}") instead of a plain text delta.
+    /// Decode the envelope so the underlying text is used; otherwise the raw JSON
+    /// envelope would leak into the stream and break the incremental-delta and
+    /// resume-replay dedup that rely on real text.
+    /// </summary>
+    private static string? ExtractTextFromEncodedString(JsonElement contentElement)
+    {
+        var raw = contentElement.GetString();
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return raw;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(raw);
+            var decoded = document.RootElement.ValueKind switch
+            {
+                JsonValueKind.Object => ExtractTextFromObject(document.RootElement),
+                JsonValueKind.Array => ExtractTextFromArray(document.RootElement),
+                _ => null
+            };
+
+            return string.IsNullOrEmpty(decoded) ? raw : decoded;
+        }
+        catch (JsonException)
+        {
+            // Not a JSON envelope; treat the raw string as the text.
+            return raw;
+        }
     }
 
     private static string? ExtractTextFromObject(JsonElement contentElement)
