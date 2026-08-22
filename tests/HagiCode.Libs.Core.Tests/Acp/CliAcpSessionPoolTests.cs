@@ -549,6 +549,8 @@ public sealed class CliAcpSessionPoolTests
         {
             yield break;
         }
+
+        public string? GetDiagnosticSummary() => null;
     }
 
     private sealed class ManualTimeProvider : TimeProvider

@@ -641,6 +641,8 @@ public sealed class HermesProviderTests
             var periodIndex = value.IndexOf('.');
             return periodIndex >= 0 ? value[..periodIndex].Trim() : value;
         }
+
+        public string? GetDiagnosticSummary() => null;
     }
 
     private sealed class StubExecutableResolver : CliExecutableResolver

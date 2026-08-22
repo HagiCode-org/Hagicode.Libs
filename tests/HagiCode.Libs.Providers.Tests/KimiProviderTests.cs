@@ -568,6 +568,8 @@ public sealed class KimiProviderTests
         }
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+        public string? GetDiagnosticSummary() => null;
     }
 
     private sealed record BootstrapInvocation(string Method, JsonElement Parameters);

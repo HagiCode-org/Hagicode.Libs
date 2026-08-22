@@ -206,6 +206,7 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
         await foreach (var message in StreamPromptAttemptAsync(
                            sessionClient,
                            sessionHandle.SessionId,
+                           sessionHandle.IsResumed,
                            prompt,
                            cancellationToken).ConfigureAwait(false))
         {
@@ -284,10 +285,11 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
         IAcpSessionClient sessionClient,
         string sessionId,
         Task<JsonElement> promptTask,
+        bool isResumedSession,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var sawTerminalMessage = false;
         var sawAssistantText = false;
+        var isHistoryReplayActive = false;
         using var receiveUpdatesCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _ = CancelReceiveLoopWhenPromptCompletesAsync(promptTask, receiveUpdatesCancellation);
         await using var updateEnumerator = sessionClient.ReceiveNotificationsAsync(receiveUpdatesCancellation.Token)
@@ -325,21 +327,62 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
                 yield break;
             }
 
-            foreach (var message in CodebuddyAcpMessageMapper.NormalizeNotification(notification))
+            if (isResumedSession &&
+                CodebuddyAcpMessageMapper.TryGetReplayWindowBoundary(notification, out var isReplayStart))
             {
+                isHistoryReplayActive = isReplayStart;
+            }
+
+            if (isResumedSession &&
+                isHistoryReplayActive &&
+                IsAgentMessageChunk(notification))
+            {
+                continue;
+            }
+
+            foreach (var normalizedMessage in CodebuddyAcpMessageMapper.NormalizeNotification(notification))
+            {
+                var message = normalizedMessage;
                 if (string.Equals(message.Type, "assistant", StringComparison.OrdinalIgnoreCase) &&
                     CodebuddyAcpMessageMapper.TryExtractMessageText(message.Content, out _))
                 {
                     sawAssistantText = true;
                 }
 
-                yield return message;
+                if (string.Equals(message.Type, "terminal.completed", StringComparison.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        var terminalPromptResult = await promptTask.ConfigureAwait(false);
+                        if (CodebuddyAcpMessageMapper.IsFailurePromptResult(terminalPromptResult))
+                        {
+                            message = CodebuddyAcpMessageMapper.CreateTerminalMessage(sessionId, terminalPromptResult);
+                        }
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        message = CodebuddyAcpMessageMapper.CreateTerminalFailureMessage(sessionId, ex);
+                    }
+                }
+
                 if (IsTerminalMessage(message.Type))
                 {
-                    sawTerminalMessage = true;
-                    yield break;
+                    if (string.Equals(message.Type, "terminal.failed", StringComparison.OrdinalIgnoreCase))
+                    {
+                        yield return message;
+                        yield break;
+                    }
+
+                    break;
                 }
+
+                yield return message;
             }
+
         }
 
         JsonElement promptResult;
@@ -364,15 +407,21 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
             yield break;
         }
 
-        if (sawTerminalMessage)
-        {
-            yield break;
-        }
-
-        foreach (var fallbackMessage in BuildFallbackMessages(sessionId, promptResult, sawAssistantText))
+        foreach (var fallbackMessage in BuildFallbackMessages(sessionId, promptResult, sawAssistantText, sessionClient))
         {
             yield return fallbackMessage;
         }
+    }
+
+    private static bool IsAgentMessageChunk(AcpNotification notification)
+    {
+        return string.Equals(notification.Method, "session/update", StringComparison.OrdinalIgnoreCase) &&
+               notification.Parameters.ValueKind == JsonValueKind.Object &&
+               notification.Parameters.TryGetProperty("update", out var updateElement) &&
+               updateElement.ValueKind == JsonValueKind.Object &&
+               updateElement.TryGetProperty("sessionUpdate", out var updateKind) &&
+               updateKind.ValueKind == JsonValueKind.String &&
+               string.Equals(updateKind.GetString(), "agent_message_chunk", StringComparison.OrdinalIgnoreCase);
     }
 
     private static async Task CancelReceiveLoopWhenPromptCompletesAsync(
@@ -397,23 +446,37 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
     private static IAsyncEnumerable<CliMessage> StreamPromptAttemptAsync(
         IAcpSessionClient sessionClient,
         string sessionId,
+        bool isResumedSession,
         string prompt,
         CancellationToken cancellationToken)
     {
         var promptTask = sessionClient.SendPromptAsync(sessionId, prompt, cancellationToken);
-        return StreamPromptMessagesAsync(sessionClient, sessionId, promptTask, cancellationToken);
+        return StreamPromptMessagesAsync(sessionClient, sessionId, promptTask, isResumedSession, cancellationToken);
     }
 
     private static IEnumerable<CliMessage> BuildFallbackMessages(
         string sessionId,
         JsonElement promptResult,
-        bool sawAssistantText)
+        bool sawAssistantText,
+        IAcpSessionClient sessionClient)
     {
         if (!sawAssistantText &&
             CodebuddyAcpMessageMapper.TryExtractPromptResultText(promptResult, out var fallbackText) &&
             !CodebuddyAcpMessageMapper.IsFailurePromptResult(promptResult))
         {
             yield return CodebuddyAcpMessageMapper.CreateAssistantMessage(sessionId, fallbackText, promptResult);
+        }
+
+        if (!sawAssistantText)
+        {
+            var diagnostic = sessionClient.GetDiagnosticSummary();
+            if (!string.IsNullOrWhiteSpace(diagnostic))
+            {
+                yield return CodebuddyAcpMessageMapper.CreateTerminalFailureMessage(
+                    sessionId,
+                    new InvalidOperationException(diagnostic));
+                yield break;
+            }
         }
 
         yield return CodebuddyAcpMessageMapper.CreateTerminalMessage(sessionId, promptResult);

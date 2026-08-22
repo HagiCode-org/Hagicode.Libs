@@ -13,6 +13,7 @@ public sealed class AcpSessionClient : IAcpSessionClient
     private readonly Channel<AcpNotification> _sessionNotifications = Channel.CreateUnbounded<AcpNotification>();
     private readonly CancellationTokenSource _disposeCts = new();
     private readonly string? _agentNameHint;
+    private readonly IAcpTransportDiagnosticsSource? _diagnosticsSource;
     private JsonElement? _initializeResult;
     private Task? _notificationPumpTask;
     private bool _disposed;
@@ -27,6 +28,13 @@ public sealed class AcpSessionClient : IAcpSessionClient
         ArgumentNullException.ThrowIfNull(transport);
         _rpcClient = new AcpJsonRpcClient(transport);
         _agentNameHint = Process.ArgumentValueNormalizer.NormalizeOptionalValue(agentNameHint);
+        _diagnosticsSource = transport as IAcpTransportDiagnosticsSource;
+    }
+
+    /// <inheritdoc />
+    public string? GetDiagnosticSummary()
+    {
+        return _diagnosticsSource?.GetDiagnosticSummary();
     }
 
     /// <inheritdoc />
@@ -313,6 +321,21 @@ public sealed class AcpSessionClient : IAcpSessionClient
 
     private static bool ShouldEnqueuePromptCompletedNotification(JsonElement promptResult)
     {
+        if (promptResult.ValueKind == JsonValueKind.Object &&
+            ((promptResult.TryGetProperty("is_error", out var isError) && isError.ValueKind == JsonValueKind.True) ||
+             (promptResult.TryGetProperty("subtype", out var subtype) &&
+              subtype.ValueKind == JsonValueKind.String &&
+              subtype.GetString()?.Contains("error", StringComparison.OrdinalIgnoreCase) == true) ||
+             (promptResult.TryGetProperty("errors", out var errors) &&
+              errors.ValueKind == JsonValueKind.Array &&
+              errors.GetArrayLength() > 0) ||
+             (promptResult.TryGetProperty("errors_info", out var errorsInfo) &&
+              errorsInfo.ValueKind == JsonValueKind.Array &&
+              errorsInfo.GetArrayLength() > 0)))
+        {
+            return false;
+        }
+
         var stopReason = TryGetString(promptResult, "stopReason") ?? TryGetString(promptResult, "status");
         return string.Equals(stopReason, "end_turn", StringComparison.OrdinalIgnoreCase) ||
                string.Equals(stopReason, "completed", StringComparison.OrdinalIgnoreCase) ||

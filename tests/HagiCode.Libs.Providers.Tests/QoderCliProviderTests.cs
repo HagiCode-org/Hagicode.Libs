@@ -688,6 +688,8 @@ public sealed class QoderCliProviderTests
         }
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+        public string? GetDiagnosticSummary() => null;
     }
 
     private sealed class StubExecutableResolver : CliExecutableResolver

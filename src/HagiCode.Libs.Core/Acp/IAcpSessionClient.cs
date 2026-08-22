@@ -70,4 +70,11 @@ public interface IAcpSessionClient : IAsyncDisposable
     /// <param name="cancellationToken">Cancels notification enumeration.</param>
     /// <returns>The inbound notifications.</returns>
     IAsyncEnumerable<AcpNotification> ReceiveNotificationsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns the latest transport diagnostics snapshot (e.g. subprocess stderr), or null when none is available.
+    /// Providers use this to surface executor failures that are printed to stderr instead of being reported as
+    /// structured ACP terminal events.
+    /// </summary>
+    string? GetDiagnosticSummary();
 }

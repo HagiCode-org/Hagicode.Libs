@@ -114,6 +114,28 @@ public sealed class CodebuddyProviderTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_suppresses_replayed_assistant_chunks_until_replay_ends()
+    {
+        var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(
+            resumedSessionId: "session-resume",
+            emitReplayNotifications: true));
+        var messages = new List<CliMessage>();
+
+        await foreach (var message in provider.ExecuteAsync(
+                           new CodebuddyOptions { SessionId = "session-resume" },
+                           "resume prompt"))
+        {
+            messages.Add(message);
+        }
+
+        messages.Select(static message => message.Type).ShouldBe(
+            ["session.resumed", "session.update", "session.update", "assistant", "terminal.completed"]);
+        messages.Where(static message => message.Type == "assistant")
+            .Select(static message => message.Content.GetProperty("text").GetString())
+            .ShouldBe(["new answer"]);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_creates_fresh_session_client_for_each_execution()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient());
@@ -153,6 +175,41 @@ public sealed class CodebuddyProviderTests
 
         messages.Select(static message => message.Type).ShouldBe(["session.started", "assistant", "terminal.completed"]);
         messages[1].Content.GetProperty("text").GetString().ShouldBe("pong");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_prefers_prompt_result_error_over_success_notification()
+    {
+        var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(promptIsError: true));
+        var messages = new List<CliMessage>();
+
+        await foreach (var message in provider.ExecuteAsync(new CodebuddyOptions(), "hello"))
+        {
+            messages.Add(message);
+        }
+
+        messages.Last().Type.ShouldBe("terminal.failed");
+        messages.Last().Content.GetProperty("text").GetString().ShouldBe("429 hy3 quota exceeded");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_emits_terminal_failed_with_diagnostic_when_completion_produces_no_text()
+    {
+        const string diagnostic = "429 您的使用量已超出频率限制，请稍后再试";
+        var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(
+            emitNotifications: false,
+            promptStopReason: "end_turn",
+            promptOutputText: null,
+            diagnosticSummary: diagnostic));
+        var messages = new List<CliMessage>();
+
+        await foreach (var message in provider.ExecuteAsync(new CodebuddyOptions(), "hello"))
+        {
+            messages.Add(message);
+        }
+
+        messages.Last().Type.ShouldBe("terminal.failed");
+        messages.Last().Content.GetProperty("message").GetString().ShouldBe(diagnostic);
     }
 
     [Fact]
@@ -220,6 +277,69 @@ public sealed class CodebuddyProviderTests
         messages.ShouldHaveSingleItem();
         messages[0].Type.ShouldBe("terminal.completed");
         messages[0].Content.GetProperty("session_id").GetString().ShouldBe("session-1");
+    }
+
+    [Fact]
+    public void CreateTerminalMessage_maps_error_result_to_failed_message_with_error_text()
+    {
+        var promptResult = JsonSerializer.SerializeToElement(new
+        {
+            subtype = "error_during_execution",
+            is_error = true,
+            errors = new[] { "429 hy3 quota exceeded" }
+        });
+
+        var message = CodebuddyAcpMessageMapper.CreateTerminalMessage("session-1", promptResult);
+
+        message.Type.ShouldBe("terminal.failed");
+        message.Content.GetProperty("text").GetString().ShouldBe("429 hy3 quota exceeded");
+    }
+
+    [Fact]
+    public void CreateTerminalMessage_maps_nested_error_result_to_failed_message()
+    {
+        var promptResult = JsonSerializer.SerializeToElement(new
+        {
+            stopReason = "success",
+            result = new
+            {
+                subtype = "error_during_execution",
+                is_error = true,
+                errors = new[] { "429 hy3 quota exceeded" }
+            }
+        });
+
+        var message = CodebuddyAcpMessageMapper.CreateTerminalMessage("session-1", promptResult);
+
+        message.Type.ShouldBe("terminal.failed");
+        message.Content.GetProperty("text").GetString().ShouldBe("429 hy3 quota exceeded");
+    }
+
+    [Fact]
+    public void NormalizeNotification_maps_prompt_completed_result_error_to_failed_message()
+    {
+        var notification = new AcpNotification(
+            "session/update",
+            JsonSerializer.SerializeToElement(new
+            {
+                sessionId = "session-1",
+                update = new
+                {
+                    sessionUpdate = "prompt_completed",
+                    stopReason = "success"
+                },
+                result = new
+                {
+                    subtype = "error_during_execution",
+                    is_error = true,
+                    errors = new[] { "429 hy3 quota exceeded" }
+                }
+            }));
+
+        var message = CodebuddyAcpMessageMapper.NormalizeNotification(notification).Single();
+
+        message.Type.ShouldBe("terminal.failed");
+        message.Content.GetProperty("text").GetString().ShouldBe("429 hy3 quota exceeded");
     }
 
     [Fact]
@@ -416,7 +536,10 @@ public sealed class CodebuddyProviderTests
         string? resumedSessionId = null,
         bool emitNotifications = true,
         string? promptStopReason = "end_turn",
-        string? promptOutputText = null) : IAcpSessionClient
+        string? promptOutputText = null,
+        bool promptIsError = false,
+        bool emitReplayNotifications = false,
+        string? diagnosticSummary = null) : IAcpSessionClient
     {
         public int ConnectCalls { get; private set; }
 
@@ -482,11 +605,19 @@ public sealed class CodebuddyProviderTests
         public Task<JsonElement> SendPromptAsync(string sessionId, string prompt, CancellationToken cancellationToken = default)
         {
             PromptCalls++;
-            return Task.FromResult(JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+            var result = new Dictionary<string, object?>
             {
                 ["stopReason"] = promptStopReason,
                 ["outputText"] = promptOutputText ?? (prompt.Contains("resume", StringComparison.OrdinalIgnoreCase) ? "session ready" : "pong")
-            }));
+            };
+            if (promptIsError)
+            {
+                result["subtype"] = "error_during_execution";
+                result["is_error"] = true;
+                result["errors"] = new[] { "429 hy3 quota exceeded" };
+            }
+
+            return Task.FromResult(JsonSerializer.SerializeToElement(result));
         }
 
         public async IAsyncEnumerable<AcpNotification> ReceiveNotificationsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -495,6 +626,31 @@ public sealed class CodebuddyProviderTests
             {
                 await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
                 yield break;
+            }
+
+            if (emitReplayNotifications)
+            {
+                yield return CreateSessionUpdate(new
+                {
+                    sessionUpdate = "session_info_update",
+                    _meta = new Dictionary<string, object?>
+                    {
+                        ["codebuddy.ai/historyReplay"] = "start"
+                    }
+                });
+                yield return CreateSessionUpdate(new
+                {
+                    sessionUpdate = "agent_message_chunk",
+                    content = new { type = "text", text = "historical ACK" }
+                });
+                yield return CreateSessionUpdate(new
+                {
+                    sessionUpdate = "session_info_update",
+                    _meta = new Dictionary<string, object?>
+                    {
+                        ["codebuddy.ai/historyReplay"] = "end"
+                    }
+                });
             }
 
             yield return new AcpNotification(
@@ -508,7 +664,7 @@ public sealed class CodebuddyProviderTests
                         content = new
                         {
                             type = "text",
-                            text = "pong"
+                            text = emitReplayNotifications ? "new answer" : "pong"
                         }
                     }
                 }));
@@ -526,7 +682,20 @@ public sealed class CodebuddyProviderTests
                 }));
         }
 
+        private AcpNotification CreateSessionUpdate(object update)
+        {
+            return new AcpNotification(
+                "session/update",
+                JsonSerializer.SerializeToElement(new
+                {
+                    sessionId = LastSessionId ?? resumedSessionId ?? "session-1",
+                    update
+                }));
+        }
+
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+        public string? GetDiagnosticSummary() => diagnosticSummary;
     }
 
     private sealed class StubExecutableResolver : CliExecutableResolver

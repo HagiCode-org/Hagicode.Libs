@@ -313,6 +313,18 @@ public sealed class AcpSessionClientTests
     }
 
     [Fact]
+    public async Task GetDiagnosticSummary_surfaces_transport_diagnostics()
+    {
+        var transport = new ScriptedAcpTransport(
+            _ => [],
+            diagnosticSummary: "429 您的使用量已超出频率限制");
+
+        await using var client = new AcpSessionClient(transport);
+
+        client.GetDiagnosticSummary().ShouldBe("429 您的使用量已超出频率限制");
+    }
+
+    [Fact]
     public void SanitizeIncomingMessage_strips_comment_preamble()
     {
         var payload = "// ready\n{\"jsonrpc\":\"2.0\",\"id\":\"1\",\"result\":{}}";
