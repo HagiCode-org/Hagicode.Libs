@@ -290,6 +290,7 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
     {
         var sawAssistantText = false;
         var isHistoryReplayActive = false;
+        var receivedCompletionNotification = false;
         using var receiveUpdatesCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _ = CancelReceiveLoopWhenPromptCompletesAsync(promptTask, receiveUpdatesCancellation);
         await using var updateEnumerator = sessionClient.ReceiveNotificationsAsync(receiveUpdatesCancellation.Token)
@@ -377,12 +378,17 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
                         yield break;
                     }
 
+                    receivedCompletionNotification = true;
                     break;
                 }
 
                 yield return message;
             }
 
+            if (receivedCompletionNotification)
+            {
+                break;
+            }
         }
 
         JsonElement promptResult;
