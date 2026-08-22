@@ -645,11 +645,32 @@ public sealed class CodebuddyProviderTests
                 });
                 yield return CreateSessionUpdate(new
                 {
+                    sessionUpdate = "tool_call",
+                    toolCallId = "historical-tool",
+                    title = "historical tool",
+                    rawInput = new { command = "historical" }
+                });
+                yield return CreateSessionUpdate(new
+                {
+                    sessionUpdate = "tool_call_update",
+                    toolCallId = "historical-tool",
+                    status = "completed",
+                    content = new { type = "text", text = "historical result" }
+                });
+                yield return CreateSessionUpdate(new
+                {
                     sessionUpdate = "session_info_update",
                     _meta = new Dictionary<string, object?>
                     {
                         ["codebuddy.ai/historyReplay"] = "end"
                     }
+                });
+                yield return CreateSessionUpdate(new
+                {
+                    sessionUpdate = "tool_call",
+                    toolCallId = "historical-tool",
+                    title = "historical tool",
+                    rawInput = new { command = "historical" }
                 });
             }
 

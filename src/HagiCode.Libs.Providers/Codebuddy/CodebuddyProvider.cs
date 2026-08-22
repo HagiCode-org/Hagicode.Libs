@@ -290,6 +290,7 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
     {
         var sawAssistantText = false;
         var isHistoryReplayActive = false;
+        var replayedToolCallIds = new HashSet<string>(StringComparer.Ordinal);
         var receivedCompletionNotification = false;
         using var receiveUpdatesCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _ = CancelReceiveLoopWhenPromptCompletesAsync(promptTask, receiveUpdatesCancellation);
@@ -336,7 +337,21 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
 
             if (isResumedSession &&
                 isHistoryReplayActive &&
-                IsAgentMessageChunk(notification))
+                IsReplayContent(notification))
+            {
+                if (TryGetToolCallId(notification, out var replayedToolCallId))
+                {
+                    replayedToolCallIds.Add(replayedToolCallId);
+                }
+
+                continue;
+            }
+
+            if (isResumedSession &&
+                !isHistoryReplayActive &&
+                replayedToolCallIds.Count > 0 &&
+                TryGetToolCallId(notification, out var toolCallId) &&
+                replayedToolCallIds.Contains(toolCallId))
             {
                 continue;
             }
@@ -419,15 +434,53 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
         }
     }
 
-    private static bool IsAgentMessageChunk(AcpNotification notification)
+    private static bool IsReplayContent(AcpNotification notification)
     {
+        if (!string.Equals(notification.Method, "session/update", StringComparison.OrdinalIgnoreCase) ||
+            notification.Parameters.ValueKind != JsonValueKind.Object ||
+            !notification.Parameters.TryGetProperty("update", out var updateElement) ||
+            updateElement.ValueKind != JsonValueKind.Object ||
+            !updateElement.TryGetProperty("sessionUpdate", out var updateKind) ||
+            updateKind.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        var updateName = updateKind.GetString();
+        return string.Equals(updateName, "agent_message_chunk", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(updateName, "tool_call", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(updateName, "tool_call_update", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TryGetToolCallId(AcpNotification notification, out string toolCallId)
+    {
+        toolCallId = string.Empty;
+        if (!TryGetSessionUpdate(notification, out var updateElement))
+        {
+            return false;
+        }
+
+        foreach (var propertyName in new[] { "toolCallId", "tool_call_id", "id" })
+        {
+            if (updateElement.TryGetProperty(propertyName, out var idElement) &&
+                idElement.ValueKind == JsonValueKind.String &&
+                !string.IsNullOrWhiteSpace(idElement.GetString()))
+            {
+                toolCallId = idElement.GetString()!;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryGetSessionUpdate(AcpNotification notification, out JsonElement updateElement)
+    {
+        updateElement = default;
         return string.Equals(notification.Method, "session/update", StringComparison.OrdinalIgnoreCase) &&
                notification.Parameters.ValueKind == JsonValueKind.Object &&
-               notification.Parameters.TryGetProperty("update", out var updateElement) &&
-               updateElement.ValueKind == JsonValueKind.Object &&
-               updateElement.TryGetProperty("sessionUpdate", out var updateKind) &&
-               updateKind.ValueKind == JsonValueKind.String &&
-               string.Equals(updateKind.GetString(), "agent_message_chunk", StringComparison.OrdinalIgnoreCase);
+               notification.Parameters.TryGetProperty("update", out updateElement) &&
+               updateElement.ValueKind == JsonValueKind.Object;
     }
 
     private static async Task CancelReceiveLoopWhenPromptCompletesAsync(
