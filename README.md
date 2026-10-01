@@ -86,7 +86,7 @@ The endpoint profile is provider-driven, so consumers can replace `IOnlineApiEnd
 
 ## Dedicated provider console
 
-`src/HagiCode.Libs.ClaudeCode.Console`, `src/HagiCode.Libs.Copilot.Console`, `src/HagiCode.Libs.Codex.Console`, `src/HagiCode.Libs.DeepAgents.Console`, `src/HagiCode.Libs.Codebuddy.Console`, `src/HagiCode.Libs.Gemini.Console`, `src/HagiCode.Libs.Hermes.Console`, `src/HagiCode.Libs.Kimi.Console`, `src/HagiCode.Libs.Kiro.Console`, `src/HagiCode.Libs.OpenCode.Console`, `src/HagiCode.Libs.Pi.Console`, `src/HagiCode.Libs.QoderCli.Console`, and `src/HagiCode.Libs.Reasonix.Console` are dedicated provider consoles built on the shared `HagiCode.Libs.ConsoleTesting` harness.
+`src/HagiCode.Libs.ClaudeCode.Console`, `src/HagiCode.Libs.Copilot.Console`, `src/HagiCode.Libs.Codex.Console`, `src/HagiCode.Libs.DeepAgents.Console`, `src/HagiCode.Libs.Codebuddy.Console`, `src/HagiCode.Libs.Gemini.Console`, `src/HagiCode.Libs.Junie.Console`, `src/HagiCode.Libs.Hermes.Console`, `src/HagiCode.Libs.Kimi.Console`, `src/HagiCode.Libs.Kiro.Console`, `src/HagiCode.Libs.OpenCode.Console`, `src/HagiCode.Libs.Pi.Console`, `src/HagiCode.Libs.QoderCli.Console`, and `src/HagiCode.Libs.Reasonix.Console` are dedicated provider consoles built on the shared `HagiCode.Libs.ConsoleTesting` harness.
 
 `src/HagiCode.Libs.Providers/OpenCode` now owns the canonical OpenCode typed runtime/session surface and the reusable `OpenCodeFixtureServer` test fixture. `hagicode-core` consumes that boundary through adapter-level tests and no longer ships a second OpenCode console or runtime project.
 
@@ -140,6 +140,13 @@ dotnet run --project src/HagiCode.Libs.Gemini.Console -- --test-provider gemini-
 dotnet run --project src/HagiCode.Libs.Gemini.Console -- --test-provider-full --repo .
 dotnet run --project src/HagiCode.Libs.Gemini.Console -- --test-provider-full --model gemini-2.5-pro --arg --profile=smoke
 dotnet run --project src/HagiCode.Libs.Gemini.Console -- --test-all gemini
+
+dotnet run --project src/HagiCode.Libs.Junie.Console -- --help
+dotnet run --project src/HagiCode.Libs.Junie.Console
+dotnet run --project src/HagiCode.Libs.Junie.Console -- --test-provider junie-cli
+dotnet run --project src/HagiCode.Libs.Junie.Console -- --test-provider-full --repo .
+dotnet run --project src/HagiCode.Libs.Junie.Console -- --test-provider-full --model sonnet --arg --brave
+dotnet run --project src/HagiCode.Libs.Junie.Console -- --test-all junie
 
 dotnet run --project src/HagiCode.Libs.Kimi.Console -- --help
 dotnet run --project src/HagiCode.Libs.Kimi.Console
@@ -217,6 +224,10 @@ dotnet run --project src/HagiCode.Libs.Reasonix.Console -- --test-all reasonix
 - Gemini 默认套件当前包含 `Ping`、`Simple Prompt`、`Complex Prompt` 和 `Session Resume`。
 - Gemini accepts `--model <model>`, `--executable <path>`, repeated `--arg <value>` overrides, and optional `--auth-method <id>` / `--auth-token <token>` bootstrap hints.
 - Gemini repository summary remains opt-in via `--repo <path>`, and `gemini-cli` remains a dedicated-console alias for the canonical `gemini` provider name.
+- No arguments also run the default Junie suite.
+- Junie 默认套件当前包含 `Ping`、`Simple Prompt`、`Complex Prompt` 和 `Session Resume`。
+- Junie accepts `--model <model>`, `--executable <path>`, repeated `--arg <value>` overrides, and optional `--auth-method <id>` / `--auth-token <token>` bootstrap hints (`--auth-token` maps to `JUNIE_API_KEY`).
+- Junie repository summary remains opt-in via `--repo <path>`, and `junie-cli` remains a dedicated-console alias for the canonical `junie` provider name.
 - No arguments also run the default Kimi suite.
 - Kimi 默认套件当前包含 `Ping`、`Simple Prompt`、`Complex Prompt` 和 `Session Resume`。
 - Kimi accepts `--model <model>`, `--executable <path>`, repeated `--arg <value>` overrides, and optional `--auth-method <id>` / `--auth-token <token>` bootstrap hints.
@@ -617,6 +628,13 @@ HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.ConsoleTesting.Tests/H
 HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.Providers.Tests/HagiCode.Libs.Providers.Tests.csproj --filter "FullyQualifiedName~Gemini"
 HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.ConsoleTesting.Tests/HagiCode.Libs.ConsoleTesting.Tests.csproj --filter "FullyQualifiedName~Gemini"
 dotnet run --project src/HagiCode.Libs.Gemini.Console -- --test-provider-full --repo .
+```
+
+**Junie** (requires local installation and any required local auth bootstrap):
+```bash
+HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.Providers.Tests/HagiCode.Libs.Providers.Tests.csproj --filter "FullyQualifiedName~Junie"
+HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.ConsoleTesting.Tests/HagiCode.Libs.ConsoleTesting.Tests.csproj --filter "FullyQualifiedName~Junie"
+dotnet run --project src/HagiCode.Libs.Junie.Console -- --test-provider-full --repo .
 ```
 
 **Kimi** (requires local installation and any required local auth bootstrap):
