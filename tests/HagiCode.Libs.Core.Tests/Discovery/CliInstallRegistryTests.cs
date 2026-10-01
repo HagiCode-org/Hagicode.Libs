@@ -39,6 +39,17 @@ public sealed class CliInstallRegistryTests
     }
 
     [Fact]
+    public void Descriptors_include_junie_with_explicit_local_only_metadata()
+    {
+        var descriptor = CliInstallRegistry.Descriptors.Single(d => d.ProviderName == "Junie");
+
+        descriptor.NpmPackage.ShouldBeEmpty();
+        descriptor.PinnedVersion.ShouldBeEmpty();
+        descriptor.ExecutableCandidates.ShouldBe(["junie", "junie-cli"]);
+        descriptor.IsPubliclyInstallable.ShouldBeFalse();
+    }
+
+    [Fact]
     public void Descriptors_include_deepagents_with_explicit_local_only_metadata()
     {
         var descriptor = CliInstallRegistry.Descriptors.Single(d => d.ProviderName == "DeepAgents");

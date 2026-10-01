@@ -8,6 +8,7 @@ using HagiCode.Libs.Providers.Copilot;
 using HagiCode.Libs.Providers.Codex;
 using HagiCode.Libs.Providers.DeepAgents;
 using HagiCode.Libs.Providers.Gemini;
+using HagiCode.Libs.Providers.Junie;
 using HagiCode.Libs.Providers.Hermes;
 using HagiCode.Libs.Providers.Kimi;
 using HagiCode.Libs.Providers.Kiro;
@@ -39,6 +40,7 @@ public sealed class DependencyInjectionTests
         var codexProvider = serviceProvider.GetRequiredService<ICodexProvider>();
         var deepAgentsProvider = serviceProvider.GetRequiredService<ICliProvider<DeepAgentsOptions>>();
         var geminiProvider = serviceProvider.GetRequiredService<ICliProvider<GeminiOptions>>();
+        var junieProvider = serviceProvider.GetRequiredService<ICliProvider<JunieOptions>>();
         var hermesProvider = serviceProvider.GetRequiredService<ICliProvider<HermesOptions>>();
         var kimiProvider = serviceProvider.GetRequiredService<ICliProvider<KimiOptions>>();
         var kiroProvider = serviceProvider.GetRequiredService<ICliProvider<KiroOptions>>();
@@ -80,6 +82,8 @@ public sealed class DependencyInjectionTests
         registry.GetProvider("deepagents-acp").ShouldBeNull();
         registry.GetProvider("gemini").ShouldNotBeNull();
         registry.GetProvider("gemini-cli").ShouldNotBeNull();
+        registry.GetProvider("junie").ShouldNotBeNull();
+        registry.GetProvider("junie-cli").ShouldNotBeNull();
         registry.GetProvider("hermes").ShouldNotBeNull();
         registry.GetProvider("hermes-cli").ShouldNotBeNull();
         registry.GetProvider("kimi").ShouldNotBeNull();
@@ -100,6 +104,7 @@ public sealed class DependencyInjectionTests
         codexProvider.ShouldBeOfType<CodexProvider>();
         deepAgentsProvider.ShouldBeOfType<DeepAgentsProvider>();
         geminiProvider.ShouldBeOfType<GeminiProvider>();
+        junieProvider.ShouldBeOfType<JunieProvider>();
         hermesProvider.ShouldBeOfType<HermesProvider>();
         kimiProvider.ShouldBeOfType<KimiProvider>();
         kiroProvider.ShouldBeOfType<KiroProvider>();
@@ -110,6 +115,7 @@ public sealed class DependencyInjectionTests
         reasonixProvider.ShouldBeOfType<ReasonixProvider>();
         allProviders.ShouldContain(provider => provider is CodexProvider);
         allProviders.ShouldContain(provider => provider is GeminiProvider);
+        allProviders.ShouldContain(provider => provider is JunieProvider);
         allProviders.ShouldContain(provider => provider is HermesProvider);
         allProviders.ShouldContain(provider => provider is KimiProvider);
         allProviders.ShouldContain(provider => provider is KiroProvider);
@@ -128,6 +134,8 @@ public sealed class DependencyInjectionTests
         registry.GetProvider<DeepAgentsOptions>("deepagents-acp").ShouldBeNull();
         registry.GetProvider<GeminiOptions>("gemini").ShouldBeOfType<GeminiProvider>();
         registry.GetProvider<GeminiOptions>("gemini-cli").ShouldBeOfType<GeminiProvider>();
+        registry.GetProvider<JunieOptions>("junie").ShouldBeOfType<JunieProvider>();
+        registry.GetProvider<JunieOptions>("junie-cli").ShouldBeOfType<JunieProvider>();
         registry.GetProvider<HermesOptions>("hermes").ShouldBeOfType<HermesProvider>();
         registry.GetProvider<HermesOptions>("hermes-cli").ShouldBeOfType<HermesProvider>();
         registry.GetProvider<KimiOptions>("kimi").ShouldBeOfType<KimiProvider>();
@@ -142,6 +150,6 @@ public sealed class DependencyInjectionTests
         registry.GetProvider<OmpOptions>("omp-cli").ShouldBeOfType<OmpProvider>();
         registry.GetProvider<QoderCliOptions>("qodercli").ShouldBeOfType<QoderCliProvider>();
         registry.GetProvider<ReasonixOptions>("reasonix").ShouldBeOfType<ReasonixProvider>();
-        registry.GetAllProviders().Select(static provider => provider.Name).ShouldBe(["claude-code", "codebuddy", "copilot", "codex", "deepagents", "gemini", "hermes", "kimi", "kiro-cli", "opencode", "pi", "omp", "qodercli", "reasonix"], ignoreOrder: true);
+        registry.GetAllProviders().Select(static provider => provider.Name).ShouldBe(["claude-code", "codebuddy", "copilot", "codex", "deepagents", "gemini", "junie", "hermes", "kimi", "kiro-cli", "opencode", "pi", "omp", "qodercli", "reasonix"], ignoreOrder: true);
     }
 }

@@ -9,6 +9,7 @@ using HagiCode.Libs.Providers.Copilot;
 using HagiCode.Libs.Providers.Codex;
 using HagiCode.Libs.Providers.DeepAgents;
 using HagiCode.Libs.Providers.Gemini;
+using HagiCode.Libs.Providers.Junie;
 using HagiCode.Libs.Providers.Hermes;
 using HagiCode.Libs.Providers.Kimi;
 using HagiCode.Libs.Providers.Kiro;
@@ -64,6 +65,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICodexProvider>(serviceProvider => serviceProvider.GetRequiredService<CodexProvider>());
         services.AddSingleton<DeepAgentsProvider>();
         services.AddSingleton<GeminiProvider>();
+        services.AddSingleton<JunieProvider>();
         services.AddSingleton<HermesProvider>();
         services.AddSingleton<KimiProvider>();
         services.AddSingleton<KiroProvider>();
@@ -80,6 +82,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<ICodexProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<DeepAgentsProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<GeminiProvider>());
+        services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<JunieProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<HermesProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<KimiProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<KiroProvider>());
@@ -93,6 +96,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICliProvider<CopilotOptions>>(serviceProvider => serviceProvider.GetRequiredService<CopilotProvider>());
         services.AddSingleton<ICliProvider<DeepAgentsOptions>>(serviceProvider => serviceProvider.GetRequiredService<DeepAgentsProvider>());
         services.AddSingleton<ICliProvider<GeminiOptions>>(serviceProvider => serviceProvider.GetRequiredService<GeminiProvider>());
+        services.AddSingleton<ICliProvider<JunieOptions>>(serviceProvider => serviceProvider.GetRequiredService<JunieProvider>());
         services.AddSingleton<ICliProvider<HermesOptions>>(serviceProvider => serviceProvider.GetRequiredService<HermesProvider>());
         services.AddSingleton<ICliProvider<KimiOptions>>(serviceProvider => serviceProvider.GetRequiredService<KimiProvider>());
         services.AddSingleton<ICliProvider<KiroOptions>>(serviceProvider => serviceProvider.GetRequiredService<KiroProvider>());
@@ -109,6 +113,12 @@ public static class ServiceCollectionExtensions
                 if (provider is GeminiProvider)
                 {
                     registry.Register(provider.Name, provider, ["gemini-cli"]);
+                    continue;
+                }
+
+                if (provider is JunieProvider)
+                {
+                    registry.Register(provider.Name, provider, ["junie-cli"]);
                     continue;
                 }
 

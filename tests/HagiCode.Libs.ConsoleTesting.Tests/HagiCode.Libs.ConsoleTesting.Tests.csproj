@@ -30,6 +30,7 @@
     <ProjectReference Include="..\..\src\HagiCode.Libs.Codex.Console\HagiCode.Libs.Codex.Console.csproj" />
     <ProjectReference Include="..\..\src\HagiCode.Libs.DeepAgents.Console\HagiCode.Libs.DeepAgents.Console.csproj" />
     <ProjectReference Include="..\..\src\HagiCode.Libs.Gemini.Console\HagiCode.Libs.Gemini.Console.csproj" />
+    <ProjectReference Include="..\..\src\HagiCode.Libs.Junie.Console\HagiCode.Libs.Junie.Console.csproj" />
     <ProjectReference Include="..\..\src\HagiCode.Libs.Hermes.Console\HagiCode.Libs.Hermes.Console.csproj" />
     <ProjectReference Include="..\..\src\HagiCode.Libs.Kiro.Console\HagiCode.Libs.Kiro.Console.csproj" />
     <ProjectReference Include="..\..\src\HagiCode.Libs.Kimi.Console\HagiCode.Libs.Kimi.Console.csproj" />

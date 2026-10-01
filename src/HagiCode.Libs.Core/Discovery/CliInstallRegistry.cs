@@ -76,6 +76,13 @@ public static class CliInstallRegistry
             IsPubliclyInstallable: false),
 
         new CliInstallDescriptor(
+            ProviderName: "Junie",
+            NpmPackage: string.Empty,
+            PinnedVersion: string.Empty,
+            ExecutableCandidates: ["junie", "junie-cli"],
+            IsPubliclyInstallable: false),
+
+        new CliInstallDescriptor(
             ProviderName: "Hermes",
             NpmPackage: string.Empty,
             PinnedVersion: string.Empty,
