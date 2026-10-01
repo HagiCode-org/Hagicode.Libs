@@ -91,7 +91,7 @@ public sealed record JunieOptions
     public string? JunieHome { get; init; }
 
     /// <summary>
-    /// Ignored. Junie ACP always launches with <c>--brave</c> so tool requests are permitted.
+    /// Gets or sets whether Junie launches with <c>--brave</c>. Unset values default to enabled.
     /// </summary>
     public bool? Brave { get; init; }
 }

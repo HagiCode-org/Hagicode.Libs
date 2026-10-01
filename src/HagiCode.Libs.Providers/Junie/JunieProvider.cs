@@ -94,7 +94,7 @@ public class JunieProvider : ICliProvider<JunieOptions>
             var startContext = new ProcessStartContext
             {
                 ExecutablePath = executablePath,
-                Arguments = [ManagedBootstrapArgument],
+                Arguments = BuildCommandArguments(new JunieOptions()),
                 WorkingDirectory = Directory.GetCurrentDirectory(),
                 EnvironmentVariables = SanitizeProcessEnvironment(runtimeEnvironment),
                 Ownership = new CliProcessOwnershipRegistration { ProviderName = Name }
@@ -160,17 +160,39 @@ public class JunieProvider : ICliProvider<JunieOptions>
         AppendFlag(arguments, "--effort", options.Effort);
         AppendFlag(arguments, "--provider", options.Provider);
         AppendFlag(arguments, "--config-location", options.ConfigLocation);
-        arguments.Add("--brave");
-
-        foreach (var argument in options.ExtraArguments)
+        if (options.Brave ?? true)
         {
-            var normalizedArgument = ArgumentValueNormalizer.NormalizeOptionalValue(argument);
+            arguments.Add("--brave");
+        }
+
+        for (var index = 0; index < options.ExtraArguments.Count; index++)
+        {
+            var normalizedArgument = ArgumentValueNormalizer.NormalizeOptionalValue(options.ExtraArguments[index]);
             if (normalizedArgument is null ||
                 string.Equals(normalizedArgument, "acp", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(normalizedArgument, "--acp", StringComparison.OrdinalIgnoreCase) ||
                 normalizedArgument.StartsWith("--acp=", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(normalizedArgument, "--brave", StringComparison.OrdinalIgnoreCase))
+                IsFlagOrAssignment(normalizedArgument, "--brave"))
             {
+                if (string.Equals(normalizedArgument, "--brave", StringComparison.OrdinalIgnoreCase) &&
+                    index + 1 < options.ExtraArguments.Count &&
+                    bool.TryParse(options.ExtraArguments[index + 1], out _))
+                {
+                    index++;
+                }
+
+                continue;
+            }
+
+            if ((options.Model is not null && IsFlagOrAssignment(normalizedArgument, "--model")) ||
+                (options.Provider is not null && IsFlagOrAssignment(normalizedArgument, "--provider")))
+            {
+                if (string.Equals(normalizedArgument, "--model", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(normalizedArgument, "--provider", StringComparison.OrdinalIgnoreCase))
+                {
+                    index++;
+                }
+
                 continue;
             }
 
@@ -208,14 +230,15 @@ public class JunieProvider : ICliProvider<JunieOptions>
             environment["JUNIE_EFFORT"] = effort;
         }
 
+        environment["_JPACKAGE_LAUNCHER"] = null;
         return environment;
     }
 
     private static Dictionary<string, string?> SanitizeProcessEnvironment(IReadOnlyDictionary<string, string?> runtimeEnvironment)
     {
         var environment = new Dictionary<string, string?>(runtimeEnvironment, StringComparer.Ordinal);
-        // jpackage treats _JPACKAGE_LAUNCHER=0 as "skip junie.cfg", which drops the main class and prints Java usage.
-        environment.Remove("_JPACKAGE_LAUNCHER");
+        // Null removes even an inherited value when CliProcessManager builds the subprocess environment.
+        environment["_JPACKAGE_LAUNCHER"] = null;
         return environment;
     }
 
@@ -229,6 +252,12 @@ public class JunieProvider : ICliProvider<JunieOptions>
 
         arguments.Add(flag);
         arguments.Add(normalized);
+    }
+
+    private static bool IsFlagOrAssignment(string argument, string flag)
+    {
+        return string.Equals(argument, flag, StringComparison.OrdinalIgnoreCase)
+               || argument.StartsWith($"{flag}=", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

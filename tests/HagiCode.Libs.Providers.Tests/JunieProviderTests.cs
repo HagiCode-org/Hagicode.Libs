@@ -46,7 +46,7 @@ public sealed class JunieProviderTests
     }
 
     [Fact]
-    public void BuildCommandArguments_always_enables_brave()
+    public void BuildCommandArguments_omits_brave_when_explicitly_disabled()
     {
         var provider = CreateProvider();
 
@@ -56,7 +56,23 @@ public sealed class JunieProviderTests
             ExtraArguments = ["--brave"]
         });
 
-        arguments.ShouldBe(["--acp=true", "--brave"]);
+        arguments.ShouldBe(["--acp=true"]);
+    }
+
+    [Fact]
+    public void BuildCommandArguments_prevents_raw_arguments_overriding_managed_selection()
+    {
+        var provider = CreateProvider();
+
+        var arguments = provider.BuildCommandArguments(new JunieOptions
+        {
+            Provider = "managed-provider",
+            Model = "managed-model",
+            Brave = false,
+            ExtraArguments = ["--provider", "raw-provider", "--model=raw-model", "--brave", "true", "--brave", "false", "--brave=false", "--profile", "ci"]
+        });
+
+        arguments.ShouldBe(["--acp=true", "--model", "managed-model", "--provider", "managed-provider", "--profile", "ci"]);
     }
 
     [Fact]
@@ -72,12 +88,14 @@ public sealed class JunieProviderTests
                 Effort = " balanced ",
                 EnvironmentVariables = new Dictionary<string, string?>
                 {
-                    ["KEEP"] = "1"
+                    ["KEEP"] = "1",
+                    ["_JPACKAGE_LAUNCHER"] = "0"
                 }
             },
             new Dictionary<string, string?>
             {
-                ["PATH"] = "/tmp/bin"
+                ["PATH"] = "/tmp/bin",
+                ["_JPACKAGE_LAUNCHER"] = "0"
             });
 
         environment["JUNIE_API_KEY"].ShouldBe("secret");
@@ -85,7 +103,12 @@ public sealed class JunieProviderTests
         environment["JUNIE_EFFORT"].ShouldBe("balanced");
         environment["KEEP"].ShouldBe("1");
         environment["PATH"].ShouldBe("/tmp/bin");
-        environment.ContainsKey("_JPACKAGE_LAUNCHER").ShouldBeFalse();
+        environment["_JPACKAGE_LAUNCHER"].ShouldBeNull();
+        new CliProcessManager().CreateStartInfo(new ProcessStartContext
+        {
+            ExecutablePath = "/custom/junie",
+            EnvironmentVariables = environment
+        }).Environment.ContainsKey("_JPACKAGE_LAUNCHER").ShouldBeFalse();
     }
 
     [Fact]
@@ -293,6 +316,8 @@ public sealed class JunieProviderTests
         result.Success.ShouldBeTrue();
         result.Version.ShouldNotBeNullOrWhiteSpace();
         result.Version.ShouldContain("junie");
+        provider.LastStartContext!.Arguments.ShouldBe(["--acp=true", "--brave"]);
+        provider.LastStartContext.EnvironmentVariables!["_JPACKAGE_LAUNCHER"].ShouldBeNull();
         provider.SessionClient!.InitializeCalls.ShouldBe(1);
     }
 
