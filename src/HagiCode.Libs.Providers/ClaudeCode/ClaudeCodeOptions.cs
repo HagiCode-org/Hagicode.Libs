@@ -55,6 +55,13 @@ public sealed record ClaudeCodeOptions
     public int? MaxTurns { get; init; }
 
     /// <summary>
+    /// Gets or sets the Claude Code effort level passed as <c>--effort</c>.
+    /// Supported levels are <c>low</c>, <c>medium</c>, <c>high</c>, <c>xhigh</c>, and <c>max</c>
+    /// (case-insensitive, surrounding whitespace is ignored). When omitted or empty, the CLI default applies.
+    /// </summary>
+    public string? Effort { get; init; }
+
+    /// <summary>
     /// Gets or sets the system prompt.
     /// </summary>
     public string? SystemPrompt { get; init; }

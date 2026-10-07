@@ -147,6 +147,128 @@ public sealed class ClaudeCodeProviderTests
         resumedArguments.ShouldNotContain("--append-system-prompt");
     }
 
+    [Theory]
+    [InlineData("low")]
+    [InlineData("medium")]
+    [InlineData("high")]
+    [InlineData("xhigh")]
+    [InlineData("max")]
+    public void BuildCommandArguments_forwards_each_supported_effort_level(string level)
+    {
+        var provider = CreateProvider();
+
+        var arguments = provider.BuildCommandArguments(new ClaudeCodeOptions
+        {
+            Effort = level
+        });
+
+        arguments.ShouldContain("--effort", level);
+    }
+
+    [Fact]
+    public void BuildCommandArguments_normalizes_effort_casing_and_whitespace()
+    {
+        var provider = CreateProvider();
+
+        var arguments = provider.BuildCommandArguments(new ClaudeCodeOptions
+        {
+            Effort = "  XHigh "
+        });
+
+        arguments.ShouldContain("--effort", "xhigh");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void BuildCommandArguments_omits_effort_when_value_is_empty(string? effort)
+    {
+        var provider = CreateProvider();
+
+        var arguments = provider.BuildCommandArguments(new ClaudeCodeOptions
+        {
+            Effort = effort
+        });
+
+        arguments.ShouldNotContain("--effort");
+    }
+
+    [Fact]
+    public void BuildCommandArguments_throws_for_unsupported_effort_level()
+    {
+        var provider = CreateProvider();
+
+        var exception = Should.Throw<ArgumentException>(() => provider.BuildCommandArguments(new ClaudeCodeOptions
+        {
+            Effort = "ultra"
+        }));
+
+        exception.Message.ShouldContain("ultra");
+        exception.Message.ShouldContain("low");
+        exception.Message.ShouldContain("max");
+    }
+
+    [Fact]
+    public void AllowedEffortLevels_contains_exactly_the_supported_levels()
+    {
+        var expected = new[]
+        {
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+        };
+
+        ClaudeCodeProvider.AllowedEffortLevels
+            .Select(static level => level.ToLowerInvariant())
+            .OrderBy(static level => level, StringComparer.Ordinal)
+            .ShouldBe(expected.OrderBy(static level => level, StringComparer.Ordinal));
+
+        // Matching is case-insensitive.
+        ClaudeCodeProvider.AllowedEffortLevels.Contains("XHIGH").ShouldBeTrue();
+        ClaudeCodeProvider.AllowedEffortLevels.Contains("Max").ShouldBeTrue();
+        ClaudeCodeProvider.AllowedEffortLevels.Contains("ULTRA").ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_forwards_effort_to_the_launched_process_arguments()
+    {
+        var provider = CreateProvider();
+
+        await foreach (var _ in provider.ExecuteAsync(
+                           new ClaudeCodeOptions
+                           {
+                               Effort = "XHigh",
+                               SessionId = "effort-session"
+                           },
+                           "hello"))
+        {
+        }
+
+        provider.LastStartContext.ShouldNotBeNull();
+        provider.LastStartContext.Arguments.ShouldContain("--effort", "xhigh");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_omits_effort_argument_when_not_configured()
+    {
+        var provider = CreateProvider();
+
+        await foreach (var _ in provider.ExecuteAsync(
+                           new ClaudeCodeOptions
+                           {
+                               SessionId = "effort-session"
+                           },
+                           "hello"))
+        {
+        }
+
+        provider.LastStartContext.ShouldNotBeNull();
+        provider.LastStartContext.Arguments.ShouldNotContain("--effort");
+    }
+
     [Fact]
     public async Task ExecuteAsync_uses_custom_executable_and_streams_messages()
     {
@@ -264,6 +386,64 @@ public sealed class ClaudeCodeProviderTests
         messages[0].Content.TryGetProperty("binding_key", out _).ShouldBeFalse();
         messages[0].Content.TryGetProperty("pool_fingerprint", out _).ShouldBeFalse();
         messages[0].Content.TryGetProperty("resume_mode", out _).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_keeps_event_timestamp_unchanged_and_mirrors_it_into_payload()
+    {
+        var eventTime = new DateTimeOffset(2026, 10, 6, 14, 32, 5, TimeSpan.FromHours(8));
+        var provider = CreateProvider(messageBatches:
+        [
+            [
+                new CliMessage("assistant", JsonSerializer.SerializeToElement(new { type = "assistant" }))
+                {
+                    EventTimestamp = eventTime
+                }
+            ]
+        ]);
+        var messages = new List<CliMessage>();
+
+        await foreach (var message in provider.ExecuteAsync(
+                           new ClaudeCodeOptions { SessionId = "session-1", WorkingDirectory = "/tmp/project" },
+                           "hello"))
+        {
+            messages.Add(message);
+        }
+
+        messages[0].EventTimestamp.ShouldBe(eventTime.ToUniversalTime());
+        messages[0].EventTimestamp.Offset.ShouldBe(TimeSpan.Zero);
+        DateTimeOffset.Parse(messages[0].Content.GetProperty("event_timestamp").GetString()!)
+            .ShouldBe(messages[0].EventTimestamp);
+    }
+
+    [Fact]
+    public void CliMessage_stamps_read_time_once_in_utc_when_not_supplied()
+    {
+        var before = DateTimeOffset.UtcNow;
+        var message = new CliMessage("assistant", JsonSerializer.SerializeToElement(new { type = "assistant" }));
+        var after = DateTimeOffset.UtcNow;
+
+        message.EventTimestamp.ShouldBeGreaterThanOrEqualTo(before);
+        message.EventTimestamp.ShouldBeLessThanOrEqualTo(after);
+        message.EventTimestamp.Offset.ShouldBe(TimeSpan.Zero);
+        (message with { Content = message.Content }).EventTimestamp.ShouldBe(message.EventTimestamp);
+    }
+
+    [Theory]
+    [InlineData("""{"type":"a","event_timestamp":"2026-10-06T06:32:05Z"}""", true)]
+    [InlineData("""{"type":"a","timestamp":"2026-10-06T14:32:05+08:00"}""", true)]
+    [InlineData("""{"type":"a","timestamp":"not a time"}""", false)]
+    [InlineData("""{"type":"a","timestamp":"0001-01-01T00:00:00Z"}""", false)]
+    [InlineData("""{"type":"a"}""", false)]
+    public void TryReadPayloadTimestamp_accepts_only_valid_non_default_times(string json, bool expected)
+    {
+        using var document = JsonDocument.Parse(json);
+
+        CliMessage.TryReadPayloadTimestamp(document.RootElement, out var timestamp).ShouldBe(expected);
+        if (expected)
+        {
+            timestamp.ShouldBe(new DateTimeOffset(2026, 10, 6, 6, 32, 5, TimeSpan.Zero));
+        }
     }
 
     [Fact]
@@ -406,6 +586,34 @@ public sealed class ClaudeCodeProviderTests
             TimeSpan.FromSeconds(45));
 
         RealCliInvocationTestHarness.AssertActionableFailure("claude-code", failureMessage);
+    }
+
+    [Fact]
+    [Trait("Category", "RealCli")]
+    [Trait("Category", "RealCliInvocationContract")]
+    public async Task ExecuteAsync_real_cli_accepts_effort_flag_without_syntax_error()
+    {
+        if (!IsRealCliTestsEnabled())
+        {
+            return;
+        }
+
+        using var sandbox = new RealCliInvocationSandbox();
+        await using var provider = new ClaudeCodeProvider(new CliExecutableResolver(), new CliProcessManager(), sandbox);
+
+        var failureMessage = await RealCliInvocationTestHarness.CaptureFailureMessageAsync(
+            provider,
+            new ClaudeCodeOptions
+            {
+                WorkingDirectory = sandbox.WorkingDirectory,
+                AddDirectories = [sandbox.WorkingDirectory],
+                PermissionMode = "plan",
+                Effort = "high"
+            },
+            "Reply with exactly the word 'pong'.",
+            TimeSpan.FromSeconds(45));
+
+        RealCliInvocationTestHarness.AssertActionableFailure("claude-code/effort-flag", failureMessage);
     }
 
     [Fact]

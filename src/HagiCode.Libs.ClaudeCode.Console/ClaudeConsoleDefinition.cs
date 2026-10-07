@@ -14,7 +14,8 @@ public static class ClaudeConsoleDefinition
         [
             "--repo <path>         Include the repository analysis scenario in the suite",
             "--api-key <key>       Override the Anthropic API key for scenario runs",
-            "--model <model>       Override the Claude model for scenario runs"
+            "--model <model>       Override the Claude model for scenario runs",
+            "--effort <level>      Override the Claude effort level (low, medium, high, xhigh, max)"
         ],
         exampleLines:
         [

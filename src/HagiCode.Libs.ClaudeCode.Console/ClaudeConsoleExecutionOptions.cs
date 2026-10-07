@@ -5,7 +5,8 @@ namespace HagiCode.Libs.ClaudeCode.Console;
 public sealed record ClaudeConsoleExecutionOptions(
     string? ApiKey,
     string? Model,
-    string? RepositoryPath)
+    string? RepositoryPath,
+    string? Effort = null)
 {
     public static ClaudeConsoleExecutionOptions Parse(IReadOnlyList<string> args)
     {
@@ -14,6 +15,7 @@ public sealed record ClaudeConsoleExecutionOptions(
         string? apiKey = null;
         string? model = null;
         string? repositoryPath = null;
+        string? effort = null;
 
         for (var index = 0; index < args.Count; index++)
         {
@@ -26,6 +28,9 @@ public sealed record ClaudeConsoleExecutionOptions(
                 case "--model":
                     model = ReadValue(args, ref index, argument);
                     break;
+                case "--effort":
+                    effort = ReadValue(args, ref index, argument);
+                    break;
                 case "--repo":
                     repositoryPath = ReadValue(args, ref index, argument);
                     break;
@@ -34,7 +39,7 @@ public sealed record ClaudeConsoleExecutionOptions(
             }
         }
 
-        return new ClaudeConsoleExecutionOptions(apiKey, model, repositoryPath);
+        return new ClaudeConsoleExecutionOptions(apiKey, model, repositoryPath, effort);
     }
 
     public ClaudeCodeOptions CreateBaseOptions()
@@ -43,6 +48,7 @@ public sealed record ClaudeConsoleExecutionOptions(
         {
             ApiKey = ApiKey,
             Model = Model,
+            Effort = Effort,
         };
     }
 

@@ -18,6 +18,14 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
 {
     private static readonly string[] DefaultExecutableCandidates = ["claude", "claude-code"];
     private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
+
+    /// <summary>
+    /// The set of effort levels accepted by the Claude Code <c>--effort</c> flag.
+    /// Values are compared case-insensitively; the lowercase canonical form is emitted to the CLI.
+    /// </summary>
+    internal static readonly IReadOnlySet<string> AllowedEffortLevels = new HashSet<string>(
+        ["low", "medium", "high", "xhigh", "max"],
+        StringComparer.OrdinalIgnoreCase);
     private readonly CliExecutableResolver _executableResolver;
     private readonly CliProcessManager _processManager;
     private readonly IRuntimeEnvironmentResolver? _runtimeEnvironmentResolver;
@@ -139,6 +147,12 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
         if (model is not null)
         {
             arguments.AddRange(["--model", model]);
+        }
+
+        var effort = NormalizeEffort(options.Effort);
+        if (effort is not null)
+        {
+            arguments.AddRange(["--effort", effort]);
         }
 
         var systemPrompt = ArgumentValueNormalizer.NormalizeOptionalValue(options.SystemPrompt);
@@ -357,8 +371,7 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
     {
         return new ClaudeCodeDebugContext(
             ResolveRequestedSessionId(options),
-            BuildRuntimeFingerprint(startContext),
-            DateTime.UtcNow);
+            BuildRuntimeFingerprint(startContext));
     }
 
     private static CliMessage EnrichMessageWithDebugMetadata(CliMessage message, ClaudeCodeDebugContext debugContext)
@@ -376,7 +389,7 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
 
         UpsertString(rootNode, "requested_session_id", debugContext.RequestedSessionId);
         UpsertString(rootNode, "runtime_fingerprint", debugContext.RuntimeFingerprint);
-        UpsertString(rootNode, "event_timestamp", debugContext.EventTimestampUtc.ToString("O"));
+        UpsertString(rootNode, "event_timestamp", message.EventTimestamp.ToString("O"));
 
         return message with
         {
@@ -423,6 +436,25 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
     {
         return ArgumentValueNormalizer.NormalizeOptionalValue(options.ExecutionWorkingDirectory)
                ?? ArgumentValueNormalizer.NormalizeOptionalValue(options.WorkingDirectory);
+    }
+
+    private static string? NormalizeEffort(string? effort)
+    {
+        var normalizedEffort = ArgumentValueNormalizer.NormalizeOptionalValue(effort);
+        if (normalizedEffort is null)
+        {
+            return null;
+        }
+
+        if (!AllowedEffortLevels.Contains(normalizedEffort))
+        {
+            throw new ArgumentException(
+                $"Invalid Claude Code effort level '{normalizedEffort}'. " +
+                $"Valid values: {string.Join(", ", AllowedEffortLevels.OrderBy(level => level, StringComparer.Ordinal))}.",
+                nameof(effort));
+        }
+
+        return normalizedEffort.ToLowerInvariant();
     }
 
     private static string? BuildEffectiveAppendSystemPrompt(ClaudeCodeOptions options)
@@ -476,6 +508,5 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
 
     private sealed record ClaudeCodeDebugContext(
         string? RequestedSessionId,
-        string RuntimeFingerprint,
-        DateTime EventTimestampUtc);
+        string RuntimeFingerprint);
 }

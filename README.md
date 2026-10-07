@@ -196,6 +196,7 @@ dotnet run --project src/HagiCode.Libs.Reasonix.Console -- --test-all reasonix
 - `--test-provider-full` and `--test-all` run the full provider-scoped suite.
 - `--repo <path>` adds the repository analysis scenario to the suite.
 - `--api-key <key>` and `--model <model>` override Claude execution options for scenario runs.
+- `--effort <level>` overrides the Claude `Effort` option and is forwarded to the CLI as `--effort`. Supported levels are `low`, `medium`, `high`, `xhigh`, and `max` (case-insensitive).
 - No arguments also run the default Copilot suite.
 - Copilot 默认套件当前包含 `Ping`、`Simple Prompt` 和 `Complex Prompt`。
 - Copilot accepts `--model <model>`, `--executable <path>`, `--auth-source <mode>`, `--github-token <token>`, `--config-dir <path>`, and compatible filtered startup overrides such as `--log-level <level>`.
