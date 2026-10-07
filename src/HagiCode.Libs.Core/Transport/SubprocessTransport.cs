@@ -98,7 +98,10 @@ public sealed class SubprocessTransport : ICliTransport
                 throw new InvalidDataException("The CLI message is missing a string 'type' property.");
             }
 
-            yield return new CliMessage(typeElement.GetString()!, root);
+            var message = new CliMessage(typeElement.GetString()!, root);
+            yield return CliMessage.TryReadPayloadTimestamp(root, out var payloadTimestamp)
+                ? message with { EventTimestamp = payloadTimestamp }
+                : message;
         }
     }
 

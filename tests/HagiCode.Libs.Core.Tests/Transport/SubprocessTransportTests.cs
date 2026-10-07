@@ -63,6 +63,34 @@ public sealed class SubprocessTransportTests
     }
 
     [Fact]
+    public async Task SubprocessTransport_uses_payload_time_or_read_time_as_event_timestamp()
+    {
+        var manager = new CliProcessManager();
+        await using var transport = new SubprocessTransport(manager, new ProcessStartContext
+        {
+            ExecutablePath = "/bin/sh",
+            Arguments =
+            [
+                "-lc",
+                "printf '{\"type\":\"assistant\",\"timestamp\":\"2020-01-02T03:04:05Z\"}\\n'; printf '{\"type\":\"result\",\"done\":true}\\n'"
+            ]
+        });
+
+        var before = DateTimeOffset.UtcNow;
+        await transport.ConnectAsync();
+
+        var messages = new List<CliMessage>();
+        await foreach (var message in transport.ReceiveAsync())
+        {
+            messages.Add(message);
+        }
+
+        messages[0].EventTimestamp.ShouldBe(new DateTimeOffset(2020, 1, 2, 3, 4, 5, TimeSpan.Zero));
+        messages[1].EventTimestamp.ShouldBeGreaterThanOrEqualTo(before);
+        messages[1].EventTimestamp.Offset.ShouldBe(TimeSpan.Zero);
+    }
+
+    [Fact]
     public async Task SubprocessTransport_rejects_send_before_connect()
     {
         var manager = new CliProcessManager();
