@@ -502,6 +502,136 @@ public sealed class ClaudeCodeProviderTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_stops_at_single_turn_result_and_does_not_read_further()
+    {
+        var provider = CreateProvider(messageBatches:
+        [
+            [
+                StreamMessage("system", new { subtype = "init" }),
+                StreamMessage("assistant", new { }),
+                StreamMessage("result", new { is_error = false }),
+                StreamMessage("assistant", new { marker = "after-final-result" })
+            ]
+        ]);
+
+        var messages = await CollectAsync(provider);
+
+        DescribeTypes(messages).ShouldBe(["system:init", "assistant", "result"]);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_keeps_streaming_past_launch_turn_result_while_subagent_is_running()
+    {
+        // Real stream order for `Agent` with is_backgrounded=true: the turn that launched the subagent ends with its own
+        // "result" while the subagent is still working; the CLI reports back through task_notification and a follow-up turn.
+        var provider = CreateProvider(messageBatches:
+        [
+            [
+                StreamMessage("system", new { subtype = "init" }),
+                StreamMessage("system", new { subtype = "background_tasks_changed", tasks = SubagentTasks("agent-1") }),
+                StreamMessage("system", new { subtype = "task_started", task_id = "agent-1", task_type = "local_agent" }),
+                StreamMessage("assistant", new { parent_tool_use_id = (string?)null }),
+                StreamMessage("result", new { is_error = false, result = "agent is running in the background" }),
+                StreamMessage("assistant", new { parent_tool_use_id = "toolu_1" }),
+                StreamMessage("system", new { subtype = "task_notification", task_id = "agent-1", status = "completed" }),
+                StreamMessage("system", new { subtype = "background_tasks_changed", tasks = SubagentTasks() }),
+                StreamMessage("system", new { subtype = "init" }),
+                StreamMessage("assistant", new { parent_tool_use_id = (string?)null }),
+                StreamMessage("result", new { is_error = false, result = "DONE" }),
+                StreamMessage("assistant", new { marker = "after-final-result" })
+            ]
+        ]);
+
+        var messages = await CollectAsync(provider);
+
+        DescribeTypes(messages).ShouldBe(
+        [
+            "system:init",
+            "system:background_tasks_changed",
+            "system:task_started",
+            "assistant",
+            "result",
+            "assistant",
+            "system:task_notification",
+            "system:background_tasks_changed",
+            "system:init",
+            "assistant",
+            "result"
+        ]);
+        messages[^1].Content.GetProperty("result").GetString().ShouldBe("DONE");
+        provider.DisposedTransportCount.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_waits_for_follow_up_turn_result_when_subagent_finished_before_launch_turn_result()
+    {
+        // A fast subagent completes before the launch turn's "result" is flushed: the follow-up turn has already started
+        // (second init) when the first "result" arrives, so the first "result" is not the final one.
+        var provider = CreateProvider(messageBatches:
+        [
+            [
+                StreamMessage("system", new { subtype = "init" }),
+                StreamMessage("system", new { subtype = "background_tasks_changed", tasks = SubagentTasks("agent-1") }),
+                StreamMessage("system", new { subtype = "task_notification", task_id = "agent-1", status = "completed" }),
+                StreamMessage("system", new { subtype = "background_tasks_changed", tasks = SubagentTasks() }),
+                StreamMessage("system", new { subtype = "init" }),
+                StreamMessage("assistant", new { }),
+                StreamMessage("result", new { is_error = false, result = "agent is running in the background" }),
+                StreamMessage("result", new { is_error = false, result = "DONE" }),
+                StreamMessage("assistant", new { marker = "after-final-result" })
+            ]
+        ]);
+
+        var messages = await CollectAsync(provider);
+
+        DescribeTypes(messages).Count(static type => type == "result").ShouldBe(2);
+        messages[^1].Content.GetProperty("result").GetString().ShouldBe("DONE");
+        messages.Any(static message => message.Content.TryGetProperty("marker", out _)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_does_not_wait_for_background_shell_tasks()
+    {
+        var provider = CreateProvider(messageBatches:
+        [
+            [
+                StreamMessage("system", new { subtype = "init" }),
+                StreamMessage(
+                    "system",
+                    new
+                    {
+                        subtype = "background_tasks_changed",
+                        tasks = new[] { new { task_id = "bash-1", task_type = "local_bash" } }
+                    }),
+                StreamMessage("result", new { is_error = false, result = "dev server started" }),
+                StreamMessage("assistant", new { marker = "after-final-result" })
+            ]
+        ]);
+
+        var messages = await CollectAsync(provider);
+
+        DescribeTypes(messages).ShouldBe(["system:init", "system:background_tasks_changed", "result"]);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_stops_at_error_result_even_when_subagent_is_still_running()
+    {
+        var provider = CreateProvider(messageBatches:
+        [
+            [
+                StreamMessage("system", new { subtype = "init" }),
+                StreamMessage("system", new { subtype = "background_tasks_changed", tasks = SubagentTasks("agent-1") }),
+                StreamMessage("result", new { is_error = true, subtype = "error_during_execution" }),
+                StreamMessage("assistant", new { marker = "after-final-result" })
+            ]
+        ]);
+
+        var messages = await CollectAsync(provider);
+
+        DescribeTypes(messages).ShouldBe(["system:init", "system:background_tasks_changed", "result"]);
+    }
+
+    [Fact]
     public async Task PingAsync_reports_version_when_process_succeeds()
     {
         var processManager = new StubCliProcessManager
@@ -737,6 +867,47 @@ public sealed class ClaudeCodeProviderTests
             isWindows: true);
 
         resolvedPath.ShouldBe(aliasedCmdShimPath);
+    }
+
+    private static async Task<List<CliMessage>> CollectAsync(ClaudeCodeProvider provider)
+    {
+        var messages = new List<CliMessage>();
+        await foreach (var message in provider.ExecuteAsync(
+                           new ClaudeCodeOptions { SessionId = "session-1", WorkingDirectory = "/tmp/project" },
+                           "hello"))
+        {
+            messages.Add(message);
+        }
+
+        return messages;
+    }
+
+    private static CliMessage StreamMessage(string type, object payload)
+    {
+        var content = JsonSerializer.SerializeToElement(payload);
+        using var document = JsonDocument.Parse(content.GetRawText());
+        var properties = new Dictionary<string, JsonElement> { ["type"] = JsonSerializer.SerializeToElement(type) };
+        foreach (var property in document.RootElement.EnumerateObject())
+        {
+            properties[property.Name] = property.Value.Clone();
+        }
+
+        return new CliMessage(type, JsonSerializer.SerializeToElement(properties));
+    }
+
+    private static object[] SubagentTasks(params string[] taskIds)
+    {
+        return taskIds.Select(static taskId => (object)new { task_id = taskId, task_type = "local_agent" }).ToArray();
+    }
+
+    private static List<string> DescribeTypes(IEnumerable<CliMessage> messages)
+    {
+        return messages
+            .Select(static message =>
+                message.Type == "system" && message.Content.TryGetProperty("subtype", out var subtype)
+                    ? $"system:{subtype.GetString()}"
+                    : message.Type)
+            .ToList();
     }
 
     private static TestClaudeCodeProvider CreateProvider(

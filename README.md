@@ -195,6 +195,7 @@ dotnet run --project src/HagiCode.Libs.Reasonix.Console -- --test-all reasonix
 - `--test-provider` runs the provider ping flow for the Claude console only.
 - `--test-provider-full` and `--test-all` run the full provider-scoped suite.
 - `--repo <path>` adds the repository analysis scenario to the suite.
+- `--subagent` adds the `Background Subagent` scenario (about 20-30 seconds, uses extra tokens). It asks Claude to launch a background subagent and passes only when the final `result` carries a token the subagent generated at run time, i.e. the stream was tracked past the launch turn's own `result`. It reports "inconclusive" if Claude does not launch a background subagent; run it again in that case.
 - `--api-key <key>` and `--model <model>` override Claude execution options for scenario runs.
 - `--effort <level>` overrides the Claude `Effort` option and is forwarded to the CLI as `--effort`. Supported levels are `low`, `medium`, `high`, `xhigh`, and `max` (case-insensitive).
 - No arguments also run the default Copilot suite.
@@ -328,7 +329,7 @@ The descriptor is aligned with the official OpenCode install guidance (`npm i -g
 Built-in providers now participate in a shared pooling architecture:
 
 - ACP providers (`CodeBuddy`, `Gemini`, `Hermes`, `Kimi`, `Kiro`, `QoderCLI`) lease warm ACP sessions from the shared `CliProviderPoolCoordinator`.
-- `Claude Code` keeps native `SessionId` / `Resume` continuity but always starts a fresh local CLI transport for each invocation and disposes it after the terminal message.
+- `Claude Code` keeps native `SessionId` / `Resume` continuity but always starts a fresh local CLI transport for each invocation and disposes it after the terminal message. A `result` is terminal only once no background subagent is still running and every started turn has produced its `result`; the turn that launches a background subagent ends with its own `result`, and the subagent's output plus the follow-up turn keep streaming afterwards. Background shell tasks are not awaited.
 - `Codex` runs each request in a fresh local CLI process. Resume continuity depends on an explicit `ThreadId`; there is no Codex-specific runtime pooling.
 - `Copilot` does not participate in the shared runtime pool. Each invocation creates a fresh SDK runtime, and continuity depends only on provider-native `SessionId` resume semantics.
 

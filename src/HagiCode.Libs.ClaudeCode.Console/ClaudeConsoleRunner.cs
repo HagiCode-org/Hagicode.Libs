@@ -36,6 +36,11 @@ public sealed class ClaudeConsoleRunner : ProviderConsoleRunnerBase<ICliProvider
             scenarios.Add(RepositorySummaryScenario.Create(options));
         }
 
+        if (options.IncludeSubagentScenario)
+        {
+            scenarios.Add(BackgroundSubagentScenario.Create(options));
+        }
+
         return scenarios;
     }
 }

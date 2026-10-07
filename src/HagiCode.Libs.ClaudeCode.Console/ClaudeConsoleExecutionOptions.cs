@@ -6,7 +6,8 @@ public sealed record ClaudeConsoleExecutionOptions(
     string? ApiKey,
     string? Model,
     string? RepositoryPath,
-    string? Effort = null)
+    string? Effort = null,
+    bool IncludeSubagentScenario = false)
 {
     public static ClaudeConsoleExecutionOptions Parse(IReadOnlyList<string> args)
     {
@@ -16,12 +17,16 @@ public sealed record ClaudeConsoleExecutionOptions(
         string? model = null;
         string? repositoryPath = null;
         string? effort = null;
+        var includeSubagentScenario = false;
 
         for (var index = 0; index < args.Count; index++)
         {
             var argument = args[index];
             switch (argument)
             {
+                case "--subagent":
+                    includeSubagentScenario = true;
+                    break;
                 case "--api-key":
                     apiKey = ReadValue(args, ref index, argument);
                     break;
@@ -39,7 +44,7 @@ public sealed record ClaudeConsoleExecutionOptions(
             }
         }
 
-        return new ClaudeConsoleExecutionOptions(apiKey, model, repositoryPath, effort);
+        return new ClaudeConsoleExecutionOptions(apiKey, model, repositoryPath, effort, includeSubagentScenario);
     }
 
     public ClaudeCodeOptions CreateBaseOptions()

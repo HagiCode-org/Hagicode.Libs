@@ -284,12 +284,6 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
         return new SubprocessTransport(_processManager, startContext);
     }
 
-    private static bool IsTerminalMessageType(string? messageType)
-    {
-        return string.Equals(messageType, "result", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(messageType, "error", StringComparison.OrdinalIgnoreCase);
-    }
-
     private async IAsyncEnumerable<CliMessage> ExecuteOneShotAsync(
         string prompt,
         ClaudeCodeOptions options,
@@ -319,10 +313,13 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
         await transport.ConnectAsync(cancellationToken).ConfigureAwait(false);
         await transport.SendAsync(CreatePromptMessage(prompt, options), cancellationToken).ConfigureAwait(false);
 
+        // The first "result" is not necessarily the last one: a background subagent keeps running after the turn
+        // that launched it, so the tracker decides when the run is really over.
+        var completionTracker = new ClaudeStreamCompletionTracker();
         await foreach (var message in transport.ReceiveAsync(cancellationToken).ConfigureAwait(false))
         {
             yield return EnrichMessageWithDebugMetadata(message, debugContext);
-            if (IsTerminalMessageType(message.Type))
+            if (completionTracker.Observe(message))
             {
                 yield break;
             }

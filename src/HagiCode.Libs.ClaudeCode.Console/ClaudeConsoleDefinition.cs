@@ -13,6 +13,7 @@ public static class ClaudeConsoleDefinition
         optionLines:
         [
             "--repo <path>         Include the repository analysis scenario in the suite",
+            "--subagent            Include the background subagent tracking scenario (slower, uses extra tokens)",
             "--api-key <key>       Override the Anthropic API key for scenario runs",
             "--model <model>       Override the Claude model for scenario runs",
             "--effort <level>      Override the Claude effort level (low, medium, high, xhigh, max)"
