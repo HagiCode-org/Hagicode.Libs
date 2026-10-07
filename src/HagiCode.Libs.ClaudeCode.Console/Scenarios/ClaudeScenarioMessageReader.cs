@@ -12,11 +12,32 @@ internal static class ClaudeScenarioMessageReader
         string prompt,
         CancellationToken cancellationToken = default)
     {
+        var (messages, assistantMessageCount, _) = await ReadAssistantMessagesWithSessionIdAsync(
+            provider,
+            options,
+            prompt,
+            cancellationToken);
+        return (messages, assistantMessageCount);
+    }
+
+    /// <summary>
+    /// Reads assistant text like <see cref="ReadAssistantMessagesAsync" /> and also reports the
+    /// <c>session_id</c> the CLI stamped on the stream, so a later request can <c>--resume</c> it.
+    /// </summary>
+    public static async Task<(IReadOnlyList<string> Messages, int AssistantMessageCount, string? SessionId)> ReadAssistantMessagesWithSessionIdAsync(
+        ICliProvider<ClaudeCodeOptions> provider,
+        ClaudeCodeOptions options,
+        string prompt,
+        CancellationToken cancellationToken = default)
+    {
         var messages = new List<string>();
         var assistantMessageCount = 0;
+        string? sessionId = null;
 
         await foreach (var message in provider.ExecuteAsync(options, prompt, cancellationToken))
         {
+            sessionId ??= ExtractSessionId(message.Content);
+
             if (!string.Equals(message.Type, "assistant", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
@@ -30,7 +51,20 @@ internal static class ClaudeScenarioMessageReader
             }
         }
 
-        return (messages, assistantMessageCount);
+        return (messages, assistantMessageCount, sessionId);
+    }
+
+    private static string? ExtractSessionId(JsonElement content)
+    {
+        if (content.ValueKind == JsonValueKind.Object &&
+            content.TryGetProperty("session_id", out var sessionIdElement) &&
+            sessionIdElement.ValueKind == JsonValueKind.String &&
+            !string.IsNullOrWhiteSpace(sessionIdElement.GetString()))
+        {
+            return sessionIdElement.GetString();
+        }
+
+        return null;
     }
 
     private static string? ExtractTextContent(JsonElement content)

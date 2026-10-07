@@ -60,6 +60,23 @@ public sealed class ClaudeCodeProviderTests
     }
 
     [Fact]
+    public void BuildCommandArguments_omits_continue_when_resume_is_specified()
+    {
+        var provider = CreateProvider();
+
+        var arguments = provider.BuildCommandArguments(new ClaudeCodeOptions
+        {
+            ContinueConversation = true,
+            Resume = "resume-id",
+            SessionId = "resume-id"
+        });
+
+        arguments.ShouldContain("--resume", "resume-id");
+        arguments.ShouldNotContain("--continue");
+        arguments.ShouldNotContain("--session-id");
+    }
+
+    [Fact]
     public void BuildCommandArguments_omits_session_id_when_resume_is_specified()
     {
         var provider = CreateProvider();

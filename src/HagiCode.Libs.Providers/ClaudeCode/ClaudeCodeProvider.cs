@@ -198,12 +198,15 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
             arguments.AddRange(["--permission-mode", permissionMode]);
         }
 
-        if (options.ContinueConversation)
+        var resume = ArgumentValueNormalizer.NormalizeOptionalValue(options.Resume);
+
+        // --continue takes the most recent conversation in the working directory and overrides --resume <id>,
+        // so an explicit resume id must be sent alone.
+        if (options.ContinueConversation && resume is null)
         {
             arguments.Add("--continue");
         }
 
-        var resume = ArgumentValueNormalizer.NormalizeOptionalValue(options.Resume);
         if (resume is not null)
         {
             arguments.AddRange(["--resume", resume]);

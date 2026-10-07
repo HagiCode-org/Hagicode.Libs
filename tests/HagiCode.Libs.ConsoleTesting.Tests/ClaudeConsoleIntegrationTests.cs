@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using HagiCode.Libs.ClaudeCode.Console;
 using HagiCode.Libs.ConsoleTesting;
 using HagiCode.Libs.Core.Transport;
@@ -28,8 +29,78 @@ public sealed class ClaudeConsoleIntegrationTests
         rendered.ShouldContain("[PASS] claude-code / Ping");
         rendered.ShouldContain("[PASS] claude-code / Simple Prompt");
         rendered.ShouldContain("[PASS] claude-code / Complex Prompt");
-        rendered.ShouldContain("[PASS] claude-code / Session Restore");
-        rendered.ShouldContain("Summary: 4/4 passed");
+        rendered.ShouldContain("[PASS] claude-code / Session Restore (Session Id)");
+        rendered.ShouldContain("[PASS] claude-code / Session Restore (Resume Id)");
+        rendered.ShouldContain("Summary: 6/6 passed");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_restores_conversations_by_explicit_session_id_and_by_reported_resume_id()
+    {
+        var provider = new FakeClaudeProvider();
+        using var output = new StringWriter();
+        var formatter = new ProviderConsoleOutputFormatter(output);
+        var runner = new ClaudeConsoleRunner(ClaudeConsoleDefinition.Instance, provider, formatter);
+
+        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync([], ClaudeConsoleDefinition.Instance, runner, output);
+
+        exitCode.ShouldBe(0);
+
+        // --session-id <id> on the first request, then --resume <same id> on the follow-up.
+        var explicitIdSetup = provider.Calls.Single(call =>
+            call.Prompt.Contains("Remember the secret word:", StringComparison.Ordinal) && call.Options.SessionId is not null);
+        var explicitIdFollowUp = provider.Calls.Single(call => call.Options.Resume == explicitIdSetup.Options.SessionId);
+        explicitIdFollowUp.Options.ContinueConversation.ShouldBeFalse();
+        explicitIdFollowUp.Options.SessionId.ShouldBeNull();
+
+        // No id on the first request, then --resume <session_id reported by the first stream>.
+        var reportedIdSetups = provider.Calls
+            .Where(call => call.Prompt.Contains("Remember the secret word:", StringComparison.Ordinal)
+                           && call.Options.SessionId is null
+                           && !call.Options.ContinueConversation)
+            .ToArray();
+        var reportedIdFollowUps = provider.Calls
+            .Where(call => call.Options.Resume is not null && call.Options.Resume != explicitIdSetup.Options.SessionId)
+            .ToArray();
+        reportedIdSetups.Length.ShouldBe(2);
+        reportedIdFollowUps.Length.ShouldBe(1);
+        provider.ReportedSessionIds.ShouldContain(reportedIdFollowUps[0].Options.Resume!);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_fails_resume_id_scenarios_when_the_provider_does_not_restore_the_conversation()
+    {
+        var provider = new FakeClaudeProvider { RestoreByResumeId = false };
+        using var output = new StringWriter();
+        var formatter = new ProviderConsoleOutputFormatter(output);
+        var runner = new ClaudeConsoleRunner(ClaudeConsoleDefinition.Instance, provider, formatter);
+
+        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync([], ClaudeConsoleDefinition.Instance, runner, output);
+
+        exitCode.ShouldBe(1);
+        var rendered = output.ToString();
+        rendered.ShouldContain("[FAIL] claude-code / Session Restore (Session Id)");
+        rendered.ShouldContain("[FAIL] claude-code / Session Restore (Resume Id)");
+        rendered.ShouldContain("did not return the remembered secret");
+        // --continue still works, so only the by-id scenarios regress.
+        Regex.IsMatch(rendered, @"^\[PASS\] claude-code / Session Restore( \(\d+ms\))?\r?$", RegexOptions.Multiline).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task DispatchAsync_fails_session_id_scenario_when_the_provider_ignores_the_requested_session_id()
+    {
+        var provider = new FakeClaudeProvider { HonorRequestedSessionId = false };
+        using var output = new StringWriter();
+        var formatter = new ProviderConsoleOutputFormatter(output);
+        var runner = new ClaudeConsoleRunner(ClaudeConsoleDefinition.Instance, provider, formatter);
+
+        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync([], ClaudeConsoleDefinition.Instance, runner, output);
+
+        exitCode.ShouldBe(1);
+        var rendered = output.ToString();
+        rendered.ShouldContain("[FAIL] claude-code / Session Restore (Session Id)");
+        rendered.ShouldContain("did not honor --session-id");
+        rendered.ShouldContain("[PASS] claude-code / Session Restore (Resume Id)");
     }
 
     [Fact]
@@ -105,7 +176,22 @@ public sealed class ClaudeConsoleIntegrationTests
 
     private sealed class FakeClaudeProvider : ICliProvider<ClaudeCodeOptions>
     {
-        private string? _lastSecret;
+        private readonly Dictionary<string, string> _secretsBySessionId = new(StringComparer.OrdinalIgnoreCase);
+        private string? _lastSessionId;
+
+        /// <summary>
+        /// When <see langword="false" />, <c>--resume &lt;id&gt;</c> is ignored and the follow-up starts a blank conversation.
+        /// </summary>
+        public bool RestoreByResumeId { get; init; } = true;
+
+        /// <summary>
+        /// When <see langword="false" />, a requested <c>--session-id</c> is ignored and a fresh id is reported instead.
+        /// </summary>
+        public bool HonorRequestedSessionId { get; init; } = true;
+
+        public List<(ClaudeCodeOptions Options, string Prompt)> Calls { get; } = [];
+
+        public List<string> ReportedSessionIds { get; } = [];
 
         public string Name => "claude-code";
 
@@ -128,22 +214,33 @@ public sealed class ClaudeConsoleIntegrationTests
             string prompt,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
+            Calls.Add((options, prompt));
+
             var response = BuildResponse(prompt, options.WorkingDirectory);
+            var sessionId = ResolveSessionId(options);
             if (prompt.Contains("Remember the secret word:", StringComparison.OrdinalIgnoreCase))
             {
-                _lastSecret = ExtractSecret(prompt);
+                var secret = ExtractSecret(prompt);
+                if (secret is not null)
+                {
+                    _secretsBySessionId[sessionId] = secret;
+                }
+
                 response = "ACK";
             }
-            else if (options.ContinueConversation &&
-                     prompt.Contains("What was the secret word I told you earlier", StringComparison.OrdinalIgnoreCase))
+            else if (prompt.Contains("What was the secret word I told you earlier", StringComparison.OrdinalIgnoreCase))
             {
-                response = _lastSecret ?? "UNKNOWN";
+                response = LookUpSecret(options, sessionId) ?? "UNKNOWN";
             }
+
+            _lastSessionId = sessionId;
+            ReportedSessionIds.Add(sessionId);
 
             yield return new CliMessage(
                 "assistant",
                 JsonSerializer.SerializeToElement(new
                 {
+                    session_id = sessionId,
                     message = new
                     {
                         content = new[]
@@ -158,8 +255,39 @@ public sealed class ClaudeConsoleIntegrationTests
                 }));
             yield return new CliMessage(
                 "result",
-                JsonSerializer.SerializeToElement(new { type = "result", subtype = "success" }));
+                JsonSerializer.SerializeToElement(new { type = "result", subtype = "success", session_id = sessionId }));
             await Task.Yield();
+        }
+
+        private string ResolveSessionId(ClaudeCodeOptions options)
+        {
+            if (options.Resume is not null && RestoreByResumeId)
+            {
+                return options.Resume;
+            }
+
+            if (options.ContinueConversation && _lastSessionId is not null)
+            {
+                return _lastSessionId;
+            }
+
+            if (options.SessionId is not null && HonorRequestedSessionId)
+            {
+                return options.SessionId;
+            }
+
+            return Guid.NewGuid().ToString();
+        }
+
+        private string? LookUpSecret(ClaudeCodeOptions options, string sessionId)
+        {
+            // Only a request that asks to restore a conversation (--continue or --resume <id>) can see earlier secrets.
+            if (!options.ContinueConversation && options.Resume is null)
+            {
+                return null;
+            }
+
+            return _secretsBySessionId.TryGetValue(sessionId, out var secret) ? secret : null;
         }
 
         private static string BuildResponse(string prompt, string? workingDirectory)

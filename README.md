@@ -191,7 +191,11 @@ dotnet run --project src/HagiCode.Libs.Reasonix.Console -- --test-all reasonix
 ```
 
 - No arguments run the default Claude suite.
-- 默认套件当前包含 `Ping`、`Simple Prompt`、`Complex Prompt` 和 `Session Restore`。
+- 默认套件当前包含 `Ping`、`Simple Prompt`、`Complex Prompt`、`Session Restore`、`Session Restore (Session Id)` 和 `Session Restore (Resume Id)`。
+  - `Session Restore` 通过 `--continue` 续接当前目录最近一次会话。
+  - `Session Restore (Session Id)` 用 `--session-id <id>` 开启会话，再用 `--resume <id>` 恢复，并要求 CLI 回报的 `session_id` 与请求的一致。
+  - `Session Restore (Resume Id)` 不指定 id，读取首轮 stream 里回报的 `session_id`，再用 `--resume <id>` 恢复。
+  - 三个场景都用运行时生成的随机 secret 校验，只有真正取回上一轮内容才算通过。
 - `--test-provider` runs the provider ping flow for the Claude console only.
 - `--test-provider-full` and `--test-all` run the full provider-scoped suite.
 - `--repo <path>` adds the repository analysis scenario to the suite.
