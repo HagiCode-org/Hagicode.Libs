@@ -45,38 +45,6 @@ public sealed class ClaudeCodeProviderTests
     }
 
     [Fact]
-    public void BuildCommandArguments_omits_session_id_when_continue_is_enabled()
-    {
-        var provider = CreateProvider();
-
-        var arguments = provider.BuildCommandArguments(new ClaudeCodeOptions
-        {
-            ContinueConversation = true,
-            SessionId = "session-id"
-        });
-
-        arguments.ShouldContain("--continue");
-        arguments.ShouldNotContain("--session-id");
-    }
-
-    [Fact]
-    public void BuildCommandArguments_omits_continue_when_resume_is_specified()
-    {
-        var provider = CreateProvider();
-
-        var arguments = provider.BuildCommandArguments(new ClaudeCodeOptions
-        {
-            ContinueConversation = true,
-            Resume = "resume-id",
-            SessionId = "resume-id"
-        });
-
-        arguments.ShouldContain("--resume", "resume-id");
-        arguments.ShouldNotContain("--continue");
-        arguments.ShouldNotContain("--session-id");
-    }
-
-    [Fact]
     public void BuildCommandArguments_omits_session_id_when_resume_is_specified()
     {
         var provider = CreateProvider();
@@ -125,43 +93,87 @@ public sealed class ClaudeCodeProviderTests
         ]);
     }
 
-    [Fact]
-    public void BuildCommandArguments_appends_isolated_workdir_bootstrap_only_when_requested()
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData("session-id", null)]
+    [InlineData(null, "resume-id")]
+    [InlineData("session-id", "resume-id")]
+    public void BuildCommandArguments_never_emits_continue(string? sessionId, string? resume)
     {
         var provider = CreateProvider();
 
-        var firstRunArguments = provider.BuildCommandArguments(new ClaudeCodeOptions
+        var arguments = provider.BuildCommandArguments(new ClaudeCodeOptions
+        {
+            SessionId = sessionId,
+            Resume = resume
+        });
+
+        arguments.ShouldNotContain("--continue");
+        arguments.ShouldNotContain("-c");
+    }
+
+    [Fact]
+    public void BuildCommandArguments_sends_only_resume_when_resume_and_session_id_are_both_set()
+    {
+        var provider = CreateProvider();
+
+        var arguments = provider.BuildCommandArguments(new ClaudeCodeOptions
+        {
+            Resume = "resume-id",
+            SessionId = "resume-id"
+        });
+
+        arguments.ShouldContain("--resume", "resume-id");
+        arguments.ShouldNotContain("--session-id");
+        arguments.ShouldNotContain("--continue");
+    }
+
+    [Theory]
+    [InlineData("continue")]
+    [InlineData("Continue")]
+    [InlineData("CONTINUE")]
+    public void BuildCommandArguments_rejects_continue_in_extra_args(string key)
+    {
+        var provider = CreateProvider();
+
+        var exception = Should.Throw<ArgumentException>(() => provider.BuildCommandArguments(new ClaudeCodeOptions
+        {
+            ExtraArgs = new Dictionary<string, string?> { [key] = null }
+        }));
+
+        exception.Message.ShouldContain("SessionId");
+        exception.Message.ShouldContain("Resume");
+    }
+
+    [Fact]
+    public void BuildCommandArguments_forwards_append_system_prompt_unchanged()
+    {
+        var provider = CreateProvider();
+
+        var arguments = provider.BuildCommandArguments(new ClaudeCodeOptions
         {
             WorkingDirectory = "/repo/project",
-            ExecutionWorkingDirectory = "/tmp/hagicode/claude/session-1",
-            OriginalWorkingDirectory = "/repo/project",
-            BootstrapOriginalWorkingDirectory = true,
             AppendSystemPrompt = "Keep responses terse."
         });
 
-        var appendPromptIndex = firstRunArguments
-            .Select((argument, index) => new { argument, index })
-            .FirstOrDefault(entry => entry.argument == "--append-system-prompt")?.index ?? -1;
-        appendPromptIndex.ShouldBeGreaterThanOrEqualTo(0);
-        var combinedPrompt = firstRunArguments[appendPromptIndex + 1];
-        combinedPrompt.ShouldContain("Keep responses terse.");
-        combinedPrompt.ShouldContain("isolated working directory");
-        combinedPrompt.ShouldContain("avoid concurrency conflicts and message serialization issues");
-        combinedPrompt.ShouldContain("scratch-only execution context");
-        combinedPrompt.ShouldContain("Perform repository inspection, code edits, file creation or modification, and Git operations against the canonical project path above.");
-        combinedPrompt.ShouldContain("Do not leave final project artifacts in the isolated temp directory.");
-        combinedPrompt.ShouldContain("/tmp/hagicode/claude/session-1");
-        combinedPrompt.ShouldContain("/repo/project");
+        arguments.ShouldContain("--append-system-prompt", "Keep responses terse.");
+        arguments.Count(static argument => argument == "--append-system-prompt").ShouldBe(1);
+    }
 
-        var resumedArguments = provider.BuildCommandArguments(new ClaudeCodeOptions
+    [Theory]
+    [InlineData(null)]
+    [InlineData("   ")]
+    public void BuildCommandArguments_omits_append_system_prompt_when_not_supplied(string? appendSystemPrompt)
+    {
+        var provider = CreateProvider();
+
+        var arguments = provider.BuildCommandArguments(new ClaudeCodeOptions
         {
             WorkingDirectory = "/repo/project",
-            ExecutionWorkingDirectory = "/tmp/hagicode/claude/session-1",
-            OriginalWorkingDirectory = "/repo/project",
-            BootstrapOriginalWorkingDirectory = false
+            AppendSystemPrompt = appendSystemPrompt
         });
 
-        resumedArguments.ShouldNotContain("--append-system-prompt");
+        arguments.ShouldNotContain("--append-system-prompt");
     }
 
     [Theory]
@@ -313,7 +325,7 @@ public sealed class ClaudeCodeProviderTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_prefers_execution_working_directory_when_isolation_is_enabled()
+    public async Task ExecuteAsync_starts_the_process_in_the_working_directory()
     {
         var provider = CreateProvider();
 
@@ -321,9 +333,6 @@ public sealed class ClaudeCodeProviderTests
                            new ClaudeCodeOptions
                            {
                                WorkingDirectory = "/repo/project",
-                               ExecutionWorkingDirectory = "/tmp/hagicode/claude/session-1",
-                               OriginalWorkingDirectory = "/repo/project",
-                               BootstrapOriginalWorkingDirectory = true,
                                SessionId = "session-1"
                            },
                            "hello"))
@@ -331,7 +340,7 @@ public sealed class ClaudeCodeProviderTests
         }
 
         provider.LastStartContext.ShouldNotBeNull();
-        provider.LastStartContext.WorkingDirectory.ShouldBe("/tmp/hagicode/claude/session-1");
+        provider.LastStartContext.WorkingDirectory.ShouldBe("/repo/project");
     }
 
     [Fact]

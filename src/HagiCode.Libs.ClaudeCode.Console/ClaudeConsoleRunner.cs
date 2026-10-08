@@ -28,7 +28,6 @@ public sealed class ClaudeConsoleRunner : ProviderConsoleRunnerBase<ICliProvider
         {
             SimplePromptScenario.Create(options),
             ComplexPromptScenario.Create(options),
-            SessionResumeScenario.Create(options),
             SessionIdResumeScenarios.CreateWithExplicitSessionId(options),
             SessionIdResumeScenarios.CreateWithCapturedResumeId(options)
         };

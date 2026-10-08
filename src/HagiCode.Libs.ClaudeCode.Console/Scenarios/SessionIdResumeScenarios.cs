@@ -5,8 +5,8 @@ using HagiCode.Libs.Providers.ClaudeCode;
 namespace HagiCode.Libs.ClaudeCode.Console.Scenarios;
 
 /// <summary>
-/// Scenarios that restore a Claude conversation by explicit id (<c>--resume &lt;id&gt;</c>) instead of
-/// <c>--continue</c>, which only follows the most recent conversation in the working directory.
+/// Scenarios that restore a Claude conversation by explicit id (<c>--resume &lt;id&gt;</c>), the only supported
+/// restore path; the provider never emits <c>--continue</c>.
 /// </summary>
 public static class SessionIdResumeScenarios
 {

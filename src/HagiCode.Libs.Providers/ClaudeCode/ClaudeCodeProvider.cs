@@ -69,7 +69,7 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
         {
             ExecutablePath = executablePath,
             Arguments = BuildCommandArguments(options),
-            WorkingDirectory = ResolveExecutionWorkingDirectory(options),
+            WorkingDirectory = ArgumentValueNormalizer.NormalizeOptionalValue(options.WorkingDirectory),
             EnvironmentVariables = BuildEnvironmentVariables(options, runtimeEnvironment),
             InputEncoding = Utf8NoBom,
             OutputEncoding = Utf8NoBom,
@@ -161,7 +161,7 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
             arguments.AddRange(["--system-prompt", systemPrompt]);
         }
 
-        var appendSystemPrompt = BuildEffectiveAppendSystemPrompt(options);
+        var appendSystemPrompt = ArgumentValueNormalizer.NormalizeOptionalValue(options.AppendSystemPrompt);
         if (appendSystemPrompt is not null)
         {
             arguments.AddRange(["--append-system-prompt", appendSystemPrompt]);
@@ -198,24 +198,20 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
             arguments.AddRange(["--permission-mode", permissionMode]);
         }
 
+        // Sessions are restored by explicit id only. --continue is never emitted: it follows the most recent
+        // conversation in the working directory, which can restore the wrong thread.
         var resume = ArgumentValueNormalizer.NormalizeOptionalValue(options.Resume);
-
-        // --continue takes the most recent conversation in the working directory and overrides --resume <id>,
-        // so an explicit resume id must be sent alone.
-        if (options.ContinueConversation && resume is null)
-        {
-            arguments.Add("--continue");
-        }
-
         if (resume is not null)
         {
             arguments.AddRange(["--resume", resume]);
         }
-
-        var sessionId = ArgumentValueNormalizer.NormalizeOptionalValue(options.SessionId);
-        if (sessionId is not null && !options.ContinueConversation && resume is null)
+        else
         {
-            arguments.AddRange(["--session-id", sessionId]);
+            var sessionId = ArgumentValueNormalizer.NormalizeOptionalValue(options.SessionId);
+            if (sessionId is not null)
+            {
+                arguments.AddRange(["--session-id", sessionId]);
+            }
         }
 
         foreach (var directory in options.AddDirectories)
@@ -239,6 +235,13 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
 
         foreach (var extraArgument in options.ExtraArgs)
         {
+            if (string.Equals(extraArgument.Key, "continue", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ArgumentException(
+                    "ExtraArgs must not contain 'continue': session restore is managed by ClaudeCodeOptions.SessionId and ClaudeCodeOptions.Resume instead of raw CLI flags.",
+                    nameof(options));
+            }
+
             var normalizedValue = ArgumentValueNormalizer.NormalizeOptionalValue(extraArgument.Value);
             if (extraArgument.Value is not null && normalizedValue is null)
             {
@@ -432,12 +435,6 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
                ?? ArgumentValueNormalizer.NormalizeOptionalValue(options.Resume);
     }
 
-    private static string? ResolveExecutionWorkingDirectory(ClaudeCodeOptions options)
-    {
-        return ArgumentValueNormalizer.NormalizeOptionalValue(options.ExecutionWorkingDirectory)
-               ?? ArgumentValueNormalizer.NormalizeOptionalValue(options.WorkingDirectory);
-    }
-
     private static string? NormalizeEffort(string? effort)
     {
         var normalizedEffort = ArgumentValueNormalizer.NormalizeOptionalValue(effort);
@@ -455,47 +452,6 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
         }
 
         return normalizedEffort.ToLowerInvariant();
-    }
-
-    private static string? BuildEffectiveAppendSystemPrompt(ClaudeCodeOptions options)
-    {
-        var appendSystemPrompt = ArgumentValueNormalizer.NormalizeOptionalValue(options.AppendSystemPrompt);
-        var bootstrapPrompt = BuildOriginalWorkingDirectoryBootstrap(options);
-
-        return (appendSystemPrompt, bootstrapPrompt) switch
-        {
-            (null, null) => null,
-            (not null, null) => appendSystemPrompt,
-            (null, not null) => bootstrapPrompt,
-            (not null, not null) => $"{appendSystemPrompt}\n\n{bootstrapPrompt}"
-        };
-    }
-
-    private static string? BuildOriginalWorkingDirectoryBootstrap(ClaudeCodeOptions options)
-    {
-        if (!options.BootstrapOriginalWorkingDirectory)
-        {
-            return null;
-        }
-
-        var originalWorkingDirectory = ArgumentValueNormalizer.NormalizeOptionalValue(options.OriginalWorkingDirectory);
-        if (originalWorkingDirectory is null)
-        {
-            return null;
-        }
-
-        var executionWorkingDirectory = ResolveExecutionWorkingDirectory(options) ?? "(unknown)";
-        return string.Join(
-            "\n",
-            [
-                "You are running in an isolated working directory for this session.",
-                "This isolation exists only to avoid concurrency conflicts and message serialization issues when multiple sessions operate on the same repository.",
-                $"Current isolated working directory: {executionWorkingDirectory}",
-                $"Canonical project working directory: {originalWorkingDirectory}",
-                "The isolated directory is scratch-only execution context, not the real project workspace.",
-                "Perform repository inspection, code edits, file creation or modification, and Git operations against the canonical project path above.",
-                "Do not leave final project artifacts in the isolated temp directory."
-            ]);
     }
 
     private static void UpsertString(JsonObject rootNode, string propertyName, string? value)

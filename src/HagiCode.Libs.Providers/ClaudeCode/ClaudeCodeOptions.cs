@@ -28,23 +28,6 @@ public sealed record ClaudeCodeOptions
     public string? WorkingDirectory { get; init; }
 
     /// <summary>
-    /// Gets or sets the process working directory used for the current execution.
-    /// When omitted, <see cref="WorkingDirectory" /> remains the execution root.
-    /// </summary>
-    public string? ExecutionWorkingDirectory { get; init; }
-
-    /// <summary>
-    /// Gets or sets the canonical project working directory preserved outside the execution cwd.
-    /// </summary>
-    public string? OriginalWorkingDirectory { get; init; }
-
-    /// <summary>
-    /// Gets or sets a value indicating whether the provider should append one-time guidance
-    /// describing the preserved original working directory for the current execution.
-    /// </summary>
-    public bool BootstrapOriginalWorkingDirectory { get; init; }
-
-    /// <summary>
     /// Gets or sets the Claude model name.
     /// </summary>
     public string? Model { get; init; }
@@ -87,17 +70,15 @@ public sealed record ClaudeCodeOptions
     public string? PermissionMode { get; init; }
 
     /// <summary>
-    /// Gets or sets a value indicating whether the conversation should continue.
-    /// </summary>
-    public bool ContinueConversation { get; init; }
-
-    /// <summary>
-    /// Gets or sets the resume token or session id to continue from.
+    /// Gets or sets the explicit session id to restore, sent as <c>--resume &lt;id&gt;</c>.
+    /// Sessions are restored by explicit id only; the provider never asks the CLI to pick the most recent conversation in the working directory.
+    /// When set, <see cref="SessionId" /> is not sent.
     /// </summary>
     public string? Resume { get; init; }
 
     /// <summary>
-    /// Gets or sets the explicit session id.
+    /// Gets or sets the explicit session id for a new conversation, sent as <c>--session-id &lt;id&gt;</c>.
+    /// Ignored when <see cref="Resume" /> is set.
     /// </summary>
     public string? SessionId { get; init; }
 

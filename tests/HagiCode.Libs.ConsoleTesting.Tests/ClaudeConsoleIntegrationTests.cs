@@ -1,6 +1,5 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using HagiCode.Libs.ClaudeCode.Console;
 using HagiCode.Libs.ConsoleTesting;
 using HagiCode.Libs.Core.Transport;
@@ -31,7 +30,7 @@ public sealed class ClaudeConsoleIntegrationTests
         rendered.ShouldContain("[PASS] claude-code / Complex Prompt");
         rendered.ShouldContain("[PASS] claude-code / Session Restore (Session Id)");
         rendered.ShouldContain("[PASS] claude-code / Session Restore (Resume Id)");
-        rendered.ShouldContain("Summary: 6/6 passed");
+        rendered.ShouldContain("Summary: 5/5 passed");
     }
 
     [Fact]
@@ -50,19 +49,17 @@ public sealed class ClaudeConsoleIntegrationTests
         var explicitIdSetup = provider.Calls.Single(call =>
             call.Prompt.Contains("Remember the secret word:", StringComparison.Ordinal) && call.Options.SessionId is not null);
         var explicitIdFollowUp = provider.Calls.Single(call => call.Options.Resume == explicitIdSetup.Options.SessionId);
-        explicitIdFollowUp.Options.ContinueConversation.ShouldBeFalse();
         explicitIdFollowUp.Options.SessionId.ShouldBeNull();
 
         // No id on the first request, then --resume <session_id reported by the first stream>.
         var reportedIdSetups = provider.Calls
             .Where(call => call.Prompt.Contains("Remember the secret word:", StringComparison.Ordinal)
-                           && call.Options.SessionId is null
-                           && !call.Options.ContinueConversation)
+                           && call.Options.SessionId is null)
             .ToArray();
         var reportedIdFollowUps = provider.Calls
             .Where(call => call.Options.Resume is not null && call.Options.Resume != explicitIdSetup.Options.SessionId)
             .ToArray();
-        reportedIdSetups.Length.ShouldBe(2);
+        reportedIdSetups.Length.ShouldBe(1);
         reportedIdFollowUps.Length.ShouldBe(1);
         provider.ReportedSessionIds.ShouldContain(reportedIdFollowUps[0].Options.Resume!);
     }
@@ -82,8 +79,7 @@ public sealed class ClaudeConsoleIntegrationTests
         rendered.ShouldContain("[FAIL] claude-code / Session Restore (Session Id)");
         rendered.ShouldContain("[FAIL] claude-code / Session Restore (Resume Id)");
         rendered.ShouldContain("did not return the remembered secret");
-        // --continue still works, so only the by-id scenarios regress.
-        Regex.IsMatch(rendered, @"^\[PASS\] claude-code / Session Restore( \(\d+ms\))?\r?$", RegexOptions.Multiline).ShouldBeTrue();
+        rendered.ShouldContain("Summary: 3/5 passed");
     }
 
     [Fact]
@@ -167,6 +163,87 @@ public sealed class ClaudeConsoleIntegrationTests
         }
     }
 
+    [Fact]
+    [Trait("Category", "RealCli")]
+    public async Task Real_claude_cli_restores_two_sessions_in_one_working_directory_by_resume_id_when_opted_in()
+    {
+        if (!IsRealCliTestsEnabled())
+        {
+            return;
+        }
+
+        var workingDirectory = Path.Combine(Path.GetTempPath(), $"hagicode-libs-resume-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(workingDirectory);
+        try
+        {
+            await using var services = ConsoleHost.BuildServiceProvider();
+            var provider = ConsoleHost.GetProvider<ClaudeCodeOptions>(services);
+
+            var sessionA = Guid.NewGuid().ToString();
+            var sessionB = Guid.NewGuid().ToString();
+            var secretA = $"ALPHA-{Guid.NewGuid():N}";
+            var secretB = $"BRAVO-{Guid.NewGuid():N}";
+
+            // Two sessions share one working directory; --continue would pick whichever ran last.
+            await ReadAssistantTextAsync(provider, workingDirectory, sessionId: sessionA, resume: null, $"Remember the secret word: {secretA}. Reply with exactly ACK.");
+            await ReadAssistantTextAsync(provider, workingDirectory, sessionId: sessionB, resume: null, $"Remember the secret word: {secretB}. Reply with exactly ACK.");
+
+            const string recallPrompt = "What was the secret word I told you earlier? Reply with just the word.";
+            var recalledA = await ReadAssistantTextAsync(provider, workingDirectory, sessionId: null, resume: sessionA, recallPrompt);
+            var recalledB = await ReadAssistantTextAsync(provider, workingDirectory, sessionId: null, resume: sessionB, recallPrompt);
+
+            recalledA.ShouldContain(secretA);
+            recalledA.ShouldNotContain(secretB);
+            recalledB.ShouldContain(secretB);
+            recalledB.ShouldNotContain(secretA);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    private static async Task<string> ReadAssistantTextAsync(
+        ICliProvider<ClaudeCodeOptions> provider,
+        string workingDirectory,
+        string? sessionId,
+        string? resume,
+        string prompt)
+    {
+        var options = new ClaudeCodeOptions
+        {
+            WorkingDirectory = workingDirectory,
+            SessionId = sessionId,
+            Resume = resume,
+            MaxTurns = 1
+        };
+
+        var text = new List<string>();
+        await foreach (var message in provider.ExecuteAsync(options, prompt))
+        {
+            if (!string.Equals(message.Type, "assistant", StringComparison.OrdinalIgnoreCase)
+                || message.Content.ValueKind != JsonValueKind.Object
+                || !message.Content.TryGetProperty("message", out var body)
+                || !body.TryGetProperty("content", out var blocks)
+                || blocks.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            foreach (var block in blocks.EnumerateArray())
+            {
+                if (block.TryGetProperty("text", out var blockText) && blockText.ValueKind == JsonValueKind.String)
+                {
+                    text.Add(blockText.GetString()!);
+                }
+            }
+        }
+
+        var combined = string.Join(" ", text);
+        combined.ShouldNotBeNullOrWhiteSpace("The Claude CLI returned no assistant text.");
+        return combined;
+    }
+
     private static bool IsRealCliTestsEnabled()
     {
         var value = Environment.GetEnvironmentVariable(RealCliTestsEnvironmentVariable);
@@ -177,7 +254,6 @@ public sealed class ClaudeConsoleIntegrationTests
     private sealed class FakeClaudeProvider : ICliProvider<ClaudeCodeOptions>
     {
         private readonly Dictionary<string, string> _secretsBySessionId = new(StringComparer.OrdinalIgnoreCase);
-        private string? _lastSessionId;
 
         /// <summary>
         /// When <see langword="false" />, <c>--resume &lt;id&gt;</c> is ignored and the follow-up starts a blank conversation.
@@ -233,7 +309,6 @@ public sealed class ClaudeConsoleIntegrationTests
                 response = LookUpSecret(options, sessionId) ?? "UNKNOWN";
             }
 
-            _lastSessionId = sessionId;
             ReportedSessionIds.Add(sessionId);
 
             yield return new CliMessage(
@@ -266,11 +341,6 @@ public sealed class ClaudeConsoleIntegrationTests
                 return options.Resume;
             }
 
-            if (options.ContinueConversation && _lastSessionId is not null)
-            {
-                return _lastSessionId;
-            }
-
             if (options.SessionId is not null && HonorRequestedSessionId)
             {
                 return options.SessionId;
@@ -281,8 +351,8 @@ public sealed class ClaudeConsoleIntegrationTests
 
         private string? LookUpSecret(ClaudeCodeOptions options, string sessionId)
         {
-            // Only a request that asks to restore a conversation (--continue or --resume <id>) can see earlier secrets.
-            if (!options.ContinueConversation && options.Resume is null)
+            // Only a request that asks to restore a conversation by id (--resume <id>) can see earlier secrets.
+            if (options.Resume is null)
             {
                 return null;
             }
