@@ -45,6 +45,15 @@ public sealed record ClaudeCodeOptions
     public string? Effort { get; init; }
 
     /// <summary>
+    /// Gets or sets the thinking display mode passed as <c>--thinking-display</c>.
+    /// Supported modes are <c>summarized</c>, <c>omitted</c>, and <c>highlights</c>
+    /// (case-insensitive, surrounding whitespace is ignored). When omitted or empty, no flag is sent and the CLI
+    /// and model default applies, which for current models streams thinking blocks with empty text.
+    /// The flag is hidden from <c>claude --help</c>. A CLI that rejects it at launch is retried once without it.
+    /// </summary>
+    public string? ThinkingDisplay { get; init; }
+
+    /// <summary>
     /// Gets or sets the system prompt.
     /// </summary>
     public string? SystemPrompt { get; init; }

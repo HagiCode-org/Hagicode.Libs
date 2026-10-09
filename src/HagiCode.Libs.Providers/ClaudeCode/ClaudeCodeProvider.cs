@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -26,6 +27,21 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
     internal static readonly IReadOnlySet<string> AllowedEffortLevels = new HashSet<string>(
         ["low", "medium", "high", "xhigh", "max"],
         StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The set of display modes accepted by the hidden Claude Code <c>--thinking-display</c> flag.
+    /// Values are compared case-insensitively; the lowercase canonical form is emitted to the CLI.
+    /// </summary>
+    internal static readonly IReadOnlySet<string> AllowedThinkingDisplayModes = new HashSet<string>(
+        ["summarized", "omitted", "highlights"],
+        StringComparer.OrdinalIgnoreCase);
+
+    private const string ThinkingDisplayFlag = "--thinking-display";
+
+    // Executables that refused --thinking-display at launch. Process lifetime only, so a host restart retries the flag
+    // after an in-place CLI upgrade.
+    private static readonly ConcurrentDictionary<string, bool> ExecutablesRejectingThinkingDisplay = new(StringComparer.Ordinal);
+
     private readonly CliExecutableResolver _executableResolver;
     private readonly CliProcessManager _processManager;
     private readonly IRuntimeEnvironmentResolver? _runtimeEnvironmentResolver;
@@ -65,10 +81,16 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
         var executablePath = ResolveExecutablePath(options, runtimeEnvironment)
             ?? throw new FileNotFoundException("Unable to locate the Claude Code executable.");
 
+        var arguments = BuildCommandArguments(options);
+        if (ExecutablesRejectingThinkingDisplay.ContainsKey(executablePath))
+        {
+            arguments = RemoveThinkingDisplayArguments(arguments);
+        }
+
         var startContext = new ProcessStartContext
         {
             ExecutablePath = executablePath,
-            Arguments = BuildCommandArguments(options),
+            Arguments = arguments,
             WorkingDirectory = ArgumentValueNormalizer.NormalizeOptionalValue(options.WorkingDirectory),
             EnvironmentVariables = BuildEnvironmentVariables(options, runtimeEnvironment),
             InputEncoding = Utf8NoBom,
@@ -153,6 +175,12 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
         if (effort is not null)
         {
             arguments.AddRange(["--effort", effort]);
+        }
+
+        var thinkingDisplay = NormalizeThinkingDisplay(options.ThinkingDisplay);
+        if (thinkingDisplay is not null)
+        {
+            arguments.AddRange([ThinkingDisplayFlag, thinkingDisplay]);
         }
 
         var systemPrompt = ArgumentValueNormalizer.NormalizeOptionalValue(options.SystemPrompt);
@@ -297,15 +325,93 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
         ClaudeCodeDebugContext debugContext,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        await foreach (var message in ExecuteOneShotAttemptAsync(
-                           prompt,
-                           options,
-                           startContext,
-                           debugContext,
-                           cancellationToken).ConfigureAwait(false))
+        // One attempt per request, with a single exception: a CLI that does not know the hidden --thinking-display flag
+        // exits before it reads the prompt or writes any stream output, so no conversation state exists to apply twice.
+        // The replacement attempt drops only that flag. Every other failure, and any failure after the first message,
+        // is surfaced as-is. A C# iterator cannot yield inside a try block that has a catch, so the attempt is driven
+        // by hand and messages are yielded outside the try.
+        var canFallBack = HasThinkingDisplayArgument(startContext.Arguments);
+        var yieldedMessage = false;
+
+        while (true)
         {
-            yield return message;
+            var rejectedThinkingDisplay = false;
+            await using var attempt = ExecuteOneShotAttemptAsync(
+                    prompt,
+                    options,
+                    startContext,
+                    debugContext,
+                    cancellationToken)
+                .GetAsyncEnumerator(cancellationToken);
+
+            while (true)
+            {
+                CliMessage message;
+                try
+                {
+                    if (!await attempt.MoveNextAsync().ConfigureAwait(false))
+                    {
+                        yield break;
+                    }
+
+                    message = attempt.Current;
+                }
+                catch (InvalidOperationException exception) when (
+                    canFallBack && !yieldedMessage && IsThinkingDisplayRejection(exception))
+                {
+                    rejectedThinkingDisplay = true;
+                    break;
+                }
+
+                yieldedMessage = true;
+                yield return message;
+            }
+
+            if (!rejectedThinkingDisplay)
+            {
+                yield break;
+            }
+
+            ExecutablesRejectingThinkingDisplay[startContext.ExecutablePath] = true;
+            startContext = startContext with { Arguments = RemoveThinkingDisplayArguments(startContext.Arguments) };
+            debugContext = CreateDebugContext(options, startContext);
+            canFallBack = false;
         }
+    }
+
+    private static bool HasThinkingDisplayArgument(IReadOnlyList<string> arguments)
+    {
+        return arguments.Any(static argument => string.Equals(argument, ThinkingDisplayFlag, StringComparison.Ordinal));
+    }
+
+    private static bool IsThinkingDisplayRejection(InvalidOperationException exception)
+    {
+        return exception.Message.Contains("unknown option", StringComparison.OrdinalIgnoreCase)
+               && exception.Message.Contains(ThinkingDisplayFlag, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Removes every <c>--thinking-display</c> flag and its value, whether it came from the typed option or from ExtraArgs.
+    /// </summary>
+    internal static IReadOnlyList<string> RemoveThinkingDisplayArguments(IReadOnlyList<string> arguments)
+    {
+        var filtered = new List<string>(arguments.Count);
+        for (var index = 0; index < arguments.Count; index++)
+        {
+            if (!string.Equals(arguments[index], ThinkingDisplayFlag, StringComparison.Ordinal))
+            {
+                filtered.Add(arguments[index]);
+                continue;
+            }
+
+            // The value is the next token unless the flag was added as a bare switch.
+            if (index + 1 < arguments.Count && !arguments[index + 1].StartsWith("--", StringComparison.Ordinal))
+            {
+                index++;
+            }
+        }
+
+        return filtered;
     }
 
     private async IAsyncEnumerable<CliMessage> ExecuteOneShotAttemptAsync(
@@ -452,6 +558,25 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
         }
 
         return normalizedEffort.ToLowerInvariant();
+    }
+
+    private static string? NormalizeThinkingDisplay(string? thinkingDisplay)
+    {
+        var normalizedMode = ArgumentValueNormalizer.NormalizeOptionalValue(thinkingDisplay);
+        if (normalizedMode is null)
+        {
+            return null;
+        }
+
+        if (!AllowedThinkingDisplayModes.Contains(normalizedMode))
+        {
+            throw new ArgumentException(
+                $"Invalid Claude Code thinking display mode '{normalizedMode}'. " +
+                $"Valid values: {string.Join(", ", AllowedThinkingDisplayModes.OrderBy(mode => mode, StringComparer.Ordinal))}.",
+                nameof(thinkingDisplay));
+        }
+
+        return normalizedMode.ToLowerInvariant();
     }
 
     private static void UpsertString(JsonObject rootNode, string propertyName, string? value)

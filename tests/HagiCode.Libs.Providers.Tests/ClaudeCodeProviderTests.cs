@@ -298,6 +298,394 @@ public sealed class ClaudeCodeProviderTests
         provider.LastStartContext.Arguments.ShouldNotContain("--effort");
     }
 
+    [Theory]
+    [InlineData("summarized")]
+    [InlineData("omitted")]
+    [InlineData("highlights")]
+    public void BuildCommandArguments_forwards_each_supported_thinking_display_mode(string mode)
+    {
+        var provider = CreateProvider();
+
+        var arguments = provider.BuildCommandArguments(new ClaudeCodeOptions
+        {
+            ThinkingDisplay = mode
+        });
+
+        arguments.ShouldContain("--thinking-display", mode);
+        arguments.Count(static argument => argument == "--thinking-display").ShouldBe(1);
+    }
+
+    [Fact]
+    public void BuildCommandArguments_normalizes_thinking_display_casing_and_whitespace()
+    {
+        var provider = CreateProvider();
+
+        var arguments = provider.BuildCommandArguments(new ClaudeCodeOptions
+        {
+            ThinkingDisplay = "  Summarized "
+        });
+
+        arguments.ShouldContain("--thinking-display", "summarized");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void BuildCommandArguments_omits_thinking_display_when_value_is_empty(string? thinkingDisplay)
+    {
+        var provider = CreateProvider();
+
+        var arguments = provider.BuildCommandArguments(new ClaudeCodeOptions
+        {
+            ThinkingDisplay = thinkingDisplay
+        });
+
+        arguments.ShouldNotContain("--thinking-display");
+    }
+
+    [Fact]
+    public void BuildCommandArguments_throws_for_unsupported_thinking_display_mode()
+    {
+        var provider = CreateProvider();
+
+        var exception = Should.Throw<ArgumentException>(() => provider.BuildCommandArguments(new ClaudeCodeOptions
+        {
+            ThinkingDisplay = "verbose"
+        }));
+
+        exception.Message.ShouldContain("verbose");
+        exception.Message.ShouldContain("summarized");
+        exception.Message.ShouldContain("omitted");
+        exception.Message.ShouldContain("highlights");
+    }
+
+    [Fact]
+    public void AllowedThinkingDisplayModes_contains_exactly_the_supported_modes()
+    {
+        ClaudeCodeProvider.AllowedThinkingDisplayModes
+            .Select(static mode => mode.ToLowerInvariant())
+            .OrderBy(static mode => mode, StringComparer.Ordinal)
+            .ShouldBe(["highlights", "omitted", "summarized"]);
+
+        ClaudeCodeProvider.AllowedThinkingDisplayModes.Contains("SUMMARIZED").ShouldBeTrue();
+        ClaudeCodeProvider.AllowedThinkingDisplayModes.Contains("verbose").ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_rejects_unsupported_thinking_display_before_starting_any_process()
+    {
+        var provider = CreateProvider();
+
+        await Should.ThrowAsync<ArgumentException>(async () =>
+        {
+            await foreach (var _ in provider.ExecuteAsync(
+                               new ClaudeCodeOptions
+                               {
+                                   ExecutablePath = UniqueExecutablePath(),
+                                   ThinkingDisplay = "verbose"
+                               },
+                               "hello"))
+            {
+            }
+        });
+
+        provider.CreatedTransportCount.ShouldBe(0);
+        provider.SentMessages.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void BuildCommandArguments_does_not_derive_thinking_display_from_the_settings_argument()
+    {
+        var provider = CreateProvider();
+        const string settings = """{"showThinkingSummaries":true}""";
+
+        var arguments = provider.BuildCommandArguments(new ClaudeCodeOptions
+        {
+            ExtraArgs = new Dictionary<string, string?> { ["settings"] = settings }
+        });
+
+        arguments.ShouldContain("--settings", settings);
+        arguments.ShouldNotContain("--thinking-display");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_forwards_thinking_display_to_the_launched_process_arguments()
+    {
+        var provider = CreateProvider();
+
+        await foreach (var _ in provider.ExecuteAsync(
+                           new ClaudeCodeOptions
+                           {
+                               ExecutablePath = UniqueExecutablePath(),
+                               ThinkingDisplay = "Summarized"
+                           },
+                           "hello"))
+        {
+        }
+
+        provider.LastStartContext.ShouldNotBeNull();
+        provider.LastStartContext.Arguments.ShouldContain("--thinking-display", "summarized");
+    }
+
+    [Fact]
+    public void RemoveThinkingDisplayArguments_removes_typed_extra_and_bare_flags_but_keeps_everything_else()
+    {
+        var provider = CreateProvider();
+        var arguments = provider.BuildCommandArguments(new ClaudeCodeOptions
+        {
+            Model = "claude-sonnet",
+            ThinkingDisplay = "summarized",
+            ExtraArgs = new Dictionary<string, string?>
+            {
+                ["thinking-display"] = "omitted",
+                ["settings"] = "balanced mode",
+                ["dangerously-skip-permissions"] = null
+            }
+        });
+        arguments.Count(static argument => argument == "--thinking-display").ShouldBe(2);
+
+        var filtered = ClaudeCodeProvider.RemoveThinkingDisplayArguments(arguments);
+
+        filtered.ShouldNotContain("--thinking-display");
+        filtered.ShouldNotContain("summarized");
+        filtered.ShouldNotContain("omitted");
+        filtered.ShouldBe(
+        [
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--input-format",
+            "stream-json",
+            "--model",
+            "claude-sonnet",
+            "--settings",
+            "balanced mode",
+            "--dangerously-skip-permissions"
+        ]);
+
+        // A bare switch must not swallow the next flag.
+        ClaudeCodeProvider.RemoveThinkingDisplayArguments(["--thinking-display", "--model", "claude-sonnet"])
+            .ShouldBe(["--model", "claude-sonnet"]);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_relaunches_once_without_thinking_display_when_the_cli_rejects_it_on_receive()
+    {
+        var executablePath = UniqueExecutablePath();
+        var provider = CreateProvider(
+            messageBatches: [[], DefaultSuccessBatch()],
+            transportFailures: [new TransportFailure(OnReceive: ThinkingDisplayRejection())]);
+
+        var messages = await CollectAsync(provider, executablePath, "summarized");
+
+        messages.Select(static message => message.Type).ShouldBe(["assistant", "result"]);
+        provider.CreatedTransportCount.ShouldBe(2);
+        provider.DisposedTransportCount.ShouldBe(2);
+        provider.StartContexts[0].Arguments.ShouldContain("--thinking-display", "summarized");
+        provider.StartContexts[1].Arguments.ShouldNotContain("--thinking-display");
+        provider.StartContexts[1].Arguments
+            .ShouldBe(ClaudeCodeProvider.RemoveThinkingDisplayArguments(provider.StartContexts[0].Arguments));
+        provider.StartContexts[1].ExecutablePath.ShouldBe(executablePath);
+        provider.StartContexts[1].WorkingDirectory.ShouldBe(provider.StartContexts[0].WorkingDirectory);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_relaunches_once_without_thinking_display_when_the_cli_rejects_it_on_send()
+    {
+        var provider = CreateProvider(
+            messageBatches: [DefaultSuccessBatch()],
+            transportFailures: [new TransportFailure(OnSend: ThinkingDisplayRejection())]);
+
+        var messages = await CollectAsync(provider, UniqueExecutablePath(), "summarized");
+
+        messages.Select(static message => message.Type).ShouldBe(["assistant", "result"]);
+        provider.CreatedTransportCount.ShouldBe(2);
+        provider.StartContexts[1].Arguments.ShouldNotContain("--thinking-display");
+        provider.SentMessages.ShouldHaveSingleItem();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_does_not_ask_a_rejecting_executable_for_thinking_display_again()
+    {
+        var executablePath = UniqueExecutablePath();
+        var provider = CreateProvider(
+            messageBatches: [[], DefaultSuccessBatch(), DefaultSuccessBatch()],
+            transportFailures: [new TransportFailure(OnReceive: ThinkingDisplayRejection())]);
+
+        await CollectAsync(provider, executablePath, "summarized");
+        provider.CreatedTransportCount.ShouldBe(2);
+
+        await CollectAsync(provider, executablePath, "summarized");
+
+        provider.CreatedTransportCount.ShouldBe(3);
+        provider.StartContexts[2].Arguments.ShouldNotContain("--thinking-display");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_keeps_sending_thinking_display_to_other_executables_after_one_rejected_it()
+    {
+        var rejectingPath = UniqueExecutablePath();
+        var otherPath = UniqueExecutablePath();
+        var provider = CreateProvider(
+            messageBatches: [[], DefaultSuccessBatch(), DefaultSuccessBatch()],
+            transportFailures: [new TransportFailure(OnReceive: ThinkingDisplayRejection())]);
+
+        await CollectAsync(provider, rejectingPath, "summarized");
+        await CollectAsync(provider, otherPath, "summarized");
+
+        provider.StartContexts[2].ExecutablePath.ShouldBe(otherPath);
+        provider.StartContexts[2].Arguments.ShouldContain("--thinking-display", "summarized");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_does_not_mask_unrelated_launch_failures_with_a_relaunch()
+    {
+        var executablePath = UniqueExecutablePath();
+        var failure = new InvalidOperationException(
+            "The subprocess exited unexpectedly with code 1: error: unknown option '--bogus'");
+        var provider = CreateProvider(
+            messageBatches: [[], DefaultSuccessBatch()],
+            transportFailures: [new TransportFailure(OnReceive: failure)]);
+
+        var thrown = await Should.ThrowAsync<InvalidOperationException>(
+            () => CollectAsync(provider, executablePath, "summarized"));
+
+        thrown.ShouldBeSameAs(failure);
+        provider.CreatedTransportCount.ShouldBe(1);
+        provider.DisposedTransportCount.ShouldBe(1);
+
+        // The executable must not have been recorded as rejecting the flag.
+        await CollectAsync(provider, executablePath, "summarized");
+        provider.StartContexts[1].Arguments.ShouldContain("--thinking-display", "summarized");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_does_not_relaunch_when_the_flag_was_never_sent()
+    {
+        var failure = ThinkingDisplayRejection();
+        var provider = CreateProvider(
+            messageBatches: [[], DefaultSuccessBatch()],
+            transportFailures: [new TransportFailure(OnReceive: failure)]);
+
+        var thrown = await Should.ThrowAsync<InvalidOperationException>(
+            () => CollectAsync(provider, UniqueExecutablePath(), thinkingDisplay: null));
+
+        thrown.ShouldBeSameAs(failure);
+        provider.CreatedTransportCount.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_does_not_relaunch_after_a_message_was_already_streamed()
+    {
+        var executablePath = UniqueExecutablePath();
+        var failure = ThinkingDisplayRejection();
+        var provider = CreateProvider(
+            messageBatches: [[StreamMessage("system", new { subtype = "init" })]],
+            transportFailures: [new TransportFailure(OnReceive: failure)]);
+        var messages = new List<CliMessage>();
+
+        var thrown = await Should.ThrowAsync<InvalidOperationException>(async () =>
+        {
+            await foreach (var message in provider.ExecuteAsync(
+                               new ClaudeCodeOptions { ExecutablePath = executablePath, ThinkingDisplay = "summarized" },
+                               "hello"))
+            {
+                messages.Add(message);
+            }
+        });
+
+        thrown.ShouldBeSameAs(failure);
+        messages.ShouldHaveSingleItem();
+        provider.CreatedTransportCount.ShouldBe(1);
+        provider.SentMessages.ShouldHaveSingleItem();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_surfaces_a_terminal_error_message_after_output_without_relaunching()
+    {
+        var provider = CreateProvider(
+            messageBatches:
+            [
+                [
+                    StreamMessage("system", new { subtype = "init" }),
+                    new CliMessage("error", JsonSerializer.SerializeToElement(new { type = "error", message = "unknown option '--thinking-display'" }))
+                ]
+            ]);
+
+        var messages = await CollectAsync(provider, UniqueExecutablePath(), "summarized");
+
+        DescribeTypes(messages).ShouldBe(["system:init", "error"]);
+        provider.CreatedTransportCount.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_real_subprocess_that_rejects_thinking_display_completes_through_the_fallback()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        // Mimics an older CLI: commander-style rejection of the unknown flag before the prompt is read. The transport
+        // reports that exit from SendAsync or ReceiveAsync depending on timing, and both must be handled. The first run
+        // goes through the fallback; later runs hit the cache and launch without the flag.
+        var directory = Path.Combine(Path.GetTempPath(), $"hagicode-fake-claude-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var scriptPath = Path.Combine(directory, "claude");
+            await File.WriteAllTextAsync(
+                scriptPath,
+                """
+                #!/bin/sh
+                for arg in "$@"; do
+                  if [ "$arg" = "--thinking-display" ]; then
+                    echo "error: unknown option '--thinking-display'" >&2
+                    exit 1
+                  fi
+                done
+                read -r line
+                echo '{"type":"assistant","message":{"content":[]}}'
+                echo '{"type":"result","is_error":false}'
+                """.ReplaceLineEndings("\n"));
+            File.SetUnixFileMode(scriptPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+
+            await using var provider = new ClaudeCodeProvider(
+                new CliExecutableResolver(),
+                new CliProcessManager(),
+                new StaticRuntimeEnvironmentResolver(new Dictionary<string, string?>()));
+
+            for (var run = 0; run < 3; run++)
+            {
+                var messages = await CollectAsync(provider, scriptPath, "summarized", directory);
+
+                messages.Select(static message => message.Type).ShouldBe(["assistant", "result"]);
+            }
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_runs_at_most_one_replacement_attempt()
+    {
+        var provider = CreateProvider(
+            messageBatches: [[], []],
+            transportFailures:
+            [
+                new TransportFailure(OnReceive: ThinkingDisplayRejection()),
+                new TransportFailure(OnReceive: ThinkingDisplayRejection())
+            ]);
+
+        await Should.ThrowAsync<InvalidOperationException>(
+            () => CollectAsync(provider, UniqueExecutablePath(), "summarized"));
+
+        provider.CreatedTransportCount.ShouldBe(2);
+    }
+
     [Fact]
     public async Task ExecuteAsync_uses_custom_executable_and_streams_messages()
     {
@@ -908,6 +1296,41 @@ public sealed class ClaudeCodeProviderTests
         return messages;
     }
 
+    private static async Task<List<CliMessage>> CollectAsync(
+        ClaudeCodeProvider provider,
+        string executablePath,
+        string? thinkingDisplay,
+        string workingDirectory = "/tmp/project")
+    {
+        var messages = new List<CliMessage>();
+        await foreach (var message in provider.ExecuteAsync(
+                           new ClaudeCodeOptions
+                           {
+                               ExecutablePath = executablePath,
+                               ThinkingDisplay = thinkingDisplay,
+                               SessionId = "session-1",
+                               WorkingDirectory = workingDirectory
+                           },
+                           "hello"))
+        {
+            messages.Add(message);
+        }
+
+        return messages;
+    }
+
+    // The fallback cache is process-wide and keyed by executable path, so each test uses its own path.
+    private static string UniqueExecutablePath() => $"/custom/claude-{Guid.NewGuid():N}";
+
+    private static InvalidOperationException ThinkingDisplayRejection() => new(
+        "The subprocess exited unexpectedly with code 1: error: unknown option '--thinking-display'");
+
+    private static IReadOnlyList<CliMessage> DefaultSuccessBatch() =>
+    [
+        StreamMessage("assistant", new { content = "hi" }),
+        StreamMessage("result", new { is_error = false })
+    ];
+
     private static CliMessage StreamMessage(string type, object payload)
     {
         var content = JsonSerializer.SerializeToElement(payload);
@@ -939,23 +1362,33 @@ public sealed class ClaudeCodeProviderTests
     private static TestClaudeCodeProvider CreateProvider(
         CliExecutableResolver? executableResolver = null,
         CliProcessManager? processManager = null,
-        IReadOnlyList<IReadOnlyList<CliMessage>>? messageBatches = null)
+        IReadOnlyList<IReadOnlyList<CliMessage>>? messageBatches = null,
+        IReadOnlyList<TransportFailure?>? transportFailures = null)
     {
         return new TestClaudeCodeProvider(
             executableResolver ?? new StubExecutableResolver(),
             processManager ?? new StubCliProcessManager(),
             new StubRuntimeEnvironmentResolver(),
-            messageBatches);
+            messageBatches,
+            transportFailures);
     }
+
+    /// <summary>
+    /// Scripts how one transport attempt fails. <see cref="OnSend" /> throws from SendAsync before the prompt is recorded;
+    /// <see cref="OnReceive" /> throws from ReceiveAsync after the attempt's message batch has been yielded.
+    /// </summary>
+    private sealed record TransportFailure(Exception? OnSend = null, Exception? OnReceive = null);
 
     private sealed class TestClaudeCodeProvider(
         CliExecutableResolver executableResolver,
         CliProcessManager processManager,
         IRuntimeEnvironmentResolver runtimeEnvironmentResolver,
-        IReadOnlyList<IReadOnlyList<CliMessage>>? messageBatches)
+        IReadOnlyList<IReadOnlyList<CliMessage>>? messageBatches,
+        IReadOnlyList<TransportFailure?>? transportFailures)
         : ClaudeCodeProvider(executableResolver, processManager, runtimeEnvironmentResolver)
     {
         private readonly Queue<IReadOnlyList<CliMessage>> _messageBatches = new(messageBatches ?? []);
+        private readonly Queue<TransportFailure?> _transportFailures = new(transportFailures ?? []);
         private static readonly IReadOnlyList<CliMessage> DefaultMessageBatch =
         [
             new CliMessage("assistant", JsonSerializer.SerializeToElement(new { type = "assistant", content = "hi" })),
@@ -963,6 +1396,7 @@ public sealed class ClaudeCodeProviderTests
         ];
 
         public ProcessStartContext? LastStartContext { get; private set; }
+        public List<ProcessStartContext> StartContexts { get; } = [];
         public List<CliMessage> SentMessages { get; } = [];
         public int CreatedTransportCount { get; private set; }
         public int DisposedTransportCount { get; private set; }
@@ -970,8 +1404,10 @@ public sealed class ClaudeCodeProviderTests
         protected override ICliTransport CreateTransport(ProcessStartContext startContext)
         {
             LastStartContext = startContext;
+            StartContexts.Add(startContext);
             CreatedTransportCount++;
-            return new StubTransport(SentMessages, GetNextMessageBatch, () => DisposedTransportCount++);
+            var failure = _transportFailures.Count > 0 ? _transportFailures.Dequeue() : null;
+            return new StubTransport(SentMessages, GetNextMessageBatch, () => DisposedTransportCount++, failure);
         }
 
         private IReadOnlyList<CliMessage> GetNextMessageBatch()
@@ -985,7 +1421,8 @@ public sealed class ClaudeCodeProviderTests
     private sealed class StubTransport(
         List<CliMessage> sentMessages,
         Func<IReadOnlyList<CliMessage>> getNextMessageBatch,
-        Action onDispose) : ICliTransport
+        Action onDispose,
+        TransportFailure? failure = null) : ICliTransport
     {
         public bool IsConnected { get; private set; }
 
@@ -1021,10 +1458,20 @@ public sealed class ClaudeCodeProviderTests
                     await Task.Yield();
                 }
             }
+
+            if (failure?.OnReceive is not null)
+            {
+                throw failure.OnReceive;
+            }
         }
 
         public Task SendAsync(CliMessage message, CancellationToken cancellationToken = default)
         {
+            if (failure?.OnSend is not null)
+            {
+                throw failure.OnSend;
+            }
+
             sentMessages.Add(message);
             return Task.CompletedTask;
         }
