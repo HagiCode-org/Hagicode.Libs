@@ -328,6 +328,14 @@ await foreach (var message in opencode.ExecuteAsync(
 
 The descriptor is aligned with the official OpenCode install guidance (`npm i -g opencode-ai@latest`) plus the pinned npm version snapshot resolved for this repository on `2026-03-28`. Real CLI validation still stays behind the `HAGICODE_REAL_CLI_TESTS` gate, so the default automated suite remains deterministic even when OpenCode is not installed locally.
 
+## Claude Code thinking display
+
+`ClaudeCodeOptions.ThinkingDisplay` is forwarded to the CLI as `--thinking-display <mode>`. Supported modes are `summarized`, `omitted`, and `highlights` (case-insensitive, surrounding whitespace ignored); any other value throws `ArgumentException` before a process starts. When unset or empty no flag is sent, so the CLI and model default applies. Current Claude models then stream thinking blocks with empty text, and `summarized` is what makes the text come back. Display only changes visibility; summaries cost the same tokens as omitted thinking.
+
+`--thinking-display` is hidden from `claude --help`. If a CLI exits at launch with an unknown-option error for exactly that flag, before any stream message, the provider starts one replacement process with the same arguments minus the flag, and remembers the executable as unsupported until the host process restarts. Any other failure, and any failure after the first message, is surfaced once with no retry. The `--settings` argument is never inspected or rewritten: `showThinkingSummaries` is ignored by the CLI in `--print` / stream-json mode.
+
+Verified with Claude Code 2.1.292 and 2.1.295: `--thinking-display summarized` returns thinking text and omitting the flag returns empty thinking text. Older builds are covered only by the fake-CLI fallback tests.
+
 ## Shared pooling
 
 Built-in providers now participate in a shared pooling architecture:
