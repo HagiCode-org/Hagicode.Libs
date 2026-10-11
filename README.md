@@ -86,7 +86,7 @@ The endpoint profile is provider-driven, so consumers can replace `IOnlineApiEnd
 
 ## Dedicated provider console
 
-`src/HagiCode.Libs.ClaudeCode.Console`, `src/HagiCode.Libs.Copilot.Console`, `src/HagiCode.Libs.Codex.Console`, `src/HagiCode.Libs.DeepAgents.Console`, `src/HagiCode.Libs.Codebuddy.Console`, `src/HagiCode.Libs.Gemini.Console`, `src/HagiCode.Libs.Junie.Console`, `src/HagiCode.Libs.Hermes.Console`, `src/HagiCode.Libs.Kimi.Console`, `src/HagiCode.Libs.Kiro.Console`, `src/HagiCode.Libs.OpenCode.Console`, `src/HagiCode.Libs.Pi.Console`, `src/HagiCode.Libs.QoderCli.Console`, and `src/HagiCode.Libs.Reasonix.Console` are dedicated provider consoles built on the shared `HagiCode.Libs.ConsoleTesting` harness.
+`src/HagiCode.Libs.ClaudeCode.Console`, `src/HagiCode.Libs.Copilot.Console`, `src/HagiCode.Libs.Codex.Console`, `src/HagiCode.Libs.DeepAgents.Console`, `src/HagiCode.Libs.Dsh.Console`, `src/HagiCode.Libs.Codebuddy.Console`, `src/HagiCode.Libs.Gemini.Console`, `src/HagiCode.Libs.Junie.Console`, `src/HagiCode.Libs.Hermes.Console`, `src/HagiCode.Libs.Kimi.Console`, `src/HagiCode.Libs.Kiro.Console`, `src/HagiCode.Libs.OpenCode.Console`, `src/HagiCode.Libs.Pi.Console`, `src/HagiCode.Libs.QoderCli.Console`, and `src/HagiCode.Libs.Reasonix.Console` are dedicated provider consoles built on the shared `HagiCode.Libs.ConsoleTesting` harness.
 
 `src/HagiCode.Libs.Providers/OpenCode` now owns the canonical OpenCode typed runtime/session surface and the reusable `OpenCodeFixtureServer` test fixture. `hagicode-core` consumes that boundary through adapter-level tests and no longer ships a second OpenCode console or runtime project.
 
@@ -140,6 +140,13 @@ dotnet run --project src/HagiCode.Libs.Gemini.Console -- --test-provider gemini-
 dotnet run --project src/HagiCode.Libs.Gemini.Console -- --test-provider-full --repo .
 dotnet run --project src/HagiCode.Libs.Gemini.Console -- --test-provider-full --model gemini-2.5-pro --arg --profile=smoke
 dotnet run --project src/HagiCode.Libs.Gemini.Console -- --test-all gemini
+
+dotnet run --project src/HagiCode.Libs.Dsh.Console -- --help
+dotnet run --project src/HagiCode.Libs.Dsh.Console
+dotnet run --project src/HagiCode.Libs.Dsh.Console -- --test-provider dsh-cli
+dotnet run --project src/HagiCode.Libs.Dsh.Console -- --test-provider-full --workspace .
+dotnet run --project src/HagiCode.Libs.Dsh.Console -- --test-provider-full --provider omniroute --model claude/claude-haiku-5-5 --dsh-home /path/to/dsh-home --verbose
+dotnet run --project src/HagiCode.Libs.Dsh.Console -- --test-all dsh
 
 dotnet run --project src/HagiCode.Libs.Junie.Console -- --help
 dotnet run --project src/HagiCode.Libs.Junie.Console
@@ -230,6 +237,10 @@ dotnet run --project src/HagiCode.Libs.Reasonix.Console -- --test-all reasonix
 - Gemini 默认套件当前包含 `Ping`、`Simple Prompt`、`Complex Prompt` 和 `Session Resume`。
 - Gemini accepts `--model <model>`, `--executable <path>`, repeated `--arg <value>` overrides, and optional `--auth-method <id>` / `--auth-token <token>` bootstrap hints.
 - Gemini repository summary remains opt-in via `--repo <path>`, and `gemini-cli` remains a dedicated-console alias for the canonical `gemini` provider name.
+- No arguments also run the default Dsh suite.
+- Dsh 默认套件当前包含 `Ping`、`Simple Prompt`、`Complex Prompt` 和 `Session Resume`。
+- Dsh accepts `--provider <id>` with `--model <model>` (for example `--provider omniroute --model claude/claude-haiku-5-5`). Libs sends dsh's advertised `["<provider>","<model>"]` value through `session/set_config_option` and forwards the model without splitting it. `--model` without `--provider` fails before the ACP session starts. Also accepted: `--executable <path>`, repeated `--arg <value>` overrides, `--dsh-home <path>` (exported as `DSH_HOME` to the spawned process), and `--verbose` (adds provider, model, and workspace detail lines to the output).
+- Dsh runs in the directory given by `--workspace <path>`; it has no `--repo` option. `dsh-cli` remains a dedicated-console alias for the canonical `dsh` provider name.
 - No arguments also run the default Junie suite.
 - Junie 默认套件当前包含 `Ping`、`Simple Prompt`、`Complex Prompt` 和 `Session Resume`。
 - Junie accepts `--model <model>`, `--executable <path>`, repeated `--arg <value>` overrides, and optional `--auth-method <id>` / `--auth-token <token>` bootstrap hints (`--auth-token` maps to `JUNIE_API_KEY`).
@@ -341,7 +352,7 @@ Verified with Claude Code 2.1.292 and 2.1.295: `--thinking-display summarized` r
 Built-in providers now participate in a shared pooling architecture:
 
 - ACP providers (`CodeBuddy`, `Gemini`, `Hermes`, `Kimi`, `Kiro`, `QoderCLI`) lease warm ACP sessions from the shared `CliProviderPoolCoordinator`.
-- `Claude Code` keeps native `SessionId` / `Resume` continuity but always starts a fresh local CLI transport for each invocation and disposes it after the terminal message. A `result` is terminal only once no background subagent is still running and every started turn has produced its `result`; the turn that launches a background subagent ends with its own `result`, and the subagent's output plus the follow-up turn keep streaming afterwards. Background shell tasks are not awaited.
+- `Claude Code` keeps native `SessionId` / `Resume` continuity but always starts a fresh local CLI transport for each invocation and disposes it after the terminal message. A `result` is terminal only once no background subagent is still running and every started turn has produced its `result`; the turn that launches a background subagent ends with its own `result`, and the subagent's output plus the follow-up turn keep streaming afterwards. A subagent can also finish its turn while a background command or monitor it started (a task with a `parent_task_id`) is still running; the CLI resumes that subagent when the task ends, so the run stays open for it, bounded by `ClaudeCodeOptions.SubagentBackgroundWorkTimeout` (default 20 minutes, `Timeout.InfiniteTimeSpan` for no limit). Background shell tasks started by the main agent are not awaited.
 - `Codex` runs each request in a fresh local CLI process. Resume continuity depends on an explicit `ThreadId`; there is no Codex-specific runtime pooling.
 - `Copilot` does not participate in the shared runtime pool. Each invocation creates a fresh SDK runtime, and continuity depends only on provider-native `SessionId` resume semantics.
 
@@ -643,6 +654,14 @@ HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.Providers.Tests/HagiCo
 HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.ConsoleTesting.Tests/HagiCode.Libs.ConsoleTesting.Tests.csproj --filter "FullyQualifiedName~Gemini"
 dotnet run --project src/HagiCode.Libs.Gemini.Console -- --test-provider-full --repo .
 ```
+
+**Dsh** (requires an installed and authenticated `dsh` whose `DSH_HOME` can serve Haiku 5.5):
+```bash
+HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.Providers.Tests/HagiCode.Libs.Providers.Tests.csproj --filter "FullyQualifiedName~Dsh"
+HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.ConsoleTesting.Tests/HagiCode.Libs.ConsoleTesting.Tests.csproj --filter "FullyQualifiedName~Dsh"
+dotnet run --project src/HagiCode.Libs.Dsh.Console -- --test-provider-full --provider omniroute --model claude/claude-haiku-5-5 --workspace .
+```
+The real-run tests deliberately use Haiku 5.5 to keep token use low. `claude/claude-haiku-5-5` is the shared test model, and `omniroute` is the dsh provider that owns it in the local OmniRoute setup. Confirm both values appear in your authenticated `DSH_HOME` model list before running these commands; the provider and model are sent as dsh's `["provider","model"]` selector, so a mismatch is rejected by dsh. The real-run gate is opt-in and never runs by default.
 
 **Junie** (requires local installation and any required local auth bootstrap):
 ```bash

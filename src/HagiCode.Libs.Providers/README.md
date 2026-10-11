@@ -1,6 +1,6 @@
 # HagiCode.Libs.Providers
 
-`HagiCode.Libs.Providers` builds on `HagiCode.Libs.Core` and adds reusable provider abstractions plus built-in integrations for Claude Code, Copilot, Codex, DeepAgents, CodeBuddy, Gemini, Junie, Hermes, Kimi, Kiro, OpenCode, Pi, OMP, QoderCLI, and Reasonix.
+`HagiCode.Libs.Providers` builds on `HagiCode.Libs.Core` and adds reusable provider abstractions plus built-in integrations for Claude Code, Copilot, Codex, DeepAgents, CodeBuddy, Gemini, Junie, Hermes, Dsh, Kimi, Kiro, OpenCode, Pi, OMP, QoderCLI, and Reasonix.
 
 ## What is included
 
@@ -29,6 +29,7 @@ using HagiCode.Libs.Providers.Codebuddy;
 using HagiCode.Libs.Providers.Copilot;
 using HagiCode.Libs.Providers.Codex;
 using HagiCode.Libs.Providers.DeepAgents;
+using HagiCode.Libs.Providers.Dsh;
 using HagiCode.Libs.Providers.Gemini;
 using HagiCode.Libs.Providers.Junie;
 using HagiCode.Libs.Providers.Hermes;
@@ -49,6 +50,7 @@ var codebuddy = serviceProvider.GetRequiredService<ICliProvider<CodebuddyOptions
 var copilot = serviceProvider.GetRequiredService<ICliProvider<CopilotOptions>>();
 var codex = serviceProvider.GetRequiredService<ICodexProvider>();
 var deepAgents = serviceProvider.GetRequiredService<ICliProvider<DeepAgentsOptions>>();
+var dsh = serviceProvider.GetRequiredService<ICliProvider<DshOptions>>();
 var gemini = serviceProvider.GetRequiredService<ICliProvider<GeminiOptions>>();
 var junie = serviceProvider.GetRequiredService<ICliProvider<JunieOptions>>();
 var hermes = serviceProvider.GetRequiredService<ICliProvider<HermesOptions>>();
@@ -291,6 +293,7 @@ Practical boundaries:
 - Provider callers should continue passing structured option models; the new facade is additive and does not replace provider-specific option records.
 - `gemini` is the canonical built-in provider name; `ProviderRegistry` and the dedicated console also accept `gemini-cli` as an alias.
 - `junie` is the canonical built-in provider name; `ProviderRegistry` also accepts `junie-cli` as an alias and boots ACP through `junie --acp=true`.
+- `dsh` is the canonical built-in provider name; `ProviderRegistry` also accepts `dsh-cli` as an alias and boots ACP through `dsh --profile acp`. Caller-supplied `--profile` arguments are rejected. Before any ACP start, the `dsh --help` banner (`DeepSeek Harness`) is checked so an unrelated distributed-shell `dsh` is not driven as an agent.
 - `deepagents` is the canonical built-in provider name, and the managed runtime boots ACP through `deepagents --acp`.
 - `kimi` is the canonical built-in provider name; `ProviderRegistry` and the dedicated console also accept `kimi-cli` as an alias.
 - `kiro-cli` is the canonical built-in provider name across the shared provider registry and the dedicated console.
