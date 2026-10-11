@@ -76,6 +76,7 @@ var poolDefaults = serviceProvider.GetRequiredService<CliProviderPoolConfigurati
 `Claude Code`、`CodeBuddy`、`Hermes` 现在与 `hagicode-core` 的对应 provider 薄适配层共享同一套 libs-backed 实现。重点是：
 
 - `Claude Code` 继续保留 raw stream / resume 语义，但 `ClaudeCodeProvider` 现在固定按次启动并回收本地 CLI 进程，不再做 warm transport reuse
+- 调用方取消（`CancellationToken`）会以 `OperationCanceledException` 结束流，不会被当作正常的流结束；只有子代理等待计时器触发的静默停止会被吞掉。取消后 transport 会被释放，进程随之回收
 - `CodeBuddy` 的 tool update 归一化与 permission-mode 映射统一落在 `CodebuddyProvider`
 - `Hermes` 的 ACP session reuse、fallback 文本聚合与 lifecycle 诊断统一落在 `HermesProvider`
 - `HagiCode.Libs.Providers` 只负责单次执行并保留 provider-native 会话上下文；如果上层需要重试，必须在 provider 调用边界之外显式编排
