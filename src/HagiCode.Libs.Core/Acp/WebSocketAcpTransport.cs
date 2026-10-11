@@ -65,8 +65,10 @@ public sealed class WebSocketAcpTransport : IAcpTransport, IAcpTransportDiagnost
         try
         {
             using var stream = new MemoryStream();
-            while (!cancellationToken.IsCancellationRequested)
+            while (true)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 var result = await _webSocket.ReceiveAsync(rentedBuffer, cancellationToken).ConfigureAwait(false);
                 if (result.MessageType == WebSocketMessageType.Close)
                 {

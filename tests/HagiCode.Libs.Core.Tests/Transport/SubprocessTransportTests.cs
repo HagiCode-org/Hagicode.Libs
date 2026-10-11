@@ -201,6 +201,68 @@ public sealed class SubprocessTransportTests
         exception.Message.ShouldContain("auth required");
     }
 
+    [Fact]
+    public async Task SubprocessTransport_natural_eof_with_zero_exit_completes()
+    {
+        var manager = new CliProcessManager();
+        await using var transport = new SubprocessTransport(manager, new ProcessStartContext
+        {
+            ExecutablePath = "/bin/sh",
+            Arguments = ["-lc", "printf '{\"type\":\"result\",\"done\":true}\\n'; exit 0"]
+        });
+
+        await transport.ConnectAsync();
+
+        var messages = new List<CliMessage>();
+        await foreach (var message in transport.ReceiveAsync())
+        {
+            messages.Add(message);
+        }
+
+        messages.Select(static message => message.Type).ShouldBe(["result"]);
+    }
+
+    [Fact]
+    public async Task SubprocessTransport_cancellation_while_waiting_for_output_throws()
+    {
+        var manager = new CliProcessManager();
+        await using var transport = new SubprocessTransport(manager, new ProcessStartContext
+        {
+            ExecutablePath = "/bin/sh",
+            Arguments = ["-lc", "sleep 30"]
+        });
+
+        await transport.ConnectAsync();
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+
+        await Should.ThrowAsync<OperationCanceledException>(async () =>
+        {
+            await foreach (var _ in transport.ReceiveAsync(cancellation.Token))
+            {
+            }
+        });
+    }
+
+    [Fact]
+    public async Task SubprocessTransport_cancellation_between_yielded_messages_throws()
+    {
+        var manager = new CliProcessManager();
+        await using var transport = new SubprocessTransport(manager, new ProcessStartContext
+        {
+            ExecutablePath = "/bin/sh",
+            Arguments = ["-lc", "printf '{\"type\":\"assistant\",\"text\":\"first\"}\\n{\"type\":\"assistant\",\"text\":\"second\"}\\n'; sleep 30"]
+        });
+
+        await transport.ConnectAsync();
+        using var cancellation = new CancellationTokenSource();
+        await using var messages = transport.ReceiveAsync(cancellation.Token).GetAsyncEnumerator();
+
+        (await messages.MoveNextAsync()).ShouldBeTrue();
+        cancellation.Cancel();
+
+        await Should.ThrowAsync<OperationCanceledException>(async () => await messages.MoveNextAsync());
+    }
+
     private sealed class WindowsBatchRecordingCliProcessManager(string resolvedExecutablePath, string shellCommand) : CliProcessManager
     {
         public ProcessStartInfo? LastStartInfo { get; private set; }

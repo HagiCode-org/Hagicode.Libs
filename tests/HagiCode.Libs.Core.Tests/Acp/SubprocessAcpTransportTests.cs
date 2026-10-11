@@ -39,6 +39,25 @@ public sealed class SubprocessAcpTransportTests
         exception.Message.ShouldContain("stderr pipe failed unexpectedly");
     }
 
+    [Fact]
+    public async Task ReceiveMessagesAsync_cancellation_between_messages_throws()
+    {
+        await using var transport = new SubprocessAcpTransport(new CliProcessManager(), new ProcessStartContext
+        {
+            ExecutablePath = "/bin/sh",
+            Arguments = ["-lc", "printf 'first\\nsecond\\n'; sleep 30"]
+        });
+
+        await transport.ConnectAsync();
+        using var cancellation = new CancellationTokenSource();
+        await using var messages = transport.ReceiveMessagesAsync(cancellation.Token).GetAsyncEnumerator();
+
+        (await messages.MoveNextAsync()).ShouldBeTrue();
+        cancellation.Cancel();
+
+        await Should.ThrowAsync<OperationCanceledException>(async () => await messages.MoveNextAsync());
+    }
+
     private sealed class ThrowingStandardErrorCliProcessManager(Func<Exception> createReadException) : CliProcessManager
     {
         public override ValueTask<CliProcessHandle> StartAsync(ProcessStartContext context, CancellationToken cancellationToken = default)

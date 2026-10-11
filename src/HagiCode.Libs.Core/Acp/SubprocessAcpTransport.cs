@@ -75,8 +75,10 @@ public sealed class SubprocessAcpTransport : IAcpTransport, IAcpTransportDiagnos
         ThrowIfDisposed();
         var handle = EnsureConnected();
 
-        while (!cancellationToken.IsCancellationRequested)
+        while (true)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             var line = await handle.StandardOutput.ReadLineAsync(cancellationToken);
             if (line is null)
             {
