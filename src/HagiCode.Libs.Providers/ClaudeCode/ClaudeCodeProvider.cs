@@ -76,6 +76,14 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
+        if (options.SubagentBackgroundWorkTimeout != Timeout.InfiniteTimeSpan
+            && options.SubagentBackgroundWorkTimeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.SubagentBackgroundWorkTimeout,
+                "SubagentBackgroundWorkTimeout must be positive or Timeout.InfiniteTimeSpan.");
+        }
 
         var runtimeEnvironment = await ResolveRuntimeEnvironmentAsync(cancellationToken);
         var executablePath = ResolveExecutablePath(options, runtimeEnvironment)
@@ -428,12 +436,44 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
         // The first "result" is not necessarily the last one: a background subagent keeps running after the turn
         // that launched it, so the tracker decides when the run is really over.
         var completionTracker = new ClaudeStreamCompletionTracker();
-        await foreach (var message in transport.ReceiveAsync(cancellationToken).ConfigureAwait(false))
+
+        // Work a subagent left running in the background is awaited, but it may never end. The wait is bounded by
+        // cancelling the receive loop; a C# iterator cannot yield inside a try block that has a catch, so the stream
+        // is driven by hand and messages are yielded outside the try.
+        using var receiveCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        await using var receiver = transport.ReceiveAsync(receiveCancellation.Token)
+            .GetAsyncEnumerator(receiveCancellation.Token);
+        var backgroundWaitTimerArmed = false;
+
+        while (true)
         {
+            try
+            {
+                if (!await receiver.MoveNextAsync().ConfigureAwait(false))
+                {
+                    yield break;
+                }
+            }
+            catch (OperationCanceledException) when (
+                receiveCancellation.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+            {
+                // The only other canceller is the background-work timer: give up waiting.
+                yield break;
+            }
+
+            var message = receiver.Current;
             yield return EnrichMessageWithDebugMetadata(message, debugContext);
             if (completionTracker.Observe(message))
             {
                 yield break;
+            }
+
+            var waitingOnBackgroundWork = completionTracker.IsWaitingOnSubagentBackgroundWork;
+            if (waitingOnBackgroundWork != backgroundWaitTimerArmed)
+            {
+                receiveCancellation.CancelAfter(
+                    waitingOnBackgroundWork ? options.SubagentBackgroundWorkTimeout : Timeout.InfiniteTimeSpan);
+                backgroundWaitTimerArmed = waitingOnBackgroundWork;
             }
         }
     }

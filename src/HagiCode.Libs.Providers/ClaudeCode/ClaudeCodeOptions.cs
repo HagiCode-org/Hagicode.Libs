@@ -112,4 +112,17 @@ public sealed record ClaudeCodeOptions
     /// </summary>
     public string? McpServersPath { get; init; }
 
+    /// <summary>
+    /// Gets or sets how long the run stays open after a <c>result</c> while a background subagent has reported back but
+    /// a background command or monitor it started is still running. The CLI resumes the subagent when that work
+    /// finishes, so ending the run earlier kills it and loses the subagent's real result.
+    /// The default is 20 minutes. Use <see cref="System.Threading.Timeout.InfiniteTimeSpan" /> to wait without a limit.
+    /// When the limit passes the run ends with the results already received.
+    /// </summary>
+    public TimeSpan SubagentBackgroundWorkTimeout { get; init; } = DefaultSubagentBackgroundWorkTimeout;
+
+    /// <summary>
+    /// The default value of <see cref="SubagentBackgroundWorkTimeout" />.
+    /// </summary>
+    public static readonly TimeSpan DefaultSubagentBackgroundWorkTimeout = TimeSpan.FromMinutes(20);
 }

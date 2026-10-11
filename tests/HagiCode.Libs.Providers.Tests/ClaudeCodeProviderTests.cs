@@ -1028,6 +1028,137 @@ public sealed class ClaudeCodeProviderTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_keeps_streaming_while_subagent_background_task_outlives_the_subagent()
+    {
+        // Real stream order (Claude Code 2.1.292): a background subagent starts its own background command and ends its
+        // turn. The CLI reports the subagent as completed and lets the main agent take another turn (its own "result"),
+        // while the command is still running. Only when the command finishes does the CLI resume the subagent, whose
+        // real result reaches the main agent in a later turn. Ending the run at the interim "result" kills the command.
+        var provider = CreateProvider(messageBatches:
+        [
+            [
+                StreamMessage("system", new { subtype = "init" }),
+                StreamMessage("system", new { subtype = "background_tasks_changed", tasks = SubagentTasks("agent-1") }),
+                StreamMessage("system", new { subtype = "task_started", task_id = "agent-1", task_type = "local_agent" }),
+                StreamMessage("result", new { is_error = false, result = "DONE" }),
+                StreamMessage(
+                    "system",
+                    new
+                    {
+                        subtype = "task_started",
+                        task_id = "bash-1",
+                        task_type = "local_bash",
+                        owned_by_subagent = true,
+                        parent_task_id = "agent-1"
+                    }),
+                StreamMessage(
+                    "system",
+                    new
+                    {
+                        subtype = "background_tasks_changed",
+                        tasks = new object[]
+                        {
+                            new { task_id = "agent-1", task_type = "local_agent" },
+                            new { task_id = "bash-1", task_type = "local_bash", parent_task_id = "agent-1" }
+                        }
+                    }),
+                StreamMessage("system", new { subtype = "task_notification", task_id = "agent-1", status = "completed" }),
+                StreamMessage(
+                    "system",
+                    new
+                    {
+                        subtype = "background_tasks_changed",
+                        tasks = new object[] { new { task_id = "bash-1", task_type = "local_bash", parent_task_id = "agent-1" } }
+                    }),
+                StreamMessage("system", new { subtype = "init" }),
+                StreamMessage("result", new { is_error = false, result = "command is running, waiting" }),
+                StreamMessage("system", new { subtype = "task_notification", task_id = "bash-1", status = "completed" }),
+                StreamMessage("system", new { subtype = "background_tasks_changed", tasks = SubagentTasks() }),
+                StreamMessage("system", new { subtype = "background_tasks_changed", tasks = SubagentTasks("agent-1") }),
+                StreamMessage("system", new { subtype = "task_started", task_id = "agent-1", task_type = "local_agent" }),
+                StreamMessage("system", new { subtype = "task_notification", task_id = "agent-1", status = "completed" }),
+                StreamMessage("system", new { subtype = "background_tasks_changed", tasks = SubagentTasks() }),
+                StreamMessage("system", new { subtype = "init" }),
+                StreamMessage("result", new { is_error = false, result = "background test completed" }),
+                StreamMessage("assistant", new { marker = "after-final-result" })
+            ]
+        ]);
+
+        var messages = await CollectAsync(provider);
+
+        messages.Count(static message => message.Type == "result").ShouldBe(3);
+        messages[^1].Type.ShouldBe("result");
+        messages[^1].Content.GetProperty("result").GetString().ShouldBe("background test completed");
+        messages.Any(static message => message.Content.TryGetProperty("marker", out _)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_stops_waiting_for_subagent_background_task_after_timeout()
+    {
+        var provider = CreateProvider(
+            messageBatches: [SubagentBackgroundTaskOutlivesSubagentBatch()],
+            transportFailures: [new TransportFailure(HangAfterBatch: true)]);
+        var options = new ClaudeCodeOptions
+        {
+            SessionId = "session-1",
+            WorkingDirectory = "/tmp/project",
+            SubagentBackgroundWorkTimeout = TimeSpan.FromMilliseconds(200)
+        };
+
+        var messages = new List<CliMessage>();
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await foreach (var message in provider.ExecuteAsync(options, "hello", guard.Token))
+        {
+            messages.Add(message);
+        }
+
+        guard.IsCancellationRequested.ShouldBeFalse();
+        messages[^1].Type.ShouldBe("result");
+        messages[^1].Content.GetProperty("result").GetString().ShouldBe("command is running, waiting");
+        provider.DisposedTransportCount.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_propagates_caller_cancellation_while_waiting_for_subagent_background_task()
+    {
+        var provider = CreateProvider(
+            messageBatches: [SubagentBackgroundTaskOutlivesSubagentBatch()],
+            transportFailures: [new TransportFailure(HangAfterBatch: true)]);
+        using var cancellation = new CancellationTokenSource();
+
+        await Should.ThrowAsync<OperationCanceledException>(async () =>
+        {
+            await foreach (var message in provider.ExecuteAsync(
+                               new ClaudeCodeOptions { SessionId = "session-1", WorkingDirectory = "/tmp/project" },
+                               "hello",
+                               cancellation.Token))
+            {
+                if (message.Type == "result")
+                {
+                    await cancellation.CancelAsync();
+                }
+            }
+        });
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-5)]
+    public async Task ExecuteAsync_rejects_non_positive_subagent_background_work_timeout(int seconds)
+    {
+        var provider = CreateProvider();
+
+        await Should.ThrowAsync<ArgumentOutOfRangeException>(async () =>
+        {
+            await foreach (var _ in provider.ExecuteAsync(
+                               new ClaudeCodeOptions { SubagentBackgroundWorkTimeout = TimeSpan.FromSeconds(seconds) },
+                               "hello"))
+            {
+            }
+        });
+    }
+
+    [Fact]
     public async Task ExecuteAsync_stops_at_error_result_even_when_subagent_is_still_running()
     {
         var provider = CreateProvider(messageBatches:
@@ -1349,6 +1480,41 @@ public sealed class ClaudeCodeProviderTests
         return taskIds.Select(static taskId => (object)new { task_id = taskId, task_type = "local_agent" }).ToArray();
     }
 
+    /// <summary>
+    /// The stream up to the interim "result" of the main agent's follow-up turn: the subagent has reported back, but the
+    /// background command it started is still running.
+    /// </summary>
+    private static IReadOnlyList<CliMessage> SubagentBackgroundTaskOutlivesSubagentBatch()
+    {
+        return
+        [
+            StreamMessage("system", new { subtype = "init" }),
+            StreamMessage("system", new { subtype = "background_tasks_changed", tasks = SubagentTasks("agent-1") }),
+            StreamMessage("result", new { is_error = false, result = "DONE" }),
+            StreamMessage(
+                "system",
+                new
+                {
+                    subtype = "background_tasks_changed",
+                    tasks = new object[]
+                    {
+                        new { task_id = "agent-1", task_type = "local_agent" },
+                        new { task_id = "bash-1", task_type = "local_bash", parent_task_id = "agent-1" }
+                    }
+                }),
+            StreamMessage("system", new { subtype = "task_notification", task_id = "agent-1", status = "completed" }),
+            StreamMessage(
+                "system",
+                new
+                {
+                    subtype = "background_tasks_changed",
+                    tasks = new object[] { new { task_id = "bash-1", task_type = "local_bash", parent_task_id = "agent-1" } }
+                }),
+            StreamMessage("system", new { subtype = "init" }),
+            StreamMessage("result", new { is_error = false, result = "command is running, waiting" })
+        ];
+    }
+
     private static List<string> DescribeTypes(IEnumerable<CliMessage> messages)
     {
         return messages
@@ -1376,8 +1542,10 @@ public sealed class ClaudeCodeProviderTests
     /// <summary>
     /// Scripts how one transport attempt fails. <see cref="OnSend" /> throws from SendAsync before the prompt is recorded;
     /// <see cref="OnReceive" /> throws from ReceiveAsync after the attempt's message batch has been yielded.
+    /// <see cref="HangAfterBatch" /> keeps ReceiveAsync open after the batch until it is cancelled, like a CLI that is
+    /// still running.
     /// </summary>
-    private sealed record TransportFailure(Exception? OnSend = null, Exception? OnReceive = null);
+    private sealed record TransportFailure(Exception? OnSend = null, Exception? OnReceive = null, bool HangAfterBatch = false);
 
     private sealed class TestClaudeCodeProvider(
         CliExecutableResolver executableResolver,
@@ -1457,6 +1625,11 @@ public sealed class ClaudeCodeProviderTests
                 {
                     await Task.Yield();
                 }
+            }
+
+            if (failure?.HangAfterBatch == true)
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             }
 
             if (failure?.OnReceive is not null)
