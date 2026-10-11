@@ -238,7 +238,7 @@ dotnet run --project src/HagiCode.Libs.Reasonix.Console -- --test-all reasonix
 - Gemini accepts `--model <model>`, `--executable <path>`, repeated `--arg <value>` overrides, and optional `--auth-method <id>` / `--auth-token <token>` bootstrap hints.
 - Gemini repository summary remains opt-in via `--repo <path>`, and `gemini-cli` remains a dedicated-console alias for the canonical `gemini` provider name.
 - No arguments also run the default Dsh suite.
-- Dsh 默认套件当前包含 `Ping`、`Simple Prompt`、`Complex Prompt` 和 `Session Resume`。
+- Dsh 默认套件当前包含 `Ping`、`Simple Prompt`、`Complex Prompt`、`Session Resume` 和 `Tool Call`。
 - Dsh accepts `--provider <id>` with `--model <model>` (for example `--provider omniroute --model claude/claude-haiku-5-5`). Libs sends dsh's advertised `["<provider>","<model>"]` value through `session/set_config_option` and forwards the model without splitting it. `--model` without `--provider` fails before the ACP session starts. Also accepted: `--executable <path>`, repeated `--arg <value>` overrides, `--dsh-home <path>` (exported as `DSH_HOME` to the spawned process), and `--verbose` (adds provider, model, and workspace detail lines to the output).
 - Dsh runs in the directory given by `--workspace <path>`; it has no `--repo` option. `dsh-cli` remains a dedicated-console alias for the canonical `dsh` provider name.
 - No arguments also run the default Junie suite.
