@@ -30,7 +30,8 @@ public sealed class DshConsoleIntegrationTests
         rendered.ShouldContain("[PASS] dsh / Simple Prompt");
         rendered.ShouldContain("[PASS] dsh / Complex Prompt");
         rendered.ShouldContain("[PASS] dsh / Session Resume");
-        rendered.ShouldContain("Summary: 4/4 passed");
+        rendered.ShouldContain("[PASS] dsh / Tool Call");
+        rendered.ShouldContain("Summary: 5/5 passed");
         rendered.ShouldNotContain("Model:");
     }
 
@@ -113,7 +114,7 @@ public sealed class DshConsoleIntegrationTests
         var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(["--test-provider-full"], DshConsoleDefinition.Instance, runner, output);
 
         exitCode.ShouldBe(0);
-        provider.ReceivedOptions.Count.ShouldBe(4);
+        provider.ReceivedOptions.Count.ShouldBe(5);
         foreach (var options in provider.ReceivedOptions)
         {
             options.Provider.ShouldBeNull();
@@ -148,7 +149,7 @@ public sealed class DshConsoleIntegrationTests
             output);
 
         exitCode.ShouldBe(0);
-        provider.ReceivedOptions.Count.ShouldBe(4);
+        provider.ReceivedOptions.Count.ShouldBe(5);
         foreach (var options in provider.ReceivedOptions)
         {
             options.ExecutablePath.ShouldBe("/tmp/dsh");
@@ -160,7 +161,7 @@ public sealed class DshConsoleIntegrationTests
         }
 
         provider.ReceivedOptions[3].SessionId.ShouldBe(provider.EmittedSessionIds[2]);
-        output.ToString().ShouldContain("Summary: 4/4 passed");
+        output.ToString().ShouldContain("Summary: 5/5 passed");
     }
 
     [Fact]
@@ -196,7 +197,64 @@ public sealed class DshConsoleIntegrationTests
         var rendered = output.ToString();
         rendered.ShouldContain("[FAIL] dsh / Session Resume");
         rendered.ShouldContain("dsh did not expose a session identifier");
-        rendered.ShouldContain("Summary: 3/4 passed");
+        rendered.ShouldContain("Summary: 4/5 passed");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_verbose_lists_tool_calls_and_assistant_message_identity()
+    {
+        var provider = new FakeDshProvider();
+        using var output = new StringWriter();
+        var runner = new DshConsoleRunner(DshConsoleDefinition.Instance, provider, new ProviderConsoleOutputFormatter(output));
+
+        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(
+            ["--test-provider-full", "--verbose"],
+            DshConsoleDefinition.Instance,
+            runner,
+            output);
+
+        exitCode.ShouldBe(0);
+        var rendered = output.ToString();
+        rendered.ShouldContain("Tool: tool-call-1 / List files / completed");
+        rendered.ShouldContain("Assistant message ids: 2");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_tool_call_fails_when_no_tool_activity_is_observed()
+    {
+        var provider = new FakeDshProvider(toolBehavior: FakeToolBehavior.NoToolCall);
+        using var output = new StringWriter();
+        var runner = new DshConsoleRunner(DshConsoleDefinition.Instance, provider, new ProviderConsoleOutputFormatter(output));
+
+        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync([], DshConsoleDefinition.Instance, runner, output);
+
+        exitCode.ShouldBe(1);
+        var rendered = output.ToString();
+        rendered.ShouldContain("[FAIL] dsh / Tool Call");
+        rendered.ShouldContain("No tool call was observed");
+        rendered.ShouldContain("Summary: 4/5 passed");
+    }
+
+    [Theory]
+    [InlineData(FakeToolBehavior.Unfinished, "never completed", "in_progress")]
+    [InlineData(FakeToolBehavior.Failed, "failed", "failed")]
+    public async Task DispatchAsync_tool_call_fails_for_unfinished_or_failed_tools(
+        FakeToolBehavior toolBehavior,
+        string expectedProblem,
+        string expectedStatus)
+    {
+        var provider = new FakeDshProvider(toolBehavior: toolBehavior);
+        using var output = new StringWriter();
+        var runner = new DshConsoleRunner(DshConsoleDefinition.Instance, provider, new ProviderConsoleOutputFormatter(output));
+
+        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync([], DshConsoleDefinition.Instance, runner, output);
+
+        exitCode.ShouldBe(1);
+        var rendered = output.ToString();
+        rendered.ShouldContain("[FAIL] dsh / Tool Call");
+        rendered.ShouldContain("Tool call 'tool-call-1'");
+        rendered.ShouldContain(expectedProblem);
+        rendered.ShouldContain($"final status: {expectedStatus}");
     }
 
     [Fact]
@@ -241,7 +299,8 @@ public sealed class DshConsoleIntegrationTests
             exitCode.ShouldBe(0);
             var rendered = output.ToString();
             rendered.ShouldContain("[PASS] dsh / Session Resume");
-            rendered.ShouldContain("Summary: 4/4 passed");
+            rendered.ShouldContain("[PASS] dsh / Tool Call");
+            rendered.ShouldContain("Summary: 5/5 passed");
         }
         finally
         {
@@ -256,7 +315,17 @@ public sealed class DshConsoleIntegrationTests
                || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
     }
 
-    private sealed class FakeDshProvider(bool omitSessionId = false) : ICliProvider<DshOptions>
+    public enum FakeToolBehavior
+    {
+        Completed,
+        NoToolCall,
+        Unfinished,
+        Failed,
+    }
+
+    private sealed class FakeDshProvider(
+        bool omitSessionId = false,
+        FakeToolBehavior toolBehavior = FakeToolBehavior.Completed) : ICliProvider<DshOptions>
     {
         private readonly Dictionary<string, string> _sessionSecrets = [];
 
@@ -291,21 +360,78 @@ public sealed class DshConsoleIntegrationTests
             var lifecycleType = options.SessionId is null ? "session.started" : "session.resumed";
 
             yield return new CliMessage(lifecycleType, Payload(lifecycleType, sessionId));
-            foreach (var chunk in SplitResponse(BuildResponse(prompt, sessionId)))
+            if (prompt.Contains("shell tool", StringComparison.OrdinalIgnoreCase))
             {
-                yield return new CliMessage("assistant", Payload("assistant", sessionId, text: chunk));
+                foreach (var message in BuildToolTurn(sessionId))
+                {
+                    yield return message;
+                }
+            }
+            else
+            {
+                foreach (var chunk in SplitResponse(BuildResponse(prompt, sessionId)))
+                {
+                    yield return new CliMessage("assistant", Payload("assistant", sessionId, text: chunk));
+                }
             }
 
             yield return new CliMessage("terminal.completed", Payload("terminal.completed", sessionId, stopReason: "end_turn"));
             await Task.Yield();
         }
 
-        private JsonElement Payload(string type, string sessionId, string? text = null, string? stopReason = null)
+        private IEnumerable<CliMessage> BuildToolTurn(string sessionId)
+        {
+            yield return AssistantWithMessageId(sessionId, "Listing files now.", "message-1");
+
+            if (toolBehavior != FakeToolBehavior.NoToolCall)
+            {
+                yield return new CliMessage("tool.call", Payload("tool.call", sessionId, update: new
+                {
+                    sessionUpdate = "tool_call",
+                    toolCallId = "tool-call-1",
+                    title = "bash",
+                    kind = "other",
+                    status = "in_progress",
+                    rawInput = new { command = "ls", description = "List files" }
+                }));
+
+                if (toolBehavior != FakeToolBehavior.Unfinished)
+                {
+                    var status = toolBehavior == FakeToolBehavior.Failed ? "failed" : "completed";
+                    yield return new CliMessage("tool.update", Payload("tool.update", sessionId, update: new
+                    {
+                        sessionUpdate = "tool_call_update",
+                        toolCallId = "tool-call-1",
+                        status,
+                        content = new[] { new { type = "content", content = new { type = "text", text = "a.txt\nb.txt\nc.txt\n" } } }
+                    }));
+                }
+            }
+
+            yield return AssistantWithMessageId(sessionId, "There are 3 files.", "message-2");
+        }
+
+        private CliMessage AssistantWithMessageId(string sessionId, string text, string messageId)
+        {
+            return new CliMessage("assistant", Payload("assistant", sessionId, text: text, update: new
+            {
+                sessionUpdate = "agent_message_chunk",
+                messageId,
+                content = new { type = "text", text }
+            }));
+        }
+
+        private JsonElement Payload(string type, string sessionId, string? text = null, string? stopReason = null, object? update = null)
         {
             var fields = new Dictionary<string, object?> { ["type"] = type };
             if (!omitSessionId)
             {
                 fields["session_id"] = sessionId;
+            }
+
+            if (update is not null)
+            {
+                fields["update"] = update;
             }
 
             if (text is not null)

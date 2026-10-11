@@ -28,7 +28,8 @@ public sealed class DshConsoleRunner : ProviderConsoleRunnerBase<ICliProvider<Ds
         [
             SimplePromptScenario.Create(options),
             ComplexPromptScenario.Create(options),
-            SessionResumeScenario.Create(options)
+            SessionResumeScenario.Create(options),
+            ToolCallScenario.Create(options)
         ];
     }
 }

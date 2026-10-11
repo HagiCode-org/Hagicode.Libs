@@ -13,6 +13,10 @@ public sealed class DshRealCliTests
     private const string DshExecutableCandidate = "dsh";
     private const string TestModel = "claude-haiku-5-5";
 
+    // DshOptions.Model requires DshOptions.Provider, so the tool-call check uses dsh's advertised pair.
+    private const string ToolCallTestProvider = "omniroute";
+    private const string ToolCallTestModel = "claude/claude-haiku-5-5";
+
     [Fact]
     [Trait("Category", "RealCli")]
     public async Task PingAsync_real_cli_validates_dsh_identity_when_opted_in()
@@ -175,6 +179,65 @@ public sealed class DshRealCliTests
         }
     }
 
+    [Fact]
+    [Trait("Category", "RealCli")]
+    public async Task ExecuteAsync_real_cli_tool_call_streams_started_and_completed_updates_when_opted_in()
+    {
+        if (!IsRealCliTestsEnabled())
+        {
+            return;
+        }
+
+        var resolver = new CliExecutableResolver();
+        RequireDshOnPath(resolver);
+
+        var workspacePath = CreateWorkspacePath();
+
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(workspacePath, "dsh-tool-call.txt"), "tool call fixture");
+            await using var provider = new DshProvider(resolver, new CliProcessManager());
+            using var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(180));
+            var options = new DshOptions
+            {
+                WorkingDirectory = workspacePath,
+                Provider = ToolCallTestProvider,
+                Model = ToolCallTestModel
+            };
+
+            var messages = await CollectMessagesAsync(
+                provider,
+                options,
+                "Use your shell tool to run the read-only command `ls` in the current directory, then summarize the result in one sentence.",
+                cancellationTokenSource.Token);
+
+            var terminalIndex = messages.FindIndex(static message => message.Type == "terminal.completed");
+            terminalIndex.ShouldBeGreaterThanOrEqualTo(0, $"dsh did not complete the turn. Messages: {DescribeMessages(messages)}");
+
+            var toolCallIds = messages
+                .Take(terminalIndex)
+                .Where(static message => message.Type == "tool.call")
+                .Select(static message => FindToolCallId(message))
+                .OfType<string>()
+                .Where(static id => !string.IsNullOrWhiteSpace(id))
+                .ToArray();
+            toolCallIds.ShouldNotBeEmpty($"dsh emitted no tool.call message. Messages: {DescribeMessages(messages)}");
+
+            var completedToolCallIds = messages
+                .Take(terminalIndex)
+                .Where(static message => message.Type == "tool.update" && FindToolStatus(message) == "completed")
+                .Select(static message => FindToolCallId(message))
+                .OfType<string>()
+                .ToHashSet(StringComparer.Ordinal);
+            toolCallIds.Any(completedToolCallIds.Contains).ShouldBeTrue(
+                $"No tool.call had a completed tool.update with the same id before terminal.completed. Messages: {DescribeMessages(messages)}");
+        }
+        finally
+        {
+            Directory.Delete(workspacePath, recursive: true);
+        }
+    }
+
     private static void RequireDshOnPath(CliExecutableResolver resolver)
     {
         if (resolver.ResolveFirstAvailablePath([DshExecutableCandidate, "dsh-cli"]) is null)
@@ -221,6 +284,27 @@ public sealed class DshRealCliTests
                 ? element.GetString()
                 : null)
             .FirstOrDefault(static sessionId => !string.IsNullOrWhiteSpace(sessionId));
+    }
+
+    private static string? FindToolCallId(CliMessage message)
+    {
+        return FindUpdateString(message, "toolCallId");
+    }
+
+    private static string? FindToolStatus(CliMessage message)
+    {
+        return FindUpdateString(message, "status");
+    }
+
+    private static string? FindUpdateString(CliMessage message, string propertyName)
+    {
+        return message.Content.ValueKind == JsonValueKind.Object &&
+               message.Content.TryGetProperty("update", out var update) &&
+               update.ValueKind == JsonValueKind.Object &&
+               update.TryGetProperty(propertyName, out var element) &&
+               element.ValueKind == JsonValueKind.String
+            ? element.GetString()
+            : null;
     }
 
     private static string DescribeMessages(IEnumerable<CliMessage> messages)
