@@ -89,6 +89,12 @@ public static class CliInstallRegistry
             ExecutableCandidates: ["hermes", "hermes-cli"],
             IsPubliclyInstallable: false),
         new CliInstallDescriptor(
+            ProviderName: "Dsh",
+            NpmPackage: string.Empty,
+            PinnedVersion: string.Empty,
+            ExecutableCandidates: ["dsh", "dsh-cli"],
+            IsPubliclyInstallable: false),
+        new CliInstallDescriptor(
             ProviderName: "Kimi",
             NpmPackage: string.Empty,
             PinnedVersion: string.Empty,

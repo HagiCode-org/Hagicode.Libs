@@ -50,6 +50,17 @@ public sealed class CliInstallRegistryTests
     }
 
     [Fact]
+    public void Descriptors_include_dsh_with_explicit_local_only_metadata()
+    {
+        var descriptor = CliInstallRegistry.Descriptors.Single(d => d.ProviderName == "Dsh");
+
+        descriptor.NpmPackage.ShouldBeEmpty();
+        descriptor.PinnedVersion.ShouldBeEmpty();
+        descriptor.ExecutableCandidates.ShouldBe(["dsh", "dsh-cli"]);
+        descriptor.IsPubliclyInstallable.ShouldBeFalse();
+    }
+
+    [Fact]
     public void Descriptors_include_deepagents_with_explicit_local_only_metadata()
     {
         var descriptor = CliInstallRegistry.Descriptors.Single(d => d.ProviderName == "DeepAgents");

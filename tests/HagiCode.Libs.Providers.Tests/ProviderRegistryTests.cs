@@ -3,6 +3,7 @@ using HagiCode.Libs.Providers;
 using HagiCode.Libs.Providers.ClaudeCode;
 using HagiCode.Libs.Providers.Codebuddy;
 using HagiCode.Libs.Providers.DeepAgents;
+using HagiCode.Libs.Providers.Dsh;
 using HagiCode.Libs.Providers.Gemini;
 using HagiCode.Libs.Providers.OpenCode;
 using HagiCode.Libs.Providers.Omp;
@@ -119,6 +120,21 @@ public sealed class ProviderRegistryTests
         registry.GetProvider("pi-cli").ShouldBeOfType<PiProvider>();
         registry.GetProvider<PiOptions>("pi").ShouldBeOfType<PiProvider>();
         registry.GetProvider<PiOptions>("pi-cli").ShouldBeOfType<PiProvider>();
+    }
+
+    [Fact]
+    public async Task AddHagiCodeLibs_registers_dsh_alias_in_provider_registry()
+    {
+        var services = new ServiceCollection();
+        services.AddHagiCodeLibs();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var registry = serviceProvider.GetRequiredService<ProviderRegistry>();
+
+        registry.GetProvider("dsh").ShouldBeOfType<DshProvider>();
+        registry.GetProvider("dsh-cli").ShouldBeOfType<DshProvider>();
+        registry.GetProvider<DshOptions>("dsh").ShouldBeOfType<DshProvider>();
+        registry.GetProvider<DshOptions>("dsh-cli").ShouldBeOfType<DshProvider>();
     }
 
     [Fact]

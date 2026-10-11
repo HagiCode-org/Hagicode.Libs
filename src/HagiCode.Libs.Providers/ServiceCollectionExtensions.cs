@@ -8,6 +8,7 @@ using HagiCode.Libs.Providers.Codebuddy;
 using HagiCode.Libs.Providers.Copilot;
 using HagiCode.Libs.Providers.Codex;
 using HagiCode.Libs.Providers.DeepAgents;
+using HagiCode.Libs.Providers.Dsh;
 using HagiCode.Libs.Providers.Gemini;
 using HagiCode.Libs.Providers.Junie;
 using HagiCode.Libs.Providers.Hermes;
@@ -76,6 +77,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<OmpProvider>();
         services.AddSingleton<QoderCliProvider>();
         services.AddSingleton<ReasonixProvider>();
+        services.AddSingleton<DshProvider>();
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<ClaudeCodeProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<CodebuddyProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<CopilotProvider>());
@@ -91,6 +93,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<OmpProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<QoderCliProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<ReasonixProvider>());
+        services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<DshProvider>());
         services.AddSingleton<ICliProvider<ClaudeCodeOptions>>(serviceProvider => serviceProvider.GetRequiredService<ClaudeCodeProvider>());
         services.AddSingleton<ICliProvider<CodebuddyOptions>>(serviceProvider => serviceProvider.GetRequiredService<CodebuddyProvider>());
         services.AddSingleton<ICliProvider<CopilotOptions>>(serviceProvider => serviceProvider.GetRequiredService<CopilotProvider>());
@@ -105,6 +108,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICliProvider<OmpOptions>>(serviceProvider => serviceProvider.GetRequiredService<OmpProvider>());
         services.AddSingleton<ICliProvider<QoderCliOptions>>(serviceProvider => serviceProvider.GetRequiredService<QoderCliProvider>());
         services.AddSingleton<ICliProvider<ReasonixOptions>>(serviceProvider => serviceProvider.GetRequiredService<ReasonixProvider>());
+        services.AddSingleton<ICliProvider<DshOptions>>(serviceProvider => serviceProvider.GetRequiredService<DshProvider>());
         services.AddSingleton(static serviceProvider =>
         {
             var registry = new ProviderRegistry();
@@ -125,6 +129,12 @@ public static class ServiceCollectionExtensions
                 if (provider is HermesProvider)
                 {
                     registry.Register(provider.Name, provider, ["hermes-cli"]);
+                    continue;
+                }
+
+                if (provider is DshProvider)
+                {
+                    registry.Register(provider.Name, provider, ["dsh-cli"]);
                     continue;
                 }
 
