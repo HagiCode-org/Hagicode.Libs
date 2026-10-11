@@ -125,4 +125,33 @@ public sealed record ClaudeCodeOptions
     /// The default value of <see cref="SubagentBackgroundWorkTimeout" />.
     /// </summary>
     public static readonly TimeSpan DefaultSubagentBackgroundWorkTimeout = TimeSpan.FromMinutes(20);
+
+    /// <summary>
+    /// Gets or sets how long past its own timeout the run keeps waiting for background work the main agent armed and then
+    /// stopped to wait for: a <c>Monitor</c> (<c>timeout_ms</c>) or a <c>Bash</c> command run in the background with an
+    /// explicit <c>timeout</c>. The agent is woken by their events or exit, so ending the run at the turn's <c>result</c>
+    /// kills them and loses everything they would report. The CLI ends such work when its timeout passes and reports it,
+    /// so the run is open for the declared timeout plus this grace period; a background command without a timeout, such
+    /// as a dev server, is never awaited. When the time passes the run ends with the results already received.
+    /// The default is one minute and the value must be positive.
+    /// </summary>
+    public TimeSpan BackgroundWorkGracePeriod { get; init; } = DefaultBackgroundWorkGracePeriod;
+
+    /// <summary>
+    /// The default value of <see cref="BackgroundWorkGracePeriod" />.
+    /// </summary>
+    public static readonly TimeSpan DefaultBackgroundWorkGracePeriod = TimeSpan.FromMinutes(1);
+
+    /// <summary>
+    /// Gets or sets how long the run waits for a prompt written to the CLI to start its own turn after an earlier turn
+    /// has ended. The CLI can end a different turn first, such as the injected turn for a stopped background-task
+    /// notification on resume. When this wait passes the prompt is sent once more; a second pass ends the run with the
+    /// results already received. The default is 20 seconds and the value must be positive.
+    /// </summary>
+    public TimeSpan PromptStartTimeout { get; init; } = DefaultPromptStartTimeout;
+
+    /// <summary>
+    /// The default value of <see cref="PromptStartTimeout" />.
+    /// </summary>
+    public static readonly TimeSpan DefaultPromptStartTimeout = TimeSpan.FromSeconds(20);
 }

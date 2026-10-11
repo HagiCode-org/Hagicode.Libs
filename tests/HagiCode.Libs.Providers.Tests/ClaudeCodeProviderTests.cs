@@ -42,6 +42,7 @@ public sealed class ClaudeCodeProviderTests
         arguments.ShouldContain("--max-turns", "3");
         arguments.ShouldContain("--session-id", "session-id");
         arguments.ShouldContain("--add-dir", "/tmp/project");
+        arguments.ShouldContain("--replay-user-messages");
     }
 
     [Fact]
@@ -83,6 +84,7 @@ public sealed class ClaudeCodeProviderTests
             "--verbose",
             "--input-format",
             "stream-json",
+            "--replay-user-messages",
             "--model",
             "Claude Sonnet 4.5",
             "--add-dir",
@@ -457,6 +459,7 @@ public sealed class ClaudeCodeProviderTests
             "--verbose",
             "--input-format",
             "stream-json",
+            "--replay-user-messages",
             "--model",
             "claude-sonnet",
             "--settings",
@@ -1028,6 +1031,223 @@ public sealed class ClaudeCodeProviderTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_does_not_wait_for_a_background_command_without_a_timeout()
+    {
+        var provider = CreateProvider(messageBatches:
+        [
+            [
+                StreamMessage("system", new { subtype = "init" }),
+                BackgroundBashToolUse(timeoutMilliseconds: null),
+                StreamMessage("system", new { subtype = "background_tasks_changed", tasks = BackgroundCommandTasks("bash-1") }),
+                StreamMessage(
+                    "system",
+                    new { subtype = "task_started", task_id = "bash-1", task_type = "local_bash", tool_use_id = "toolu-bash" }),
+                StreamMessage("result", new { is_error = false, result = "dev server started" }),
+                StreamMessage("assistant", new { marker = "after-final-result" })
+            ]
+        ]);
+
+        var messages = await CollectAsync(provider);
+
+        messages[^1].Type.ShouldBe("result");
+        messages.Any(static message => message.Content.TryGetProperty("marker", out _)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_keeps_streaming_while_a_monitor_armed_by_the_main_agent_is_watching()
+    {
+        // Real stream order (Claude Code 2.1.296): the main agent arms a Monitor and ends its turn. A Monitor is reported as
+        // a plain "local_bash" task, tied to its tool call only by the tool_use_id of "task_started", which follows the
+        // task list. Every monitor event wakes the agent for another turn, and the monitor's own end is reported by a
+        // "task_notification". Ending the run at the first "result" kills the monitor and loses all of its events.
+        var provider = CreateProvider(messageBatches:
+        [
+            [
+                StreamMessage("system", new { subtype = "init" }),
+                MonitorToolUse(),
+                StreamMessage("system", new { subtype = "background_tasks_changed", tasks = BackgroundCommandTasks("monitor-1") }),
+                StreamMessage(
+                    "system",
+                    new { subtype = "task_started", task_id = "monitor-1", task_type = "local_bash", tool_use_id = "toolu-monitor" }),
+                StreamMessage("result", new { is_error = false, result = "ARMED" }),
+                StreamMessage("system", new { subtype = "init" }),
+                StreamMessage("result", new { is_error = false, result = "GOT EVENT-ONE" }),
+                StreamMessage("system", new { subtype = "task_updated", task_id = "monitor-1" }),
+                StreamMessage("system", new { subtype = "task_notification", task_id = "monitor-1", status = "completed" }),
+                StreamMessage("system", new { subtype = "background_tasks_changed", tasks = BackgroundCommandTasks() }),
+                StreamMessage("system", new { subtype = "init" }),
+                StreamMessage("result", new { is_error = false, result = "GOT EVENT-TWO" }),
+                StreamMessage("assistant", new { marker = "after-final-result" })
+            ]
+        ]);
+
+        var messages = await CollectAsync(provider);
+
+        messages.Count(static message => message.Type == "result").ShouldBe(3);
+        messages[^1].Content.GetProperty("result").GetString().ShouldBe("GOT EVENT-TWO");
+        messages.Any(static message => message.Content.TryGetProperty("marker", out _)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_keeps_streaming_while_a_background_command_with_a_timeout_is_running()
+    {
+        // The main agent starts a waiter in the background with an explicit timeout and ends its turn. The CLI wakes it
+        // when the command exits (or kills it at the timeout), so the run must stay open until then.
+        var provider = CreateProvider(messageBatches:
+        [
+            [
+                StreamMessage("system", new { subtype = "init" }),
+                BackgroundBashToolUse(timeoutMilliseconds: 7_200_000),
+                StreamMessage("system", new { subtype = "background_tasks_changed", tasks = BackgroundCommandTasks("bash-1") }),
+                StreamMessage(
+                    "system",
+                    new { subtype = "task_started", task_id = "bash-1", task_type = "local_bash", tool_use_id = "toolu-bash" }),
+                StreamMessage("result", new { is_error = false, result = "waiting for the driver" }),
+                StreamMessage("system", new { subtype = "task_notification", task_id = "bash-1", status = "completed" }),
+                StreamMessage("system", new { subtype = "background_tasks_changed", tasks = BackgroundCommandTasks() }),
+                StreamMessage("system", new { subtype = "init" }),
+                StreamMessage("result", new { is_error = false, result = "driver finished" }),
+                StreamMessage("assistant", new { marker = "after-final-result" })
+            ]
+        ]);
+
+        var messages = await CollectAsync(provider);
+
+        messages.Count(static message => message.Type == "result").ShouldBe(2);
+        messages[^1].Content.GetProperty("result").GetString().ShouldBe("driver finished");
+        messages.Any(static message => message.Content.TryGetProperty("marker", out _)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_waits_for_a_background_command_until_the_cli_stops_it_at_its_timeout()
+    {
+        // The CLI enforces the declared timeout of a background command: it reports the task as stopped and wakes the
+        // agent for a turn about it.
+        var provider = CreateProvider(messageBatches:
+        [
+            [
+                StreamMessage("system", new { subtype = "init" }),
+                BackgroundBashToolUse(timeoutMilliseconds: 8_000),
+                StreamMessage(
+                    "system",
+                    new { subtype = "task_started", task_id = "bash-1", task_type = "local_bash", tool_use_id = "toolu-bash" }),
+                StreamMessage("result", new { is_error = false, result = "STARTED" }),
+                StreamMessage("system", new { subtype = "task_notification", task_id = "bash-1", status = "stopped" }),
+                StreamMessage("system", new { subtype = "init" }),
+                StreamMessage("result", new { is_error = false, result = "NOTIFIED killed" })
+            ]
+        ]);
+
+        var messages = await CollectAsync(provider);
+
+        messages[^1].Content.GetProperty("result").GetString().ShouldBe("NOTIFIED killed");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_keeps_waiting_when_the_monitor_task_list_arrives_after_task_started()
+    {
+        var provider = CreateProvider(messageBatches:
+        [
+            [
+                StreamMessage("system", new { subtype = "init" }),
+                MonitorToolUse(),
+                StreamMessage(
+                    "system",
+                    new { subtype = "task_started", task_id = "monitor-1", task_type = "local_bash", tool_use_id = "toolu-monitor" }),
+                StreamMessage("system", new { subtype = "background_tasks_changed", tasks = BackgroundCommandTasks("monitor-1") }),
+                StreamMessage("result", new { is_error = false, result = "ARMED" }),
+                StreamMessage("system", new { subtype = "task_notification", task_id = "monitor-1", status = "completed" }),
+                StreamMessage("system", new { subtype = "init" }),
+                StreamMessage("result", new { is_error = false, result = "monitor ended" })
+            ]
+        ]);
+
+        var messages = await CollectAsync(provider);
+
+        messages.Count(static message => message.Type == "result").ShouldBe(2);
+        messages[^1].Content.GetProperty("result").GetString().ShouldBe("monitor ended");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_stops_waiting_for_a_monitor_after_timeout()
+    {
+        var provider = CreateProvider(
+            messageBatches:
+            [
+                [
+                    StreamMessage("system", new { subtype = "init" }),
+                    MonitorToolUse(timeoutMilliseconds: 150),
+                    StreamMessage("system", new { subtype = "background_tasks_changed", tasks = BackgroundCommandTasks("monitor-1") }),
+                    StreamMessage(
+                        "system",
+                        new { subtype = "task_started", task_id = "monitor-1", task_type = "local_bash", tool_use_id = "toolu-monitor" }),
+                    StreamMessage("result", new { is_error = false, result = "ARMED" })
+                ]
+            ],
+            transportFailures: [new TransportFailure(HangAfterBatch: true)]);
+        var options = new ClaudeCodeOptions
+        {
+            SessionId = "session-1",
+            WorkingDirectory = "/tmp/project",
+            BackgroundWorkGracePeriod = TimeSpan.FromMilliseconds(100)
+        };
+
+        var messages = new List<CliMessage>();
+        var stopwatch = Stopwatch.StartNew();
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await foreach (var message in provider.ExecuteAsync(options, "hello", guard.Token))
+        {
+            messages.Add(message);
+        }
+
+        guard.IsCancellationRequested.ShouldBeFalse();
+        // Without the wait the run would end at the first "result", long before the declared timeout and grace pass.
+        stopwatch.Elapsed.ShouldBeGreaterThanOrEqualTo(TimeSpan.FromMilliseconds(200));
+        messages[^1].Type.ShouldBe("result");
+        messages[^1].Content.GetProperty("result").GetString().ShouldBe("ARMED");
+        provider.DisposedTransportCount.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_stops_at_error_result_even_when_a_monitor_is_watching()
+    {
+        var provider = CreateProvider(messageBatches:
+        [
+            [
+                StreamMessage("system", new { subtype = "init" }),
+                MonitorToolUse(),
+                StreamMessage(
+                    "system",
+                    new { subtype = "task_started", task_id = "monitor-1", task_type = "local_bash", tool_use_id = "toolu-monitor" }),
+                StreamMessage("result", new { is_error = true, result = "boom" }),
+                StreamMessage("assistant", new { marker = "after-final-result" })
+            ]
+        ]);
+
+        var messages = await CollectAsync(provider);
+
+        messages[^1].Type.ShouldBe("result");
+        messages.Any(static message => message.Content.TryGetProperty("marker", out _)).ShouldBeFalse();
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-5)]
+    public async Task ExecuteAsync_rejects_non_positive_background_work_grace_period(int seconds)
+    {
+        var provider = CreateProvider();
+
+        await Should.ThrowAsync<ArgumentOutOfRangeException>(async () =>
+        {
+            await foreach (var _ in provider.ExecuteAsync(
+                               new ClaudeCodeOptions { BackgroundWorkGracePeriod = TimeSpan.FromSeconds(seconds) },
+                               "hello"))
+            {
+            }
+        });
+    }
+
+    [Fact]
     public async Task ExecuteAsync_keeps_streaming_while_subagent_background_task_outlives_the_subagent()
     {
         // Real stream order (Claude Code 2.1.292): a background subagent starts its own background command and ends its
@@ -1119,6 +1339,134 @@ public sealed class ClaudeCodeProviderTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_waits_for_host_prompt_turn_after_an_injected_turn_ends_first()
+    {
+        // On resume the CLI runs an injected turn for a stopped background-task notification before the host prompt.
+        // Its "result" does not answer the prompt, which starts its own turn afterwards.
+        var provider = CreateProvider(messageBatches:
+        [
+            [
+                StreamMessage("system", new { subtype = "init" }),
+                StreamMessage("result", new { is_error = false, result = "" }),
+                StreamMessage("system", new { subtype = "init" }),
+                StreamMessage("user", new { isReplay = true, message = new { role = "user", content = "hello" } }),
+                StreamMessage("assistant", new { content = "final answer" }),
+                StreamMessage("result", new { is_error = false, result = "final answer" })
+            ]
+        ]);
+
+        var messages = await CollectAsync(provider);
+
+        DescribeTypes(messages).ShouldBe(["system:init", "assistant", "result"]);
+        messages[^1].Content.GetProperty("result").GetString().ShouldBe("final answer");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_resends_the_prompt_once_when_the_host_turn_does_not_start()
+    {
+        var provider = CreateProvider(
+            messageBatches:
+            [
+                [
+                    StreamMessage("system", new { subtype = "init" }),
+                    StreamMessage("result", new { is_error = false, result = "" })
+                ]
+            ],
+            transportFailures:
+            [
+                new TransportFailure(
+                    EchoPrompt: false,
+                    ReplyAfterResend:
+                    [
+                        StreamMessage("system", new { subtype = "init" }),
+                        StreamMessage("user", new { isReplay = true, message = new { role = "user", content = "hello" } }),
+                        StreamMessage("assistant", new { content = "resent answer" }),
+                        StreamMessage("result", new { is_error = false, result = "resent answer" })
+                    ])
+            ]);
+
+        var messages = await CollectAsync(
+            provider,
+            new ClaudeCodeOptions
+            {
+                SessionId = "session-1",
+                WorkingDirectory = "/tmp/project",
+                PromptStartTimeout = TimeSpan.FromMilliseconds(200)
+            });
+
+        DescribeTypes(messages).ShouldBe(["system:init", "assistant", "result"]);
+        messages[^1].Content.GetProperty("result").GetString().ShouldBe("resent answer");
+        provider.SentMessages.Count(static message => message.Type == "user").ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ends_when_the_resent_prompt_does_not_start_either()
+    {
+        var provider = CreateProvider(
+            messageBatches:
+            [
+                [
+                    StreamMessage("system", new { subtype = "init" }),
+                    StreamMessage("result", new { is_error = false, result = "" })
+                ]
+            ],
+            transportFailures: [new TransportFailure(EchoPrompt: false, HangAfterBatch: true)]);
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        var messages = await CollectAsync(
+            provider,
+            new ClaudeCodeOptions
+            {
+                SessionId = "session-1",
+                WorkingDirectory = "/tmp/project",
+                PromptStartTimeout = TimeSpan.FromMilliseconds(200)
+            },
+            guard.Token);
+
+        guard.IsCancellationRequested.ShouldBeFalse();
+        messages.ShouldBeEmpty();
+        provider.SentMessages.Count(static message => message.Type == "user").ShouldBe(2);
+        provider.DisposedTransportCount.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_still_delivers_a_turn_with_output_when_the_prompt_is_never_replayed()
+    {
+        var provider = CreateProvider(
+            messageBatches:
+            [
+                [
+                    StreamMessage("system", new { subtype = "init" }),
+                    StreamMessage("assistant", new { content = "answer without replay" }),
+                    StreamMessage("result", new { is_error = false, result = "answer without replay" })
+                ]
+            ],
+            transportFailures: [new TransportFailure(EchoPrompt: false)]);
+
+        var messages = await CollectAsync(provider);
+
+        DescribeTypes(messages).ShouldBe(["system:init", "assistant", "result"]);
+        messages[^1].Content.GetProperty("result").GetString().ShouldBe("answer without replay");
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-5)]
+    public async Task ExecuteAsync_rejects_non_positive_prompt_start_timeout(int milliseconds)
+    {
+        var provider = CreateProvider();
+
+        await Should.ThrowAsync<ArgumentOutOfRangeException>(async () =>
+        {
+            await foreach (var _ in provider.ExecuteAsync(
+                               new ClaudeCodeOptions { PromptStartTimeout = TimeSpan.FromMilliseconds(milliseconds) },
+                               "hello"))
+            {
+            }
+        });
+    }
+
+    [Fact]
     public async Task ExecuteAsync_propagates_caller_cancellation_while_waiting_for_subagent_background_task()
     {
         var provider = CreateProvider(
@@ -1139,6 +1487,75 @@ public sealed class ClaudeCodeProviderTests
                 }
             }
         });
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_stop_interrupts_the_wait_for_background_work_armed_by_the_main_agent()
+    {
+        // The wait can last as long as the timeout the agent declared (two hours here), so a caller's stop must end it at once.
+        var provider = CreateProvider(
+            messageBatches:
+            [
+                [
+                    StreamMessage("system", new { subtype = "init" }),
+                    BackgroundBashToolUse(timeoutMilliseconds: 7_200_000),
+                    StreamMessage("system", new { subtype = "background_tasks_changed", tasks = BackgroundCommandTasks("bash-1") }),
+                    StreamMessage(
+                        "system",
+                        new { subtype = "task_started", task_id = "bash-1", task_type = "local_bash", tool_use_id = "toolu-bash" }),
+                    StreamMessage("result", new { is_error = false, result = "waiting for the driver" })
+                ]
+            ],
+            transportFailures: [new TransportFailure(HangAfterBatch: true)]);
+        using var cancellation = new CancellationTokenSource();
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var stopwatch = Stopwatch.StartNew();
+
+        await Should.ThrowAsync<OperationCanceledException>(async () =>
+        {
+            await foreach (var message in provider.ExecuteAsync(
+                               new ClaudeCodeOptions { SessionId = "session-1", WorkingDirectory = "/tmp/project" },
+                               "hello",
+                               cancellation.Token))
+            {
+                if (message.Type == "result")
+                {
+                    _ = Task.Run(async () =>
+                    {
+                        await Task.Delay(100, guard.Token);
+                        await cancellation.CancelAsync();
+                    });
+                }
+            }
+        });
+
+        stopwatch.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(20));
+        provider.DisposedTransportCount.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_cancellation_mid_stream_throws_and_disposes_transport()
+    {
+        var provider = CreateProvider(
+            messageBatches: [[StreamMessage("assistant", new { marker = "partial" })]],
+            transportFailures: [new TransportFailure(HangAfterBatch: true)]);
+        using var cancellation = new CancellationTokenSource();
+        var messages = new List<CliMessage>();
+
+        await Should.ThrowAsync<OperationCanceledException>(async () =>
+        {
+            await foreach (var message in provider.ExecuteAsync(
+                               new ClaudeCodeOptions { SessionId = "session-1", WorkingDirectory = "/tmp/project" },
+                               "hello",
+                               cancellation.Token))
+            {
+                messages.Add(message);
+                await cancellation.CancelAsync();
+            }
+        });
+
+        DescribeTypes(messages).ShouldBe(["assistant"]);
+        provider.DisposedTransportCount.ShouldBe(1);
     }
 
     [Theory]
@@ -1414,6 +1831,20 @@ public sealed class ClaudeCodeProviderTests
         resolvedPath.ShouldBe(aliasedCmdShimPath);
     }
 
+    private static async Task<List<CliMessage>> CollectAsync(
+        ClaudeCodeProvider provider,
+        ClaudeCodeOptions options,
+        CancellationToken cancellationToken = default)
+    {
+        var messages = new List<CliMessage>();
+        await foreach (var message in provider.ExecuteAsync(options, "hello", cancellationToken))
+        {
+            messages.Add(message);
+        }
+
+        return messages;
+    }
+
     private static async Task<List<CliMessage>> CollectAsync(ClaudeCodeProvider provider)
     {
         var messages = new List<CliMessage>();
@@ -1480,6 +1911,39 @@ public sealed class ClaudeCodeProviderTests
         return taskIds.Select(static taskId => (object)new { task_id = taskId, task_type = "local_agent" }).ToArray();
     }
 
+    private static object[] BackgroundCommandTasks(params string[] taskIds)
+    {
+        return taskIds.Select(static taskId => (object)new { task_id = taskId, task_type = "local_bash" }).ToArray();
+    }
+
+    private static CliMessage ToolUseMessage(string toolName, string toolUseId, object? input = null)
+    {
+        return StreamMessage(
+            "assistant",
+            new
+            {
+                message = new
+                {
+                    content = new object[]
+                    {
+                        new { type = "tool_use", id = toolUseId, name = toolName, input = input ?? new { } }
+                    }
+                }
+            });
+    }
+
+    private static CliMessage MonitorToolUse(long timeoutMilliseconds = 120_000)
+    {
+        return ToolUseMessage("Monitor", "toolu-monitor", new { description = "wait test", timeout_ms = timeoutMilliseconds });
+    }
+
+    private static CliMessage BackgroundBashToolUse(long? timeoutMilliseconds)
+    {
+        return timeoutMilliseconds is { } timeout
+            ? ToolUseMessage("Bash", "toolu-bash", new { command = "sleep 60", run_in_background = true, timeout })
+            : ToolUseMessage("Bash", "toolu-bash", new { command = "sleep 60", run_in_background = true });
+    }
+
     /// <summary>
     /// The stream up to the interim "result" of the main agent's follow-up turn: the subagent has reported back, but the
     /// background command it started is still running.
@@ -1540,12 +2004,18 @@ public sealed class ClaudeCodeProviderTests
     }
 
     /// <summary>
-    /// Scripts how one transport attempt fails. <see cref="OnSend" /> throws from SendAsync before the prompt is recorded;
+    /// Scripts how one transport attempt behaves. <see cref="OnSend" /> throws from SendAsync before the prompt is recorded;
     /// <see cref="OnReceive" /> throws from ReceiveAsync after the attempt's message batch has been yielded.
     /// <see cref="HangAfterBatch" /> keeps ReceiveAsync open after the batch until it is cancelled, like a CLI that is
-    /// still running.
+    /// still running. <see cref="EchoPrompt" /> set to false models a CLI that never replays the prompt. When the prompt
+    /// is sent again, <see cref="ReplyAfterResend" /> is yielded.
     /// </summary>
-    private sealed record TransportFailure(Exception? OnSend = null, Exception? OnReceive = null, bool HangAfterBatch = false);
+    private sealed record TransportFailure(
+        Exception? OnSend = null,
+        Exception? OnReceive = null,
+        bool HangAfterBatch = false,
+        bool EchoPrompt = true,
+        IReadOnlyList<CliMessage>? ReplyAfterResend = null);
 
     private sealed class TestClaudeCodeProvider(
         CliExecutableResolver executableResolver,
@@ -1592,6 +2062,9 @@ public sealed class ClaudeCodeProviderTests
         Action onDispose,
         TransportFailure? failure = null) : ICliTransport
     {
+        private readonly TaskCompletionSource _resent = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _sendCount;
+
         public bool IsConnected { get; private set; }
 
         public Task ConnectAsync(CancellationToken cancellationToken = default)
@@ -1617,13 +2090,22 @@ public sealed class ClaudeCodeProviderTests
 
         public async IAsyncEnumerable<CliMessage> ReceiveAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            var batch = getNextMessageBatch();
+            var batch = WithPromptEcho(getNextMessageBatch());
             for (var index = 0; index < batch.Count; index++)
             {
                 yield return batch[index];
                 if (index < batch.Count - 1)
                 {
                     await Task.Yield();
+                }
+            }
+
+            if (failure?.ReplyAfterResend is { } reply)
+            {
+                await _resent.Task.WaitAsync(cancellationToken);
+                for (var index = 0; index < reply.Count; index++)
+                {
+                    yield return reply[index];
                 }
             }
 
@@ -1646,7 +2128,31 @@ public sealed class ClaudeCodeProviderTests
             }
 
             sentMessages.Add(message);
+            if (++_sendCount > 1)
+            {
+                _resent.TrySetResult();
+            }
+
             return Task.CompletedTask;
+        }
+
+        // The CLI replays a prompt right after the init of the turn it starts. Batches that script the replay themselves are left alone.
+        private IReadOnlyList<CliMessage> WithPromptEcho(IReadOnlyList<CliMessage> batch)
+        {
+            if (failure?.EchoPrompt == false || batch.Any(static message => message.Type == "user"))
+            {
+                return batch;
+            }
+
+            var withEcho = batch.ToList();
+            var initIndex = withEcho.FindIndex(static message =>
+                message.Type == "system"
+                && message.Content.TryGetProperty("subtype", out var subtype)
+                && subtype.GetString() == "init");
+            withEcho.Insert(
+                initIndex + 1,
+                StreamMessage("user", new { isReplay = true, message = new { role = "user", content = "hello" } }));
+            return withEcho;
         }
     }
 

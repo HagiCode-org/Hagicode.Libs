@@ -85,6 +85,22 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
                 "SubagentBackgroundWorkTimeout must be positive or Timeout.InfiniteTimeSpan.");
         }
 
+        if (options.BackgroundWorkGracePeriod <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.BackgroundWorkGracePeriod,
+                "BackgroundWorkGracePeriod must be positive.");
+        }
+
+        if (options.PromptStartTimeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.PromptStartTimeout,
+                "PromptStartTimeout must be positive.");
+        }
+
         var runtimeEnvironment = await ResolveRuntimeEnvironmentAsync(cancellationToken);
         var executablePath = ResolveExecutablePath(options, runtimeEnvironment)
             ?? throw new FileNotFoundException("Unable to locate the Claude Code executable.");
@@ -170,7 +186,8 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
             "stream-json",
             "--verbose",
             "--input-format",
-            "stream-json"
+            "stream-json",
+            "--replay-user-messages"
         };
 
         var model = ArgumentValueNormalizer.NormalizeOptionalValue(options.Model);
@@ -431,50 +448,127 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
     {
         await using var transport = CreateTransport(startContext);
         await transport.ConnectAsync(cancellationToken).ConfigureAwait(false);
-        await transport.SendAsync(CreatePromptMessage(prompt, options), cancellationToken).ConfigureAwait(false);
 
         // The first "result" is not necessarily the last one: a background subagent keeps running after the turn
-        // that launched it, so the tracker decides when the run is really over.
-        var completionTracker = new ClaudeStreamCompletionTracker();
+        // that launched it, and a prompt can be answered by a turn that is not its own. The tracker decides when the
+        // run is really over.
+        var completionTracker = new ClaudeStreamCompletionTracker(options.BackgroundWorkGracePeriod);
+        var turnDelivery = new ClaudeTurnDelivery();
+        var promptMessage = CreatePromptMessage(prompt, options);
+        completionTracker.RecordHostPromptSent();
+        await transport.SendAsync(promptMessage, cancellationToken).ConfigureAwait(false);
 
-        // Work a subagent left running in the background is awaited, but it may never end. The wait is bounded by
-        // cancelling the receive loop; a C# iterator cannot yield inside a try block that has a catch, so the stream
-        // is driven by hand and messages are yielded outside the try.
+        // Each wait the run can idle on is bounded. Giving up cancels the receive loop. A C# iterator cannot yield inside
+        // a try block that has a catch, so the stream is driven by hand and messages are yielded outside any try.
         using var receiveCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         await using var receiver = transport.ReceiveAsync(receiveCancellation.Token)
             .GetAsyncEnumerator(receiveCancellation.Token);
-        var backgroundWaitTimerArmed = false;
+        Task<bool>? pendingReceive = null;
+        var promptResent = false;
 
         while (true)
         {
-            try
+            var wait = completionTracker.CurrentWait;
+            pendingReceive ??= receiver.MoveNextAsync().AsTask();
+            var hasNext = await WaitForReceiveAsync(
+                    pendingReceive,
+                    ResolveWaitBound(wait, options, completionTracker),
+                    receiveCancellation.Token)
+                .ConfigureAwait(false);
+
+            if (hasNext is null)
             {
-                if (!await receiver.MoveNextAsync().ConfigureAwait(false))
+                if (wait == ClaudeStreamCompletionTracker.PendingWait.HostPromptStart && !promptResent)
                 {
-                    yield break;
+                    promptResent = true;
+                    await transport.SendAsync(promptMessage, cancellationToken).ConfigureAwait(false);
+                    continue;
                 }
+
+                receiveCancellation.Cancel();
+                await DrainCancelledReceiveAsync(pendingReceive).ConfigureAwait(false);
+                foreach (var held in turnDelivery.Drain())
+                {
+                    yield return EnrichMessageWithDebugMetadata(held, debugContext);
+                }
+
+                yield break;
             }
-            catch (OperationCanceledException) when (
-                receiveCancellation.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+
+            pendingReceive = null;
+            if (hasNext is false)
             {
-                // The only other canceller is the background-work timer: give up waiting.
+                foreach (var held in turnDelivery.Drain())
+                {
+                    yield return EnrichMessageWithDebugMetadata(held, debugContext);
+                }
+
                 yield break;
             }
 
             var message = receiver.Current;
-            yield return EnrichMessageWithDebugMetadata(message, debugContext);
-            if (completionTracker.Observe(message))
+            var complete = completionTracker.Observe(message);
+            foreach (var deliverable in turnDelivery.Accept(message, completionTracker.HostPromptAwaitingStart))
+            {
+                yield return EnrichMessageWithDebugMetadata(deliverable, debugContext);
+            }
+
+            if (complete)
             {
                 yield break;
             }
+        }
+    }
 
-            var waitingOnBackgroundWork = completionTracker.IsWaitingOnSubagentBackgroundWork;
-            if (waitingOnBackgroundWork != backgroundWaitTimerArmed)
-            {
-                receiveCancellation.CancelAfter(
-                    waitingOnBackgroundWork ? options.SubagentBackgroundWorkTimeout : Timeout.InfiniteTimeSpan);
-                backgroundWaitTimerArmed = waitingOnBackgroundWork;
-            }
+    private static TimeSpan ResolveWaitBound(
+        ClaudeStreamCompletionTracker.PendingWait wait,
+        ClaudeCodeOptions options,
+        ClaudeStreamCompletionTracker completionTracker)
+    {
+        return wait switch
+        {
+            ClaudeStreamCompletionTracker.PendingWait.SubagentBackgroundWork => options.SubagentBackgroundWorkTimeout,
+            ClaudeStreamCompletionTracker.PendingWait.MainAgentBackgroundWork => completionTracker.RemainingBackgroundWork,
+            ClaudeStreamCompletionTracker.PendingWait.HostPromptStart => options.PromptStartTimeout,
+            _ => Timeout.InfiniteTimeSpan
+        };
+    }
+
+    /// <returns>
+    /// <see langword="true" /> or <see langword="false" /> when the receive finished, or <see langword="null" /> when the
+    /// bound passed first. In that case the receive keeps running and must be awaited or cancelled by the caller.
+    /// </returns>
+    private static async Task<bool?> WaitForReceiveAsync(
+        Task<bool> pendingReceive,
+        TimeSpan bound,
+        CancellationToken cancellationToken)
+    {
+        using var deadlineSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadlineSource.CancelAfter(bound);
+        try
+        {
+            return await pendingReceive.WaitAsync(deadlineSource.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (
+            deadlineSource.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            return null;
+        }
+        catch (OperationCanceledException)
+        {
+            await DrainCancelledReceiveAsync(pendingReceive).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    private static async Task DrainCancelledReceiveAsync(Task<bool> pendingReceive)
+    {
+        try
+        {
+            await pendingReceive.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
         }
     }
 
