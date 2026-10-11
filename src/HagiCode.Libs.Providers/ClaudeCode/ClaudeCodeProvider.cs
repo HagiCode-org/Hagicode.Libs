@@ -9,6 +9,7 @@ using HagiCode.Libs.Core.Environment;
 using HagiCode.Libs.Core.Process;
 using HagiCode.Libs.Core.Transport;
 using HagiCode.Libs.Core.Acp;
+using HagiCode.Libs.Core.AgentWork;
 
 namespace HagiCode.Libs.Providers.ClaudeCode;
 
@@ -466,6 +467,11 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
         Task<bool>? pendingReceive = null;
         var promptResent = false;
 
+        // A snapshot of the agent work is an effect of the CLI message that changed it and is yielded right after that
+        // message, so a consumer sees the cause first. When the cause is still held back by the turn delivery, the
+        // snapshot waits for the next delivery; only the newest snapshot matters because each one is complete.
+        AgentWorkSnapshot? pendingSnapshot = null;
+
         while (true)
         {
             var wait = completionTracker.CurrentWait;
@@ -492,6 +498,11 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
                     yield return EnrichMessageWithDebugMetadata(held, debugContext);
                 }
 
+                if (pendingSnapshot is not null)
+                {
+                    yield return pendingSnapshot.ToCliMessage();
+                }
+
                 yield break;
             }
 
@@ -503,14 +514,28 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
                     yield return EnrichMessageWithDebugMetadata(held, debugContext);
                 }
 
+                if (pendingSnapshot is not null)
+                {
+                    yield return pendingSnapshot.ToCliMessage();
+                }
+
                 yield break;
             }
 
             var message = receiver.Current;
             var complete = completionTracker.Observe(message);
+            pendingSnapshot = completionTracker.TakeSnapshot() ?? pendingSnapshot;
+            var delivered = false;
             foreach (var deliverable in turnDelivery.Accept(message, completionTracker.HostPromptAwaitingStart))
             {
+                delivered = true;
                 yield return EnrichMessageWithDebugMetadata(deliverable, debugContext);
+            }
+
+            if (pendingSnapshot is not null && (delivered || complete))
+            {
+                yield return pendingSnapshot.ToCliMessage();
+                pendingSnapshot = null;
             }
 
             if (complete)

@@ -13,7 +13,7 @@ using HagiCode.Libs.Providers.ClaudeCode;
 
 namespace HagiCode.Libs.Providers.Tests;
 
-public sealed class ClaudeCodeProviderTests
+public sealed partial class ClaudeCodeProviderTests
 {
     private const string RealCliTestsEnvironmentVariable = "HAGICODE_REAL_CLI_TESTS";
     private const string WindowsTestLocaleEnvironmentVariable = "HAGICODE_WINDOWS_TEST_LOCALE";
@@ -961,7 +961,8 @@ public sealed class ClaudeCodeProviderTests
 
         var messages = await CollectAsync(provider);
 
-        DescribeTypes(messages).ShouldBe(
+        // The agent work snapshots that follow the task events are covered by their own tests.
+        DescribeTypes(messages.Where(static message => message.Type != HagiCode.Libs.Core.AgentWork.AgentWorkSnapshot.MessageType)).ShouldBe(
         [
             "system:init",
             "system:background_tasks_changed",
