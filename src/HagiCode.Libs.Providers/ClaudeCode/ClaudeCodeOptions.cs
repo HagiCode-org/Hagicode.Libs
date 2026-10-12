@@ -154,4 +154,33 @@ public sealed record ClaudeCodeOptions
     /// The default value of <see cref="PromptStartTimeout" />.
     /// </summary>
     public static readonly TimeSpan DefaultPromptStartTimeout = TimeSpan.FromSeconds(20);
+
+    /// <summary>
+    /// Gets or sets the callback that answers the interactive questions the agent asks through the CLI's
+    /// <c>AskUserQuestion</c> tool. It is <see langword="null" /> by default, which keeps the provider exactly as it was.
+    /// Setting it adds <c>--permission-prompt-tool stdio</c> to the CLI arguments, which makes the CLI offer
+    /// <c>AskUserQuestion</c> to the agent, and makes the provider answer the CLI's <c>control_request</c> messages.
+    /// </summary>
+    /// <remarks>
+    /// The handler runs as a background task per question, so the stream keeps flowing while a user thinks, and it receives a
+    /// token that is cancelled when <see cref="QuestionTimeout" /> passes or the run ends. Returning
+    /// <see langword="null" />, timing out, or throwing denies the question. Every other tool permission request is
+    /// denied with a fixed message and never reaches the handler: the CLI refuses the tools its permission mode does not
+    /// approve on its own, and the provider keeps that outcome. An interactive request is also yielded to the caller as a
+    /// <c>control_request</c> stream message in the position it arrived (see <see cref="ClaudeUserInputRequest.TryFromCliMessage" />).
+    /// </remarks>
+    public Func<ClaudeUserInputRequest, CancellationToken, Task<ClaudeUserInputResponse?>>? UserInputHandler { get; init; }
+
+    /// <summary>
+    /// Gets or sets how long an interactive question may stay unanswered. While a question is pending the other wait
+    /// bounds do not end the run; this is the only bound. When it passes, the question is denied with a message saying that
+    /// no answer was received and the run goes on to its normal result.
+    /// The default is 30 minutes. Use <see cref="System.Threading.Timeout.InfiniteTimeSpan" /> to wait without a limit.
+    /// </summary>
+    public TimeSpan QuestionTimeout { get; init; } = DefaultQuestionTimeout;
+
+    /// <summary>
+    /// The default value of <see cref="QuestionTimeout" />.
+    /// </summary>
+    public static readonly TimeSpan DefaultQuestionTimeout = TimeSpan.FromMinutes(30);
 }

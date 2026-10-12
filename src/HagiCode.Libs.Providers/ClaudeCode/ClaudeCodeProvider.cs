@@ -39,6 +39,9 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
 
     private const string ThinkingDisplayFlag = "--thinking-display";
 
+    // How long the end of a run waits for the deny that a cancelled question writes to reach the CLI.
+    private static readonly TimeSpan QuestionDrainTimeout = TimeSpan.FromSeconds(5);
+
     // Executables that refused --thinking-display at launch. Process lifetime only, so a host restart retries the flag
     // after an in-place CLI upgrade.
     private static readonly ConcurrentDictionary<string, bool> ExecutablesRejectingThinkingDisplay = new(StringComparer.Ordinal);
@@ -100,6 +103,14 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
                 nameof(options),
                 options.PromptStartTimeout,
                 "PromptStartTimeout must be positive.");
+        }
+
+        if (options.QuestionTimeout != Timeout.InfiniteTimeSpan && options.QuestionTimeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.QuestionTimeout,
+                "QuestionTimeout must be positive or Timeout.InfiniteTimeSpan.");
         }
 
         var runtimeEnvironment = await ResolveRuntimeEnvironmentAsync(cancellationToken);
@@ -190,6 +201,13 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
             "stream-json",
             "--replay-user-messages"
         };
+
+        // Registers AskUserQuestion with the CLI and routes its permission prompts to the host. Without a handler the
+        // argument list is exactly what it was before the flag existed.
+        if (options.UserInputHandler is not null)
+        {
+            arguments.AddRange(["--permission-prompt-tool", "stdio"]);
+        }
 
         var model = ArgumentValueNormalizer.NormalizeOptionalValue(options.Model);
         if (model is not null)
@@ -456,8 +474,15 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
         var completionTracker = new ClaudeStreamCompletionTracker(options.BackgroundWorkGracePeriod);
         var turnDelivery = new ClaudeTurnDelivery();
         var promptMessage = CreatePromptMessage(prompt, options);
+
+        // Every write after connect goes through one gate: the receive loop and the background task of each pending
+        // question write concurrently.
+        var writer = new ClaudeStdinWriter(transport);
+        using var pendingQuestions = options.UserInputHandler is { } userInputHandler
+            ? new ClaudePendingQuestions(userInputHandler, options.QuestionTimeout, writer, completionTracker, cancellationToken)
+            : null;
         completionTracker.RecordHostPromptSent();
-        await transport.SendAsync(promptMessage, cancellationToken).ConfigureAwait(false);
+        await writer.SendAsync(promptMessage, cancellationToken).ConfigureAwait(false);
 
         // Each wait the run can idle on is bounded. Giving up cancels the receive loop. A C# iterator cannot yield inside
         // a try block that has a catch, so the stream is driven by hand and messages are yielded outside any try.
@@ -472,77 +497,145 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
         // snapshot waits for the next delivery; only the newest snapshot matters because each one is complete.
         AgentWorkSnapshot? pendingSnapshot = null;
 
-        while (true)
+        // try/finally is allowed around a yield, unlike catch. Whichever way the run ends, the questions that still wait are
+        // released, and a deny that a cancellation started is given a moment to reach the CLI before the transport goes.
+        try
         {
-            var wait = completionTracker.CurrentWait;
-            pendingReceive ??= receiver.MoveNextAsync().AsTask();
-            var hasNext = await WaitForReceiveAsync(
-                    pendingReceive,
-                    ResolveWaitBound(wait, options, completionTracker),
-                    receiveCancellation.Token)
-                .ConfigureAwait(false);
-
-            if (hasNext is null)
+            while (true)
             {
-                if (wait == ClaudeStreamCompletionTracker.PendingWait.HostPromptStart && !promptResent)
+                var wait = completionTracker.CurrentWait;
+                pendingReceive ??= receiver.MoveNextAsync().AsTask();
+                var hasNext = await WaitForReceiveAsync(
+                        pendingReceive,
+                        ResolveWaitBound(wait, options, completionTracker),
+                        receiveCancellation.Token)
+                    .ConfigureAwait(false);
+
+                if (hasNext is null)
                 {
-                    promptResent = true;
-                    await transport.SendAsync(promptMessage, cancellationToken).ConfigureAwait(false);
+                    if (wait == ClaudeStreamCompletionTracker.PendingWait.HostPromptStart && !promptResent)
+                    {
+                        promptResent = true;
+                        await writer.SendAsync(promptMessage, cancellationToken).ConfigureAwait(false);
+                        continue;
+                    }
+
+                    receiveCancellation.Cancel();
+                    await DrainCancelledReceiveAsync(pendingReceive).ConfigureAwait(false);
+                    foreach (var held in turnDelivery.Drain())
+                    {
+                        yield return EnrichMessageWithDebugMetadata(held, debugContext);
+                    }
+
+                    if (pendingSnapshot is not null)
+                    {
+                        yield return pendingSnapshot.ToCliMessage();
+                    }
+
+                    yield break;
+                }
+
+                pendingReceive = null;
+                if (hasNext is false)
+                {
+                    foreach (var held in turnDelivery.Drain())
+                    {
+                        yield return EnrichMessageWithDebugMetadata(held, debugContext);
+                    }
+
+                    if (pendingSnapshot is not null)
+                    {
+                        yield return pendingSnapshot.ToCliMessage();
+                    }
+
+                    yield break;
+                }
+
+                var message = receiver.Current;
+
+                // Control-protocol traffic is handled before the tracker and the turn delivery see the message: the echo of
+                // a response the host wrote looks like run activity to them, and a request that is answered here is not
+                // conversation.
+                if (ClaudeControlProtocol.IsControlResponseEcho(message))
+                {
                     continue;
                 }
 
-                receiveCancellation.Cancel();
-                await DrainCancelledReceiveAsync(pendingReceive).ConfigureAwait(false);
-                foreach (var held in turnDelivery.Drain())
+                if (ClaudeControlProtocol.TryParseRequest(message, out var controlRequest)
+                    && !await RouteControlRequestAsync(controlRequest, message, pendingQuestions, writer, cancellationToken)
+                        .ConfigureAwait(false))
                 {
-                    yield return EnrichMessageWithDebugMetadata(held, debugContext);
+                    continue;
                 }
 
-                if (pendingSnapshot is not null)
+                var complete = completionTracker.Observe(message);
+                pendingSnapshot = completionTracker.TakeSnapshot() ?? pendingSnapshot;
+                var delivered = false;
+                foreach (var deliverable in turnDelivery.Accept(message, completionTracker.HostPromptAwaitingStart))
                 {
-                    yield return pendingSnapshot.ToCliMessage();
+                    delivered = true;
+                    yield return EnrichMessageWithDebugMetadata(deliverable, debugContext);
                 }
 
-                yield break;
-            }
-
-            pendingReceive = null;
-            if (hasNext is false)
-            {
-                foreach (var held in turnDelivery.Drain())
-                {
-                    yield return EnrichMessageWithDebugMetadata(held, debugContext);
-                }
-
-                if (pendingSnapshot is not null)
+                if (pendingSnapshot is not null && (delivered || complete))
                 {
                     yield return pendingSnapshot.ToCliMessage();
+                    pendingSnapshot = null;
                 }
 
-                yield break;
-            }
-
-            var message = receiver.Current;
-            var complete = completionTracker.Observe(message);
-            pendingSnapshot = completionTracker.TakeSnapshot() ?? pendingSnapshot;
-            var delivered = false;
-            foreach (var deliverable in turnDelivery.Accept(message, completionTracker.HostPromptAwaitingStart))
-            {
-                delivered = true;
-                yield return EnrichMessageWithDebugMetadata(deliverable, debugContext);
-            }
-
-            if (pendingSnapshot is not null && (delivered || complete))
-            {
-                yield return pendingSnapshot.ToCliMessage();
-                pendingSnapshot = null;
-            }
-
-            if (complete)
-            {
-                yield break;
+                if (complete)
+                {
+                    yield break;
+                }
             }
         }
+        finally
+        {
+            if (pendingQuestions is not null)
+            {
+                pendingQuestions.CancelOutstanding();
+                await pendingQuestions.WaitForOutstandingAsync(QuestionDrainTimeout).ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Answers or routes one <c>control_request</c> of the CLI.
+    /// </summary>
+    /// <returns>
+    /// <see langword="true" /> when the request is an interactive question that is now pending, so it continues through the
+    /// normal path and reaches the caller in stream order; <see langword="false" /> when it was handled here and must not
+    /// be passed on.
+    /// </returns>
+    private static async Task<bool> RouteControlRequestAsync(
+        ClaudeControlProtocol.ControlRequest request,
+        CliMessage message,
+        ClaudePendingQuestions? pendingQuestions,
+        ClaudeStdinWriter writer,
+        CancellationToken cancellationToken)
+    {
+        // Any other request subtype is neither answered nor passed on.
+        if (!request.IsToolPermission)
+        {
+            return false;
+        }
+
+        if (request.IsUserQuestion
+            && pendingQuestions is not null
+            && ClaudeUserInputRequest.TryFromCliMessage(message, out var question))
+        {
+            pendingQuestions.Start(question);
+            return true;
+        }
+
+        // Every other permission request, and a question nobody can answer, gets a fixed deny so the run never hangs on
+        // it. The CLI refuses the tools its permission mode does not approve on its own, so deny keeps today's outcome.
+        var denyMessage = request.IsUserQuestion || request.RequiresUserInteraction
+            ? ClaudeControlProtocol.QuestionUnavailableMessage
+            : ClaudeControlProtocol.FixedDenyMessage;
+        await writer.SendAsync(ClaudeControlProtocol.BuildDenyResponse(request.RequestId, denyMessage), cancellationToken)
+            .ConfigureAwait(false);
+        return false;
     }
 
     private static TimeSpan ResolveWaitBound(
@@ -555,6 +648,9 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
             ClaudeStreamCompletionTracker.PendingWait.SubagentBackgroundWork => options.SubagentBackgroundWorkTimeout,
             ClaudeStreamCompletionTracker.PendingWait.MainAgentBackgroundWork => completionTracker.RemainingBackgroundWork,
             ClaudeStreamCompletionTracker.PendingWait.HostPromptStart => options.PromptStartTimeout,
+
+            // The agent is blocked on a person; the question timeout of the pending question is the only bound.
+            ClaudeStreamCompletionTracker.PendingWait.UserQuestion => Timeout.InfiniteTimeSpan,
             _ => Timeout.InfiniteTimeSpan
         };
     }

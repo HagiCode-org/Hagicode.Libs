@@ -64,6 +64,7 @@ internal sealed class ClaudeStreamCompletionTracker
     private int _startedTurns;
     private int _finishedTurns;
     private int _hostPromptsAwaitingStart;
+    private int _pendingQuestions;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ClaudeStreamCompletionTracker" /> class.
@@ -93,7 +94,13 @@ internal sealed class ClaudeStreamCompletionTracker
         MainAgentBackgroundWork,
 
         /// <summary>A prompt written to the CLI has not started its own turn.</summary>
-        HostPromptStart
+        HostPromptStart,
+
+        /// <summary>
+        /// An interactive question waits for the user's answer. The other bounds are suspended while it does, because the
+        /// agent is blocked on a person; the question timeout is the only bound that applies.
+        /// </summary>
+        UserQuestion
     }
 
     /// <summary>
@@ -107,6 +114,11 @@ internal sealed class ClaudeStreamCompletionTracker
     {
         get
         {
+            if (Volatile.Read(ref _pendingQuestions) > 0)
+            {
+                return PendingWait.UserQuestion;
+            }
+
             if (_finishedTurns == 0 || _finishedTurns < _startedTurns || _runningSubagentTaskIds.Count > 0)
             {
                 return PendingWait.None;
@@ -159,6 +171,32 @@ internal sealed class ClaudeStreamCompletionTracker
     public void RecordHostPromptSent()
     {
         _hostPromptsAwaitingStart++;
+    }
+
+    /// <summary>
+    /// Records that an interactive question now waits for the user. Safe to call from any thread: questions are answered
+    /// by background tasks while the receive loop reads <see cref="CurrentWait" />.
+    /// </summary>
+    public void RecordQuestionPending()
+    {
+        Interlocked.Increment(ref _pendingQuestions);
+    }
+
+    /// <summary>
+    /// Records that a pending question was resolved: answered, denied, timed out or cancelled. Safe to call from any thread.
+    /// </summary>
+    public void RecordQuestionResolved()
+    {
+        int current;
+        do
+        {
+            current = Volatile.Read(ref _pendingQuestions);
+            if (current == 0)
+            {
+                return;
+            }
+        }
+        while (Interlocked.CompareExchange(ref _pendingQuestions, current - 1, current) != current);
     }
 
     /// <summary>
