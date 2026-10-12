@@ -45,6 +45,80 @@ public sealed partial class ClaudeCodeProviderTests
         arguments.ShouldContain("--replay-user-messages");
     }
 
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData("session-id", null)]
+    [InlineData(null, "resume-id")]
+    public void BuildCommandArguments_without_a_handler_neither_prompts_nor_disallows_ask_user_question(string? sessionId, string? resume)
+    {
+        var provider = CreateProvider();
+
+        var arguments = provider.BuildCommandArguments(new ClaudeCodeOptions
+        {
+            SessionId = sessionId,
+            Resume = resume
+        });
+
+        arguments.ShouldNotContain("--permission-prompt-tool");
+        arguments.ShouldNotContain("--disallowedTools");
+        arguments.Any(static argument => argument.Contains("AskUserQuestion", StringComparison.Ordinal)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void BuildCommandArguments_with_a_handler_prompts_through_stdio_and_adds_no_disallowed_tools()
+    {
+        var provider = CreateProvider();
+
+        var arguments = provider.BuildCommandArguments(new ClaudeCodeOptions
+        {
+            UserInputHandler = static (_, _) => Task.FromResult<ClaudeUserInputResponse?>(null)
+        });
+
+        var index = arguments.ToList().IndexOf("--permission-prompt-tool");
+        index.ShouldBeGreaterThan(0);
+        arguments[index + 1].ShouldBe("stdio");
+        arguments.ShouldNotContain("--disallowedTools");
+        arguments.Any(static argument => argument.Contains("AskUserQuestion", StringComparison.Ordinal)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void BuildCommandArguments_passes_caller_disallowed_tools_through_untouched_with_or_without_a_handler()
+    {
+        var provider = CreateProvider();
+        string[] disallowed = ["AskUserQuestion", "Bash"];
+
+        var withoutHandler = provider.BuildCommandArguments(new ClaudeCodeOptions { DisallowedTools = disallowed });
+        var withHandler = provider.BuildCommandArguments(new ClaudeCodeOptions
+        {
+            DisallowedTools = disallowed,
+            UserInputHandler = static (_, _) => Task.FromResult<ClaudeUserInputResponse?>(null)
+        });
+
+        foreach (var arguments in new[] { withoutHandler, withHandler })
+        {
+            var index = arguments.ToList().IndexOf("--disallowedTools");
+            index.ShouldBeGreaterThanOrEqualTo(0);
+            arguments[index + 1].ShouldBe("AskUserQuestion,Bash");
+            arguments.Count(static argument => argument == "--disallowedTools").ShouldBe(1);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_launches_without_a_permission_prompt_tool_or_ask_user_question_exclusion_when_no_handler_is_set()
+    {
+        var provider = CreateProvider();
+
+        await foreach (var _ in provider.ExecuteAsync(
+                           new ClaudeCodeOptions { SessionId = "ask-session" },
+                           "hello"))
+        {
+        }
+
+        provider.LastStartContext.ShouldNotBeNull();
+        provider.LastStartContext.Arguments.ShouldNotContain("--permission-prompt-tool");
+        provider.LastStartContext.Arguments.ShouldNotContain("--disallowedTools");
+    }
+
     [Fact]
     public void BuildCommandArguments_omits_session_id_when_resume_is_specified()
     {
