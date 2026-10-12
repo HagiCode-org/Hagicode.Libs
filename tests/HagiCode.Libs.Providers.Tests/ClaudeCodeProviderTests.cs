@@ -1314,6 +1314,234 @@ public sealed partial class ClaudeCodeProviderTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_waits_for_the_turn_that_handles_a_notification_queued_during_the_final_answer()
+    {
+        // Real stream (ClaudeAgentWorkCapture.NotificationQueuedDuringFinalAnswer): the subagent finishes while the main
+        // agent writes its final answer. With no tool result left to attach it to, the CLI queues the notification and
+        // starts a follow-up turn right after the "result". Ending the run at that "result" kills the CLI before the agent
+        // sees what the subagent reported.
+        var provider = CreateProvider(messageBatches:
+        [
+            [
+                .. ClaudeAgentWorkCapture.NotificationQueuedDuringFinalAnswer,
+                StreamMessage("assistant", new { marker = "after-final-result" })
+            ]
+        ]);
+
+        var messages = await CollectAsync(provider);
+
+        messages.Count(static message => message.Type == "result").ShouldBe(2);
+        messages.Last(static message => message.Type == "result").Content.GetProperty("result").GetString()
+            .ShouldStartWith("The background agent finished");
+        messages.Any(static message => message.Content.TryGetProperty("marker", out _)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_does_not_wait_for_a_notification_the_agent_received_at_a_tool_boundary()
+    {
+        // Real stream (ClaudeAgentWorkCapture.NotificationConsumedAtToolBoundary): the CLI attached the notification to the
+        // request after a tool result and replayed it, so no follow-up turn starts and the first "result" is the last.
+        var provider = CreateProvider(messageBatches:
+        [
+            [
+                .. ClaudeAgentWorkCapture.NotificationConsumedAtToolBoundary,
+                StreamMessage("assistant", new { marker = "after-final-result" })
+            ]
+        ]);
+
+        var messages = await CollectAsync(provider);
+
+        messages.Count(static message => message.Type == "result").ShouldBe(1);
+        messages.Any(static message => message.Content.TryGetProperty("marker", out _)).ShouldBeFalse();
+    }
+
+    [Theory]
+    [InlineData("tool-result")]
+    [InlineData("replay")]
+    public async Task ExecuteAsync_treats_either_sign_of_delivery_as_the_end_of_a_queued_notification(string sign)
+    {
+        // The two signs are independent: a tool result of the main agent after the notification, or the CLI replaying it.
+        var provider = CreateProvider(messageBatches:
+        [
+            [
+                StreamMessage("system", new { subtype = "init" }),
+                PromptEcho(),
+                ToolUseMessage("Agent", "toolu-agent", new { description = "Review", prompt = "go" }),
+                StreamMessage("system", new { subtype = "background_tasks_changed", tasks = SubagentTasks("agent-1") }),
+                StreamMessage(
+                    "system",
+                    new { subtype = "task_started", task_id = "agent-1", task_type = "local_agent", tool_use_id = "toolu-agent" }),
+                StreamMessage("system", new { subtype = "task_notification", task_id = "agent-1", status = "completed" }),
+                StreamMessage("system", new { subtype = "background_tasks_changed", tasks = SubagentTasks() }),
+                sign == "tool-result" ? ToolResultMessage() : NotificationReplay("agent-1"),
+                StreamMessage("result", new { is_error = false, result = "answer" }),
+                StreamMessage("assistant", new { marker = "after-final-result" })
+            ]
+        ]);
+
+        var messages = await CollectAsync(provider);
+
+        messages.Count(static message => message.Type == "result").ShouldBe(1);
+        messages.Any(static message => message.Content.TryGetProperty("marker", out _)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_keeps_waiting_when_only_a_subagent_gets_a_tool_result_after_the_notification()
+    {
+        // A subagent's own tool results (parent_tool_use_id) are boundaries of the subagent's turn, not of the main agent's.
+        var provider = CreateProvider(messageBatches:
+        [
+            [
+                StreamMessage("system", new { subtype = "init" }),
+                PromptEcho(),
+                ToolUseMessage("Agent", "toolu-agent", new { description = "Review", prompt = "go" }),
+                StreamMessage("system", new { subtype = "background_tasks_changed", tasks = SubagentTasks("agent-1") }),
+                StreamMessage(
+                    "system",
+                    new { subtype = "task_started", task_id = "agent-1", task_type = "local_agent", tool_use_id = "toolu-agent" }),
+                StreamMessage("system", new { subtype = "task_notification", task_id = "agent-1", status = "completed" }),
+                ToolResultMessage(parentToolUseId: "toolu-agent"),
+                StreamMessage("system", new { subtype = "background_tasks_changed", tasks = SubagentTasks() }),
+                StreamMessage("result", new { is_error = false, result = "answer" }),
+                StreamMessage("system", new { subtype = "init" }),
+                StreamMessage("result", new { is_error = false, result = "agent-1 handled" }),
+                StreamMessage("assistant", new { marker = "after-final-result" })
+            ]
+        ]);
+
+        var messages = await CollectAsync(provider);
+
+        messages.Count(static message => message.Type == "result").ShouldBe(2);
+        messages.Last(static message => message.Type == "result").Content.GetProperty("result").GetString().ShouldBe("agent-1 handled");
+        messages.Any(static message => message.Content.TryGetProperty("marker", out _)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ends_when_a_queued_notification_never_starts_a_turn()
+    {
+        var provider = CreateProvider(
+            messageBatches:
+            [
+                [
+                    StreamMessage("system", new { subtype = "init" }),
+                    PromptEcho(),
+                    ToolUseMessage("Agent", "toolu-agent", new { description = "Review", prompt = "go" }),
+                    StreamMessage(
+                        "system",
+                        new { subtype = "task_started", task_id = "agent-1", task_type = "local_agent", tool_use_id = "toolu-agent" }),
+                    StreamMessage("system", new { subtype = "task_notification", task_id = "agent-1", status = "completed" }),
+                    StreamMessage("result", new { is_error = false, result = "answer" })
+                ]
+            ],
+            transportFailures: [new TransportFailure(HangAfterBatch: true)]);
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        var messages = await CollectAsync(
+            provider,
+            new ClaudeCodeOptions
+            {
+                SessionId = "session-1",
+                WorkingDirectory = "/tmp/project",
+                NotificationTurnTimeout = TimeSpan.FromMilliseconds(200)
+            },
+            guard.Token);
+
+        guard.IsCancellationRequested.ShouldBeFalse();
+        messages[^1].Type.ShouldBe("result");
+        messages.Count(static message => message.Type == "result").ShouldBe(1);
+        provider.DisposedTransportCount.ShouldBe(1);
+    }
+
+    [Fact]
+    public void Tracker_holds_the_run_open_for_a_notification_queued_before_the_result_until_its_turn_starts()
+    {
+        var tracker = new ClaudeStreamCompletionTracker(TimeSpan.FromMinutes(1));
+
+        tracker.Observe(StreamMessage("system", new { subtype = "init" })).ShouldBeFalse();
+        tracker.Observe(StreamMessage("system", new { subtype = "background_tasks_changed", tasks = SubagentTasks("agent-1") }));
+        tracker.Observe(StreamMessage("system", new { subtype = "task_notification", task_id = "agent-1", status = "completed" }));
+        tracker.CurrentWait.ShouldBe(ClaudeStreamCompletionTracker.PendingWait.None, "the turn is still running");
+
+        tracker.Observe(StreamMessage("result", new { is_error = false })).ShouldBeFalse();
+        tracker.CurrentWait.ShouldBe(ClaudeStreamCompletionTracker.PendingWait.NotificationTurn);
+
+        tracker.Observe(StreamMessage("system", new { subtype = "init" }));
+        tracker.CurrentWait.ShouldBe(ClaudeStreamCompletionTracker.PendingWait.None, "the follow-up turn is running");
+        tracker.Observe(StreamMessage("result", new { is_error = false })).ShouldBeTrue();
+        tracker.CurrentWait.ShouldBe(ClaudeStreamCompletionTracker.PendingWait.None);
+    }
+
+    [Fact]
+    public void Tracker_does_not_wait_for_a_notification_of_a_task_a_subagent_owns()
+    {
+        // That notification goes to the subagent, which the CLI resumes; only the subagent's own notification reaches the
+        // main agent.
+        var tracker = new ClaudeStreamCompletionTracker(TimeSpan.FromMinutes(1));
+
+        tracker.Observe(StreamMessage("system", new { subtype = "init" }));
+        tracker.Observe(
+            StreamMessage(
+                "system",
+                new
+                {
+                    subtype = "task_started",
+                    task_id = "bash-1",
+                    task_type = "local_bash",
+                    parent_task_id = "agent-1",
+                    owned_by_subagent = true
+                }));
+        tracker.Observe(StreamMessage("system", new { subtype = "task_notification", task_id = "bash-1", status = "completed" }));
+        tracker.Observe(StreamMessage("system", new { subtype = "background_tasks_changed", tasks = BackgroundCommandTasks() }));
+
+        tracker.Observe(StreamMessage("result", new { is_error = false })).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Tracker_ignores_the_stopped_notifications_a_resumed_session_replays_for_tasks_it_never_started()
+    {
+        var tracker = new ClaudeStreamCompletionTracker(TimeSpan.FromMinutes(1));
+
+        tracker.Observe(StreamMessage("system", new { subtype = "task_notification", task_id = "old-1", status = "stopped" }));
+        tracker.Observe(StreamMessage("system", new { subtype = "task_notification", task_id = "old-2", status = "stopped" }));
+        tracker.Observe(StreamMessage("system", new { subtype = "init" }));
+
+        tracker.Observe(StreamMessage("result", new { is_error = false })).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void The_replay_of_a_task_notification_is_not_the_replay_of_the_host_prompt()
+    {
+        var replay = NotificationReplay("agent-1");
+        var tracker = new ClaudeStreamCompletionTracker(TimeSpan.FromMinutes(1));
+        tracker.RecordHostPromptSent();
+
+        ClaudeStreamCompletionTracker.IsTaskNotificationReplay(replay).ShouldBeTrue();
+        ClaudeStreamCompletionTracker.IsPromptReplay(replay).ShouldBeFalse();
+        ClaudeStreamCompletionTracker.IsPromptReplay(PromptEcho()).ShouldBeTrue();
+        ClaudeStreamCompletionTracker.IsTaskNotificationReplay(PromptEcho()).ShouldBeFalse();
+
+        tracker.Observe(replay).ShouldBeFalse();
+        tracker.HostPromptAwaitingStart.ShouldBeTrue();
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-5)]
+    public async Task ExecuteAsync_rejects_non_positive_notification_turn_timeout(int milliseconds)
+    {
+        var provider = CreateProvider();
+
+        await Should.ThrowAsync<ArgumentOutOfRangeException>(async () =>
+        {
+            await foreach (var _ in provider.ExecuteAsync(
+                               new ClaudeCodeOptions { NotificationTurnTimeout = TimeSpan.FromMilliseconds(milliseconds) },
+                               "hello"))
+            {
+            }
+        });
+    }
+
+    [Fact]
     public async Task ExecuteAsync_stops_waiting_for_subagent_background_task_after_timeout()
     {
         var provider = CreateProvider(
@@ -1936,6 +2164,32 @@ public sealed partial class ClaudeCodeProviderTests
     private static CliMessage MonitorToolUse(long timeoutMilliseconds = 120_000)
     {
         return ToolUseMessage("Monitor", "toolu-monitor", new { description = "wait test", timeout_ms = timeoutMilliseconds });
+    }
+
+    // The CLI replays the host's prompt (requested with --replay-user-messages) right after the init of the turn it starts.
+    private static CliMessage PromptEcho()
+    {
+        return StreamMessage("user", new { isReplay = true, message = new { role = "user", content = "hello" } });
+    }
+
+    // The tool results that the CLI attaches queued notifications to: the main agent's own, or a subagent's when
+    // parent_tool_use_id names the call that launched it.
+    private static CliMessage ToolResultMessage(string toolUseId = "toolu-result", string? parentToolUseId = null)
+    {
+        var message = new { role = "user", content = new object[] { new { type = "tool_result", tool_use_id = toolUseId } } };
+        return parentToolUseId is null
+            ? StreamMessage("user", new { message })
+            : StreamMessage("user", new { message, parent_tool_use_id = parentToolUseId });
+    }
+
+    // The CLI replays a task notification it hands to the agent, as the prompt text the agent receives.
+    private static CliMessage NotificationReplay(params string[] taskIds)
+    {
+        var text = string.Concat(taskIds.Select(static taskId =>
+            $"<task-notification>\n<task-id>{taskId}</task-id>\n<status>completed</status>\n</task-notification>\n"));
+        return StreamMessage(
+            "user",
+            new { isReplay = true, origin = new { kind = "task-notification" }, message = new { role = "user", content = text } });
     }
 
     private static CliMessage BackgroundBashToolUse(long? timeoutMilliseconds)

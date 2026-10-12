@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using HagiCode.Libs.Core.AgentWork;
 using HagiCode.Libs.Core.Transport;
 
@@ -27,6 +28,15 @@ namespace HagiCode.Libs.Providers.ClaudeCode;
 /// and every later event is lost, so the run waits for it until its declared timeout plus a grace period. Both are
 /// reported as a plain <c>local_bash</c> task; they are recognized by the tool call whose <c>tool_use_id</c> the
 /// <c>task_started</c> message carries.
+/// A <c>task_notification</c> that is still queued when a turn ends is a turn the CLI has yet to start. A subagent that
+/// finishes while the main agent is still writing its final answer is reported mid-turn, but the CLI can only hand the
+/// notification to the agent at a tool-result boundary; with none left it queues the notification and starts another
+/// turn a few milliseconds after the <c>result</c>. Ending the run at that <c>result</c> kills the CLI before the agent
+/// ever sees what the subagent reported. A notification counts as delivered once the main agent gets a tool result after
+/// it (the CLI attaches the queue to the next request) or the CLI replays it (<c>origin.kind</c>
+/// <c>task-notification</c>); otherwise the next <c>system/init</c> is the turn that handles it. Notifications for
+/// tasks a subagent owns go to that subagent, and notifications for tasks this run never saw are the replays of an earlier
+/// session's stopped tasks, which the prompt-start logic below already covers.
 /// A prompt is recognized as started by the CLI replaying it (<c>isReplay</c>, requested with
 /// <c>--replay-user-messages</c>). A turn that is not the prompt's own can end first: a stopped background-task
 /// notification from an earlier session starts one on resume, and its <c>result</c> is not the answer to the prompt.
@@ -35,7 +45,7 @@ namespace HagiCode.Libs.Providers.ClaudeCode;
 /// created from <c>task_started</c> only, so status events for a task that never started in this run (a resumed session
 /// replays stopped notifications of its old tasks) create nothing.
 /// </remarks>
-internal sealed class ClaudeStreamCompletionTracker
+internal sealed partial class ClaudeStreamCompletionTracker
 {
     private const string SubagentTaskType = "local_agent";
     private const string MonitorToolName = "Monitor";
@@ -45,6 +55,7 @@ internal sealed class ClaudeStreamCompletionTracker
     private const string AgentToolName = "Agent";
     private const string LegacyAgentToolName = "Task";
     private const string ProviderKey = "claude";
+    private const string TaskNotificationOrigin = "task-notification";
     private const string EmptyItemsSignature = "[]";
     private const int MaxDetailLength = 200;
     private const int MaxSummaryLength = 4_000;
@@ -54,6 +65,9 @@ internal sealed class ClaudeStreamCompletionTracker
     private readonly Dictionary<string, LaunchingToolCall> _launchingToolCalls = new(StringComparer.Ordinal);
     private readonly Dictionary<string, DateTimeOffset> _boundedTaskDeadlines = new(StringComparer.Ordinal);
     private readonly HashSet<string> _runningBoundedTaskIds = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _knownTaskIds = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _taskIdsOwnedBySubagents = new(StringComparer.Ordinal);
+    private readonly List<string> _undeliveredNotificationTaskIds = [];
     private readonly TimeSpan _backgroundWorkGracePeriod;
     private readonly TimeProvider _timeProvider;
     private readonly Dictionary<string, WorkRecord> _workRecords = new(StringComparer.Ordinal);
@@ -97,6 +111,12 @@ internal sealed class ClaudeStreamCompletionTracker
         HostPromptStart,
 
         /// <summary>
+        /// A task notification for the main agent was queued by the CLI and its turn has not started. The turn normally
+        /// starts within milliseconds; the bound covers a notification the CLI handled without a visible sign.
+        /// </summary>
+        NotificationTurn,
+
+        /// <summary>
         /// An interactive question waits for the user's answer. The other bounds are suspended while it does, because the
         /// agent is blocked on a person; the question timeout is the only bound that applies.
         /// </summary>
@@ -134,7 +154,12 @@ internal sealed class ClaudeStreamCompletionTracker
                 return PendingWait.MainAgentBackgroundWork;
             }
 
-            return _hostPromptsAwaitingStart > 0 ? PendingWait.HostPromptStart : PendingWait.None;
+            if (_hostPromptsAwaitingStart > 0)
+            {
+                return PendingWait.HostPromptStart;
+            }
+
+            return _undeliveredNotificationTaskIds.Count > 0 ? PendingWait.NotificationTurn : PendingWait.None;
         }
     }
 
@@ -219,11 +244,29 @@ internal sealed class ClaudeStreamCompletionTracker
             return false;
         }
 
+        if (IsTaskNotificationReplay(message))
+        {
+            MarkNotificationsDelivered(message.Content);
+            return false;
+        }
+
         if (IsPromptReplay(message))
         {
             if (_hostPromptsAwaitingStart > 0)
             {
                 _hostPromptsAwaitingStart--;
+            }
+
+            return false;
+        }
+
+        if (string.Equals(message.Type, "user", StringComparison.OrdinalIgnoreCase))
+        {
+            if (IsMainAgentToolResult(message.Content))
+            {
+                // The CLI attaches everything queued to the request that follows a tool result, so a notification seen
+                // before this message reaches the agent within the running turn.
+                _undeliveredNotificationTaskIds.Clear();
             }
 
             return false;
@@ -246,7 +289,8 @@ internal sealed class ClaudeStreamCompletionTracker
                    && _subagentOwnedTaskIds.Count == 0
                    && _runningBoundedTaskIds.Count == 0
                    && _finishedTurns >= _startedTurns
-                   && _hostPromptsAwaitingStart == 0);
+                   && _hostPromptsAwaitingStart == 0
+                   && _undeliveredNotificationTaskIds.Count == 0);
     }
 
     /// <summary>
@@ -275,11 +319,93 @@ internal sealed class ClaudeStreamCompletionTracker
     /// </summary>
     internal static bool IsPromptReplay(CliMessage message)
     {
+        return IsReplay(message) && !IsTaskNotificationOrigin(message.Content);
+    }
+
+    /// <summary>
+    /// Reports whether the message is the CLI replaying a task notification it handed to the main agent. It is replayed
+    /// like a prompt, but it is not one the host wrote.
+    /// </summary>
+    internal static bool IsTaskNotificationReplay(CliMessage message)
+    {
+        return IsReplay(message) && IsTaskNotificationOrigin(message.Content);
+    }
+
+    private static bool IsReplay(CliMessage message)
+    {
         return string.Equals(message.Type, "user", StringComparison.OrdinalIgnoreCase)
                && message.Content.ValueKind == JsonValueKind.Object
                && message.Content.TryGetProperty("isReplay", out var isReplay)
                && isReplay.ValueKind == JsonValueKind.True;
     }
+
+    private static bool IsTaskNotificationOrigin(JsonElement content)
+    {
+        return content.ValueKind == JsonValueKind.Object
+               && content.TryGetProperty("origin", out var origin)
+               && string.Equals(GetString(origin, "kind"), TaskNotificationOrigin, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Reports whether a <c>user</c> message carries tool results of the main agent. A subagent's own tool results are
+    /// attributed to the tool call that launched it (<c>parent_tool_use_id</c>) and are boundaries of the subagent's turn.
+    /// </summary>
+    private static bool IsMainAgentToolResult(JsonElement content)
+    {
+        if (content.ValueKind != JsonValueKind.Object
+            || GetString(content, "parent_tool_use_id") is not null
+            || !content.TryGetProperty("message", out var message)
+            || message.ValueKind != JsonValueKind.Object
+            || !message.TryGetProperty("content", out var blocks)
+            || blocks.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        foreach (var block in blocks.EnumerateArray())
+        {
+            if (string.Equals(GetString(block, "type"), "tool_result", StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Forgets the notifications a replayed one names. The replay is the prompt text the agent receives, which carries the
+    /// <c>task-id</c> of every notification it contains.
+    /// </summary>
+    private void MarkNotificationsDelivered(JsonElement content)
+    {
+        if (_undeliveredNotificationTaskIds.Count == 0
+            || !content.TryGetProperty("message", out var message)
+            || message.ValueKind != JsonValueKind.Object
+            || !message.TryGetProperty("content", out var body))
+        {
+            return;
+        }
+
+        var text = body.ValueKind switch
+        {
+            JsonValueKind.String => body.GetString(),
+            JsonValueKind.Array => string.Concat(body.EnumerateArray().Select(static block => GetString(block, "text"))),
+            _ => null
+        };
+        if (string.IsNullOrEmpty(text))
+        {
+            return;
+        }
+
+        foreach (Match match in TaskIdPattern().Matches(text))
+        {
+            _undeliveredNotificationTaskIds.Remove(match.Groups[1].Value);
+        }
+    }
+
+    [GeneratedRegex("<task-id>([^<]+)</task-id>", RegexOptions.CultureInvariant)]
+    private static partial Regex TaskIdPattern();
 
     private void ObserveSystemMessage(JsonElement content)
     {
@@ -287,6 +413,13 @@ internal sealed class ClaudeStreamCompletionTracker
         {
             case "init":
                 _startedTurns++;
+
+                // The turn that starts after a queued notification is the one that handles it.
+                if (_undeliveredNotificationTaskIds.Count > 0)
+                {
+                    _undeliveredNotificationTaskIds.RemoveAt(0);
+                }
+
                 break;
             case "background_tasks_changed":
                 ReplaceRunningTasks(content);
@@ -302,6 +435,11 @@ internal sealed class ClaudeStreamCompletionTracker
             case "task_notification":
                 if (GetString(content, "task_id") is { } finishedTaskId)
                 {
+                    if (_knownTaskIds.Contains(finishedTaskId) && !_taskIdsOwnedBySubagents.Contains(finishedTaskId))
+                    {
+                        _undeliveredNotificationTaskIds.Add(finishedTaskId);
+                    }
+
                     _runningSubagentTaskIds.Remove(finishedTaskId);
                     _subagentOwnedTaskIds.Remove(finishedTaskId);
                     _runningBoundedTaskIds.Remove(finishedTaskId);
@@ -340,6 +478,7 @@ internal sealed class ClaudeStreamCompletionTracker
 
     private void TrackTask(JsonElement task, string taskId)
     {
+        _knownTaskIds.Add(taskId);
         if (IsSubagentTask(task))
         {
             _runningSubagentTaskIds.Add(taskId);
@@ -348,6 +487,7 @@ internal sealed class ClaudeStreamCompletionTracker
         if (GetString(task, "parent_task_id") is not null)
         {
             _subagentOwnedTaskIds.Add(taskId);
+            _taskIdsOwnedBySubagents.Add(taskId);
             return;
         }
 

@@ -105,6 +105,14 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
                 "PromptStartTimeout must be positive.");
         }
 
+        if (options.NotificationTurnTimeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.NotificationTurnTimeout,
+                "NotificationTurnTimeout must be positive.");
+        }
+
         if (options.QuestionTimeout != Timeout.InfiniteTimeSpan && options.QuestionTimeout <= TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(
@@ -648,6 +656,7 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
             ClaudeStreamCompletionTracker.PendingWait.SubagentBackgroundWork => options.SubagentBackgroundWorkTimeout,
             ClaudeStreamCompletionTracker.PendingWait.MainAgentBackgroundWork => completionTracker.RemainingBackgroundWork,
             ClaudeStreamCompletionTracker.PendingWait.HostPromptStart => options.PromptStartTimeout,
+            ClaudeStreamCompletionTracker.PendingWait.NotificationTurn => options.NotificationTurnTimeout,
 
             // The agent is blocked on a person; the question timeout of the pending question is the only bound.
             ClaudeStreamCompletionTracker.PendingWait.UserQuestion => Timeout.InfiniteTimeSpan,

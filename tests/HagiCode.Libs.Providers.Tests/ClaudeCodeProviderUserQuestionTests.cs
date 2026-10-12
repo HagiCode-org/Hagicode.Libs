@@ -634,8 +634,13 @@ public sealed partial class ClaudeCodeProviderTests
                 new { subtype = "task_started", task_id = "agent-1", task_type = "local_agent", tool_use_id = "toolu-agent" }),
             TwoQuestionRequest("req-agent", "toolu-two"));
         await WaitUntilAsync(() => transport.ControlResponses().Count == 1, "the answer");
+
+        // The subagent reports back before the turn ends, so the CLI queues the notification and the agent handles it in
+        // a follow-up turn that starts right after this turn's result.
         transport.Push(
             StreamMessage("system", new { subtype = "task_notification", task_id = "agent-1", status = "completed", summary = "ok" }),
+            StreamMessage("result", new { is_error = false }),
+            StreamMessage("system", new { subtype = "init" }),
             StreamMessage("result", new { is_error = false }));
         await run.Completion.WaitAsync(TimeSpan.FromSeconds(10));
 

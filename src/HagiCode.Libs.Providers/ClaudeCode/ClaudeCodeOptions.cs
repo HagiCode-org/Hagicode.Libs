@@ -156,6 +156,21 @@ public sealed record ClaudeCodeOptions
     public static readonly TimeSpan DefaultPromptStartTimeout = TimeSpan.FromSeconds(20);
 
     /// <summary>
+    /// Gets or sets how long the run waits, after a turn's <c>result</c>, for the turn that handles a task notification
+    /// (a subagent or background command that finished) the CLI queued for the main agent. A subagent that finishes while
+    /// the main agent is still writing its final answer is reported mid-turn but can only be handed to the agent by a new
+    /// turn, which the CLI starts within milliseconds of the <c>result</c>; ending the run first kills the CLI and the
+    /// agent never sees what the subagent reported. The wait ends as soon as that turn starts, so the bound only matters
+    /// for a notification the CLI handled without a visible sign. The default is 10 seconds and the value must be positive.
+    /// </summary>
+    public TimeSpan NotificationTurnTimeout { get; init; } = DefaultNotificationTurnTimeout;
+
+    /// <summary>
+    /// The default value of <see cref="NotificationTurnTimeout" />.
+    /// </summary>
+    public static readonly TimeSpan DefaultNotificationTurnTimeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>
     /// Gets or sets the callback that answers the interactive questions the agent asks through the CLI's
     /// <c>AskUserQuestion</c> tool. It is <see langword="null" /> by default, which keeps the provider exactly as it was.
     /// Setting it adds <c>--permission-prompt-tool stdio</c> to the CLI arguments, which makes the CLI offer

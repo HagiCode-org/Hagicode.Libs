@@ -26,6 +26,18 @@ namespace HagiCode.Libs.Providers.Tests;
 //  * Resuming a session replays only "task_notification" (status stopped) for tasks that were running when the old CLI
 //    died. No "task_started" or "background_tasks_changed" is replayed, so ignoring notifications of unknown task ids is
 //    enough to keep ghost items out and no extra rule is needed.
+//
+// Findings recorded for the queued-notification fix (CLI 2.1.296, haiku, 2026-10-11):
+//  * A notification is only handed to the main agent at a tool-result boundary. When the subagent finishes while the main
+//    agent writes its final answer there is none, so the CLI queues the notification, emits the turn's "result", and
+//    starts a follow-up turn (system "init") about 60 ms later. A run ended at that "result" never lets the agent see it.
+//  * A notification that is handed over at a boundary is replayed as a "user" message with isReplay true and
+//    origin.kind "task-notification" whose text names the notification's task ids; no follow-up turn starts. The
+//    follow-up turn that handles a queued notification has no such replay.
+//  * A call whose own task finished before the call returned (a Bash command the CLI ran in the background) also reports a
+//    "task_notification", but only the subagent's notification was replayed to the agent; the tool result carries the
+//    command's outcome.
+//  * Messages of a subagent carry parent_tool_use_id (the tool call that launched it); the main agent's do not.
 internal static class ClaudeAgentWorkCapture
 {
     public static IReadOnlyList<CliMessage> Parse(string jsonLines)
@@ -144,5 +156,52 @@ internal static class ClaudeAgentWorkCapture
 {"type":"result","subtype":"success","is_error":false,"result":"(fixture turn result)","session_id":"fixture-session"}
 {"type":"system","subtype":"init","session_id":"fixture-session"}
 {"type":"result","subtype":"success","is_error":false,"result":"(fixture turn result)","session_id":"fixture-session"}
+""");
+
+    /// <summary>
+    /// Capture: NotificationQueuedDuringFinalAnswer. A background subagent finishes while the main agent is still writing
+    /// its final answer: the notification is reported mid-turn, no tool result follows it, and the follow-up turn that
+    /// handles it starts right after the turn's result.
+    /// </summary>
+    public static IReadOnlyList<CliMessage> NotificationQueuedDuringFinalAnswer => Parse("""
+{"type":"system","subtype":"init","session_id":"fixture-session"}
+{"type":"user","message":{"role":"user","content":"Do exactly this. Step 1: call the Agent tool once with run_in_background true; the subage…"},"isReplay":true,"session_id":"fixture-session"}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_01KBJktb5aJo9KhAiYkdCGPs","name":"Agent","input":{"description":"Reply with A-DONE","prompt":"Do not use any tools. Reply with only the single word: A-DONE","run_in_background":true}}]},"session_id":"fixture-session"}
+{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"a0bb1b649c7cc4f79","run_id":"0mv4rgl3x-6a8fd867","task_type":"local_agent","description":"Reply with A-DONE"}],"session_id":"fixture-session"}
+{"type":"system","subtype":"task_started","task_id":"a0bb1b649c7cc4f79","run_id":"0mv4rgl3x-6a8fd867","tool_use_id":"toolu_01KBJktb5aJo9KhAiYkdCGPs","task_type":"local_agent","description":"Reply with A-DONE","is_backgrounded":true,"session_id":"fixture-session"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01KBJktb5aJo9KhAiYkdCGPs"}]},"session_id":"fixture-session"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"A-DONE"}]},"parent_tool_use_id":"toolu_01KBJktb5aJo9KhAiYkdCGPs","session_id":"fixture-session"}
+{"type":"system","subtype":"task_updated","task_id":"a0bb1b649c7cc4f79","run_id":"0mv4rgl3x-6a8fd867","patch":{"status":"completed","end_time":1791754672050},"session_id":"fixture-session"}
+{"type":"system","subtype":"task_notification","task_id":"a0bb1b649c7cc4f79","run_id":"0mv4rgl3x-6a8fd867","tool_use_id":"toolu_01KBJktb5aJo9KhAiYkdCGPs","status":"completed","summary":"A-DONE","output_file":"/tmp/fixture/tasks/a0bb1b649c7cc4f79.output","session_id":"fixture-session"}
+{"type":"system","subtype":"background_tasks_changed","tasks":[],"session_id":"fixture-session"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"1. 2: The only even prime and the smallest prime. Every oth…"}]},"session_id":"fixture-session"}
+{"type":"result","subtype":"success","is_error":false,"result":"1. 2: The only even prime and the smallest prime. Every oth…","session_id":"fixture-session"}
+{"type":"system","subtype":"init","session_id":"fixture-session"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"The background agent finished and returned `A-DONE`, as Ste…"}]},"session_id":"fixture-session"}
+{"type":"result","subtype":"success","is_error":false,"result":"The background agent finished and returned `A-DONE`, as Ste…","session_id":"fixture-session"}
+""");
+
+    /// <summary>
+    /// Capture: NotificationConsumedAtToolBoundary. The same subagent finishes while the main agent runs a tool: the CLI
+    /// attaches the notification to the request that follows the tool result and replays it, so no follow-up turn starts.
+    /// </summary>
+    public static IReadOnlyList<CliMessage> NotificationConsumedAtToolBoundary => Parse("""
+{"type":"system","subtype":"init","session_id":"fixture-session"}
+{"type":"user","message":{"role":"user","content":"Do exactly this. Step 1: call the Agent tool once with run_in_background true; the subage…"},"isReplay":true,"session_id":"fixture-session"}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_01RAGnwQfwTVZ2xEG1s16u58","name":"Agent","input":{"description":"Reply with A-DONE","prompt":"Reply with the single word A-DONE. Do not use any tools.","run_in_background":true,"subagent_type":"general-purpose"}}]},"session_id":"fixture-session"}
+{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"a05b071dfaff13840","run_id":"0mv4rq5pe-6d575695","task_type":"local_agent","description":"Reply with A-DONE"}],"session_id":"fixture-session"}
+{"type":"system","subtype":"task_started","task_id":"a05b071dfaff13840","run_id":"0mv4rq5pe-6d575695","tool_use_id":"toolu_01RAGnwQfwTVZ2xEG1s16u58","task_type":"local_agent","description":"Reply with A-DONE","is_backgrounded":true,"session_id":"fixture-session"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01RAGnwQfwTVZ2xEG1s16u58"}]},"session_id":"fixture-session"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"A-DONE"}]},"parent_tool_use_id":"toolu_01RAGnwQfwTVZ2xEG1s16u58","session_id":"fixture-session"}
+{"type":"system","subtype":"task_updated","task_id":"a05b071dfaff13840","run_id":"0mv4rq5pe-6d575695","patch":{"status":"completed","end_time":1791754672050},"session_id":"fixture-session"}
+{"type":"system","subtype":"task_notification","task_id":"a05b071dfaff13840","run_id":"0mv4rq5pe-6d575695","tool_use_id":"toolu_01RAGnwQfwTVZ2xEG1s16u58","status":"completed","summary":"A-DONE","output_file":"/tmp/fixture/tasks/a05b071dfaff13840.output","session_id":"fixture-session"}
+{"type":"system","subtype":"background_tasks_changed","tasks":[],"session_id":"fixture-session"}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_01XSVadnSUx5cikeuNJ2tVjx","name":"Bash","input":{"command":"sleep 12","description":"Pause for 12 seconds"}}]},"session_id":"fixture-session"}
+{"type":"system","subtype":"task_started","task_id":"bhx4oc0vp","run_id":"0mv4rq9lu-f6864fc1","tool_use_id":"toolu_01XSVadnSUx5cikeuNJ2tVjx","task_type":"local_bash","description":"Pause for 12 seconds","is_backgrounded":false,"session_id":"fixture-session"}
+{"type":"system","subtype":"task_notification","task_id":"bhx4oc0vp","run_id":"0mv4rq9lu-f6864fc1","tool_use_id":"toolu_01XSVadnSUx5cikeuNJ2tVjx","status":"completed","summary":"Pause for 12 seconds","output_file":"/tmp/fixture/tasks/bhx4oc0vp.output","session_id":"fixture-session"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01XSVadnSUx5cikeuNJ2tVjx"}]},"session_id":"fixture-session"}
+{"type":"user","message":{"role":"user","content":"<task-notification> <task-id>a05b071dfaff13840</task-id> <tool-use-id>toolu_01RAGnwQfwTVZ…"},"isReplay":true,"origin":{"kind":"task-notification"},"session_id":"fixture-session"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Yes, I was told the subagent finished, and it replied \"A-DO…"}]},"session_id":"fixture-session"}
+{"type":"result","subtype":"success","is_error":false,"result":"Yes, I was told the subagent finished, and it replied \"A-DO…","session_id":"fixture-session"}
 """);
 }
