@@ -97,6 +97,15 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
                 "BackgroundWorkGracePeriod must be positive.");
         }
 
+        if (options.UntimedBackgroundCommandTimeout != Timeout.InfiniteTimeSpan
+            && options.UntimedBackgroundCommandTimeout < TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.UntimedBackgroundCommandTimeout,
+                "UntimedBackgroundCommandTimeout must be zero, positive or Timeout.InfiniteTimeSpan.");
+        }
+
         if (options.PromptStartTimeout <= TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(
@@ -479,7 +488,9 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
         // The first "result" is not necessarily the last one: a background subagent keeps running after the turn
         // that launched it, and a prompt can be answered by a turn that is not its own. The tracker decides when the
         // run is really over.
-        var completionTracker = new ClaudeStreamCompletionTracker(options.BackgroundWorkGracePeriod);
+        var completionTracker = new ClaudeStreamCompletionTracker(
+            options.BackgroundWorkGracePeriod,
+            untimedBackgroundCommandTimeout: options.UntimedBackgroundCommandTimeout);
         var turnDelivery = new ClaudeTurnDelivery();
         var promptMessage = CreatePromptMessage(prompt, options);
 

@@ -1032,7 +1032,76 @@ public sealed partial class ClaudeCodeProviderTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_does_not_wait_for_a_background_command_without_a_timeout()
+    public async Task ExecuteAsync_keeps_streaming_while_a_background_command_without_a_timeout_is_running()
+    {
+        // The agent starts a build in the background without a timeout and ends its turn to wait for the exit notification.
+        // Ending the run at that "result" kills the CLI and the command, and the agent's promised follow-up never happens.
+        var provider = CreateProvider(messageBatches:
+        [
+            [
+                StreamMessage("system", new { subtype = "init" }),
+                BackgroundBashToolUse(timeoutMilliseconds: null),
+                StreamMessage("system", new { subtype = "background_tasks_changed", tasks = BackgroundCommandTasks("bash-1") }),
+                StreamMessage(
+                    "system",
+                    new { subtype = "task_started", task_id = "bash-1", task_type = "local_bash", tool_use_id = "toolu-bash" }),
+                StreamMessage("result", new { is_error = false, result = "waiting for the build" }),
+                StreamMessage("system", new { subtype = "task_notification", task_id = "bash-1", status = "completed" }),
+                StreamMessage("system", new { subtype = "background_tasks_changed", tasks = BackgroundCommandTasks() }),
+                StreamMessage("system", new { subtype = "init" }),
+                StreamMessage("result", new { is_error = false, result = "build finished" }),
+                StreamMessage("assistant", new { marker = "after-final-result" })
+            ]
+        ]);
+
+        var messages = await CollectAsync(provider);
+
+        messages.Count(static message => message.Type == "result").ShouldBe(2);
+        messages[^1].Content.GetProperty("result").GetString().ShouldBe("build finished");
+        messages.Any(static message => message.Content.TryGetProperty("marker", out _)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_stops_waiting_for_a_background_command_without_a_timeout_when_the_cap_passes()
+    {
+        // The CLI never ends such a command, so the host's own cap is the only bound; a dev server must not hold the run
+        // open for good.
+        var provider = CreateProvider(
+            messageBatches:
+            [
+                [
+                    StreamMessage("system", new { subtype = "init" }),
+                    BackgroundBashToolUse(timeoutMilliseconds: null),
+                    StreamMessage("system", new { subtype = "background_tasks_changed", tasks = BackgroundCommandTasks("bash-1") }),
+                    StreamMessage(
+                        "system",
+                        new { subtype = "task_started", task_id = "bash-1", task_type = "local_bash", tool_use_id = "toolu-bash" }),
+                    StreamMessage("result", new { is_error = false, result = "dev server started" })
+                ]
+            ],
+            transportFailures: [new TransportFailure(HangAfterBatch: true)]);
+        var options = new ClaudeCodeOptions
+        {
+            SessionId = "session-1",
+            WorkingDirectory = "/tmp/project",
+            UntimedBackgroundCommandTimeout = TimeSpan.FromMilliseconds(250)
+        };
+
+        var stopwatch = Stopwatch.StartNew();
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var messages = await CollectAsync(provider, options, guard.Token);
+
+        guard.IsCancellationRequested.ShouldBeFalse();
+        // Without the wait the run would end at the first "result"; the grace period must not be added on top of the cap.
+        stopwatch.Elapsed.ShouldBeGreaterThanOrEqualTo(TimeSpan.FromMilliseconds(200));
+        stopwatch.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(20));
+        messages[^1].Type.ShouldBe("result");
+        messages[^1].Content.GetProperty("result").GetString().ShouldBe("dev server started");
+        provider.DisposedTransportCount.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_does_not_wait_for_a_background_command_without_a_timeout_when_the_cap_is_zero()
     {
         var provider = CreateProvider(messageBatches:
         [
@@ -1048,10 +1117,87 @@ public sealed partial class ClaudeCodeProviderTests
             ]
         ]);
 
-        var messages = await CollectAsync(provider);
+        var messages = await CollectAsync(
+            provider,
+            new ClaudeCodeOptions
+            {
+                SessionId = "session-1",
+                WorkingDirectory = "/tmp/project",
+                UntimedBackgroundCommandTimeout = TimeSpan.Zero
+            });
 
         messages[^1].Type.ShouldBe("result");
         messages.Any(static message => message.Content.TryGetProperty("marker", out _)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Tracker_bounds_a_background_command_without_a_timeout_by_the_cap_alone()
+    {
+        var tracker = new ClaudeStreamCompletionTracker(
+            TimeSpan.FromMinutes(1),
+            untimedBackgroundCommandTimeout: TimeSpan.FromMinutes(30));
+
+        ObserveUntimedBackgroundCommandTurn(tracker).ShouldBeFalse();
+
+        tracker.CurrentWait.ShouldBe(ClaudeStreamCompletionTracker.PendingWait.MainAgentBackgroundWork);
+        // No grace period on top: the CLI has no timeout of its own to report, so the cap is the whole bound.
+        tracker.RemainingBackgroundWork.ShouldBeLessThanOrEqualTo(TimeSpan.FromMinutes(30));
+        tracker.RemainingBackgroundWork.ShouldBeGreaterThan(TimeSpan.FromMinutes(29));
+    }
+
+    [Fact]
+    public void Tracker_waits_without_a_limit_for_a_background_command_without_a_timeout_when_the_cap_is_infinite()
+    {
+        var tracker = new ClaudeStreamCompletionTracker(
+            TimeSpan.FromMinutes(1),
+            untimedBackgroundCommandTimeout: Timeout.InfiniteTimeSpan);
+
+        ObserveUntimedBackgroundCommandTurn(tracker).ShouldBeFalse();
+
+        tracker.CurrentWait.ShouldBe(ClaudeStreamCompletionTracker.PendingWait.MainAgentBackgroundWork);
+        tracker.RemainingBackgroundWork.ShouldBe(Timeout.InfiniteTimeSpan);
+    }
+
+    [Fact]
+    public void Tracker_does_not_wait_for_a_background_command_without_a_timeout_by_default()
+    {
+        // A tracker built without the cap behaves as before: only a declared timeout is awaited.
+        var tracker = new ClaudeStreamCompletionTracker(TimeSpan.FromMinutes(1));
+
+        ObserveUntimedBackgroundCommandTurn(tracker).ShouldBeTrue();
+        tracker.CurrentWait.ShouldBe(ClaudeStreamCompletionTracker.PendingWait.None);
+    }
+
+    [Fact]
+    public void Tracker_ends_the_wait_for_a_background_command_without_a_timeout_when_it_reports_back()
+    {
+        var tracker = new ClaudeStreamCompletionTracker(
+            TimeSpan.FromMinutes(1),
+            untimedBackgroundCommandTimeout: TimeSpan.FromMinutes(30));
+        ObserveUntimedBackgroundCommandTurn(tracker);
+
+        tracker.Observe(StreamMessage("system", new { subtype = "task_notification", task_id = "bash-1", status = "completed" }));
+        tracker.Observe(StreamMessage("system", new { subtype = "init" }));
+
+        tracker.CurrentWait.ShouldBe(ClaudeStreamCompletionTracker.PendingWait.None);
+        tracker.Observe(StreamMessage("result", new { is_error = false })).ShouldBeTrue();
+    }
+
+    [Theory]
+    [InlineData(-5)]
+    [InlineData(-60)]
+    public async Task ExecuteAsync_rejects_a_negative_untimed_background_command_timeout(int seconds)
+    {
+        var provider = CreateProvider();
+
+        await Should.ThrowAsync<ArgumentOutOfRangeException>(async () =>
+        {
+            await foreach (var _ in provider.ExecuteAsync(
+                               new ClaudeCodeOptions { UntimedBackgroundCommandTimeout = TimeSpan.FromSeconds(seconds) },
+                               "hello"))
+            {
+            }
+        });
     }
 
     [Fact]
@@ -2190,6 +2336,21 @@ public sealed partial class ClaudeCodeProviderTests
         return StreamMessage(
             "user",
             new { isReplay = true, origin = new { kind = "task-notification" }, message = new { role = "user", content = text } });
+    }
+
+    /// <summary>
+    /// Feeds a turn in which the main agent starts a background command with no timeout and ends its turn; returns what
+    /// the tracker says at that "result".
+    /// </summary>
+    private static bool ObserveUntimedBackgroundCommandTurn(ClaudeStreamCompletionTracker tracker)
+    {
+        tracker.Observe(StreamMessage("system", new { subtype = "init" }));
+        tracker.Observe(BackgroundBashToolUse(timeoutMilliseconds: null));
+        tracker.Observe(
+            StreamMessage(
+                "system",
+                new { subtype = "task_started", task_id = "bash-1", task_type = "local_bash", tool_use_id = "toolu-bash" }));
+        return tracker.Observe(StreamMessage("result", new { is_error = false }));
     }
 
     private static CliMessage BackgroundBashToolUse(long? timeoutMilliseconds)

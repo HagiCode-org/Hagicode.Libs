@@ -20,14 +20,19 @@ namespace HagiCode.Libs.Providers.ClaudeCode;
 /// the subagent as completed, lets the main agent take another turn, and resumes the same subagent once that task
 /// finishes; closing the stream in between kills the task and loses the subagent's real result. Such tasks are
 /// recognizable by their <c>parent_task_id</c>.
-/// Background shell tasks owned by the main agent are awaited only when they are bounded. A long-lived background
-/// command with no timeout (for example a dev server) never finishes on its own and would keep the run open forever.
-/// A <c>Monitor</c> (<c>timeout_ms</c>) or a <c>Bash</c> command run in the background with an explicit <c>timeout</c> is
-/// different: the agent arms it to be woken by its events or its exit and normally ends its turn right after, and the
-/// CLI ends the task, with a <c>task_notification</c>, when that timeout passes. Closing the stream early kills the task
-/// and every later event is lost, so the run waits for it until its declared timeout plus a grace period. Both are
-/// reported as a plain <c>local_bash</c> task; they are recognized by the tool call whose <c>tool_use_id</c> the
-/// <c>task_started</c> message carries.
+/// Background shell tasks owned by the main agent are awaited, each for a bounded time. A <c>Monitor</c>
+/// (<c>timeout_ms</c>) or a <c>Bash</c> command run in the background with an explicit <c>timeout</c> is armed by the agent
+/// to be woken by its events or its exit; it normally ends its turn right after, and the CLI ends the task, with a
+/// <c>task_notification</c>, when that timeout passes. Closing the stream early kills the task and every later event is
+/// lost, so the run waits for it until its declared timeout plus a grace period. Both are reported as a plain
+/// <c>local_bash</c> task; they are recognized by the tool call whose <c>tool_use_id</c> the <c>task_started</c> message
+/// carries.
+/// A <c>Bash</c> command run in the background with no <c>timeout</c> may never finish on its own (a dev server), and the
+/// CLI will not end it, but the agent cannot tell the host apart from a CLI that keeps waiting: a build started this way
+/// is followed by a turn that ends with "I will continue when it finishes", and a host that closed the stream at that
+/// <c>result</c> would kill the CLI and the build's notification with it. The run therefore waits for such a command up to
+/// a host-side cap (<c>untimedBackgroundCommandTimeout</c>), counted from when the task started, and no grace period is
+/// added because the CLI has no timeout of its own to report. A cap of zero restores the old behaviour of not waiting.
 /// A <c>task_notification</c> that is still queued when a turn ends is a turn the CLI has yet to start. A subagent that
 /// finishes while the main agent is still writing its final answer is reported mid-turn, but the CLI can only hand the
 /// notification to the agent at a tool-result boundary; with none left it queues the notification and starts another
@@ -69,6 +74,7 @@ internal sealed partial class ClaudeStreamCompletionTracker
     private readonly HashSet<string> _taskIdsOwnedBySubagents = new(StringComparer.Ordinal);
     private readonly List<string> _undeliveredNotificationTaskIds = [];
     private readonly TimeSpan _backgroundWorkGracePeriod;
+    private readonly TimeSpan _untimedBackgroundCommandTimeout;
     private readonly TimeProvider _timeProvider;
     private readonly Dictionary<string, WorkRecord> _workRecords = new(StringComparer.Ordinal);
     private readonly List<WorkRecord> _workOrder = [];
@@ -87,9 +93,17 @@ internal sealed partial class ClaudeStreamCompletionTracker
     /// How long past its declared timeout the run keeps waiting for a bounded background task of the main agent.
     /// </param>
     /// <param name="timeProvider">The clock that dates those tasks, or <see langword="null" /> for the system clock.</param>
-    public ClaudeStreamCompletionTracker(TimeSpan backgroundWorkGracePeriod, TimeProvider? timeProvider = null)
+    /// <param name="untimedBackgroundCommandTimeout">
+    /// How long the run waits for a background <c>Bash</c> command of the main agent that declared no timeout, counted
+    /// from its start. <see cref="Timeout.InfiniteTimeSpan" /> waits without a limit; zero (the default) does not wait.
+    /// </param>
+    public ClaudeStreamCompletionTracker(
+        TimeSpan backgroundWorkGracePeriod,
+        TimeProvider? timeProvider = null,
+        TimeSpan untimedBackgroundCommandTimeout = default)
     {
         _backgroundWorkGracePeriod = backgroundWorkGracePeriod;
+        _untimedBackgroundCommandTimeout = untimedBackgroundCommandTimeout;
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
@@ -165,7 +179,8 @@ internal sealed partial class ClaudeStreamCompletionTracker
 
     /// <summary>
     /// Gets how much longer the run waits for the bounded background work of the main agent: the latest declared
-    /// timeout plus the grace period, counted from when each task started. Never negative.
+    /// timeout plus the grace period, counted from when each task started, or the host-side cap for a command that
+    /// declared none. Never negative; <see cref="Timeout.InfiniteTimeSpan" /> when a task has no limit at all.
     /// </summary>
     public TimeSpan RemainingBackgroundWork
     {
@@ -175,7 +190,17 @@ internal sealed partial class ClaudeStreamCompletionTracker
             var remaining = TimeSpan.Zero;
             foreach (var taskId in _runningBoundedTaskIds)
             {
-                if (_boundedTaskDeadlines.TryGetValue(taskId, out var deadline) && deadline - now > remaining)
+                if (!_boundedTaskDeadlines.TryGetValue(taskId, out var deadline))
+                {
+                    continue;
+                }
+
+                if (deadline == DateTimeOffset.MaxValue)
+                {
+                    return Timeout.InfiniteTimeSpan;
+                }
+
+                if (deadline - now > remaining)
                 {
                     remaining = deadline - now;
                 }
@@ -495,16 +520,48 @@ internal sealed partial class ClaudeStreamCompletionTracker
         // bounded task is remembered by task id, with its deadline, once task_started has tied it to its tool call.
         if (GetString(task, "tool_use_id") is { } toolUseId
             && _launchingToolCalls.TryGetValue(toolUseId, out var launchingCall)
-            && launchingCall.DeclaredTimeout is { } declaredTimeout
-            && !_boundedTaskDeadlines.ContainsKey(taskId))
+            && !_boundedTaskDeadlines.ContainsKey(taskId)
+            && TryGetWaitDeadline(launchingCall, out var deadline))
         {
-            _boundedTaskDeadlines[taskId] = _timeProvider.GetUtcNow() + declaredTimeout + _backgroundWorkGracePeriod;
+            _boundedTaskDeadlines[taskId] = deadline;
         }
 
         if (_boundedTaskDeadlines.ContainsKey(taskId))
         {
             _runningBoundedTaskIds.Add(taskId);
         }
+    }
+
+    /// <summary>
+    /// Works out until when the run waits for a task its tool call launched. A call that declared a timeout is waited for
+    /// until that timeout plus the grace period; a background command that declared none, until the host-side cap.
+    /// </summary>
+    private bool TryGetWaitDeadline(LaunchingToolCall call, out DateTimeOffset deadline)
+    {
+        var now = _timeProvider.GetUtcNow();
+        if (call.DeclaredTimeout is { } declaredTimeout)
+        {
+            deadline = now + declaredTimeout + _backgroundWorkGracePeriod;
+            return true;
+        }
+
+        if (call.IsUntimedBackgroundCommand)
+        {
+            if (_untimedBackgroundCommandTimeout == Timeout.InfiniteTimeSpan)
+            {
+                deadline = DateTimeOffset.MaxValue;
+                return true;
+            }
+
+            if (_untimedBackgroundCommandTimeout > TimeSpan.Zero)
+            {
+                deadline = now + _untimedBackgroundCommandTimeout;
+                return true;
+            }
+        }
+
+        deadline = default;
+        return false;
     }
 
     private void RememberLaunchingToolCalls(JsonElement content)
@@ -542,12 +599,13 @@ internal sealed partial class ClaudeStreamCompletionTracker
             }
             else if (IsBackgroundCommand(toolName, input))
             {
-                // A background command with no timeout is not awaited by the host, but a subagent can own one, and the
-                // task it becomes is shown with this command.
+                // A background command with no timeout is awaited only up to the host-side cap, and not at all when the
+                // cap is zero; a subagent can also own one, and the task it becomes is shown with this command.
                 _launchingToolCalls[toolUseId] = new LaunchingToolCall(
                     GetString(input, "description"),
                     GetString(input, "command"),
-                    null);
+                    null,
+                    IsUntimedBackgroundCommand: true);
             }
         }
     }
@@ -606,10 +664,11 @@ internal sealed partial class ClaudeStreamCompletionTracker
         {
             kind = AgentWorkKinds.Subagent;
         }
-        else if (parentTaskId is not null || launchingCall?.DeclaredTimeout is not null)
+        else if (parentTaskId is not null || (launchingCall is not null && TryGetWaitDeadline(launchingCall, out _)))
         {
-            // Work the host waits on: anything a subagent owns, and a Monitor or timed background command of the main
-            // agent. A background command with no timeout is not awaited and is not shown.
+            // Work the host waits on: anything a subagent owns, a Monitor or timed background command of the main agent,
+            // and a background command with no timeout while the host-side cap is on. With the cap off such a command is
+            // not awaited and is not shown.
             kind = AgentWorkKinds.Monitor;
         }
         else
@@ -774,7 +833,12 @@ internal sealed partial class ClaudeStreamCompletionTracker
     /// <param name="Description">The call's description input.</param>
     /// <param name="Command">The call's command input, for a Monitor or background command.</param>
     /// <param name="DeclaredTimeout">The timeout the call declared, after the CLI default and cap; <see langword="null" /> when unbounded.</param>
-    private sealed record LaunchingToolCall(string? Description, string? Command, TimeSpan? DeclaredTimeout);
+    /// <param name="IsUntimedBackgroundCommand">Whether the call is a <c>Bash</c> command run in the background with no timeout.</param>
+    private sealed record LaunchingToolCall(
+        string? Description,
+        string? Command,
+        TimeSpan? DeclaredTimeout,
+        bool IsUntimedBackgroundCommand = false);
 
     private sealed class WorkRecord(string taskId, string kind, DateTimeOffset startedAt)
     {

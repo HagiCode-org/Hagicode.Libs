@@ -2,6 +2,7 @@ using System.Text.Json;
 using Shouldly;
 using HagiCode.Libs.Core.AgentWork;
 using HagiCode.Libs.Core.Transport;
+using HagiCode.Libs.Providers.ClaudeCode;
 
 namespace HagiCode.Libs.Providers.Tests;
 
@@ -106,9 +107,31 @@ public sealed partial class ClaudeCodeProviderTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_does_not_list_a_background_bash_without_a_timeout()
+    public async Task ExecuteAsync_lists_a_background_bash_without_a_timeout_that_the_host_waits_for()
     {
         var messages = await CollectAsync(CreateProvider(messageBatches: [ClaudeAgentWorkCapture.UnboundedBackgroundBash]));
+
+        var command = Snapshots(messages)[0].Items.ShouldHaveSingleItem();
+        command.Kind.ShouldBe(AgentWorkKinds.Monitor);
+        command.Status.ShouldBe(AgentWorkStatuses.Running);
+        command.Title.ShouldBe("Sleep 300 seconds then echo DONE-BG");
+        command.Detail.ShouldBe("sleep 300; echo DONE-BG");
+        // The command declared no timeout and the CLI will not end it, so there is no deadline to show.
+        command.DeadlineAt.ShouldBeNull();
+        command.BlocksCompletion.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_does_not_list_a_background_bash_without_a_timeout_when_the_cap_is_zero()
+    {
+        var messages = await CollectAsync(
+            CreateProvider(messageBatches: [ClaudeAgentWorkCapture.UnboundedBackgroundBash]),
+            new ClaudeCodeOptions
+            {
+                SessionId = "session-1",
+                WorkingDirectory = "/tmp/project",
+                UntimedBackgroundCommandTimeout = TimeSpan.Zero
+            });
 
         Snapshots(messages).ShouldBeEmpty();
     }

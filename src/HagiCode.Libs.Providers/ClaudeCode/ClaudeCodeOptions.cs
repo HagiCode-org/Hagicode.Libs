@@ -131,9 +131,9 @@ public sealed record ClaudeCodeOptions
     /// stopped to wait for: a <c>Monitor</c> (<c>timeout_ms</c>) or a <c>Bash</c> command run in the background with an
     /// explicit <c>timeout</c>. The agent is woken by their events or exit, so ending the run at the turn's <c>result</c>
     /// kills them and loses everything they would report. The CLI ends such work when its timeout passes and reports it,
-    /// so the run is open for the declared timeout plus this grace period; a background command without a timeout, such
-    /// as a dev server, is never awaited. When the time passes the run ends with the results already received.
-    /// The default is one minute and the value must be positive.
+    /// so the run is open for the declared timeout plus this grace period; a background command without a timeout is
+    /// bounded by <see cref="UntimedBackgroundCommandTimeout" /> instead. When the time passes the run ends with the
+    /// results already received. The default is one minute and the value must be positive.
     /// </summary>
     public TimeSpan BackgroundWorkGracePeriod { get; init; } = DefaultBackgroundWorkGracePeriod;
 
@@ -141,6 +141,24 @@ public sealed record ClaudeCodeOptions
     /// The default value of <see cref="BackgroundWorkGracePeriod" />.
     /// </summary>
     public static readonly TimeSpan DefaultBackgroundWorkGracePeriod = TimeSpan.FromMinutes(1);
+
+    /// <summary>
+    /// Gets or sets how long the run stays open after a <c>result</c> while a <c>Bash</c> command the main agent started in
+    /// the background with no <c>timeout</c> is still running, counted from when the command started. An agent that starts
+    /// a build this way and ends its turn to wait for it is woken by the command's exit; ending the run at that
+    /// <c>result</c> kills the CLI and the command's notification, the agent's wait is lost, and the next message finds the
+    /// command stopped or still running as an orphan. The CLI has no limit of its own for such a command, so the bound is
+    /// the host's. A command that is meant to run for good, such as a dev server, keeps the run open until the limit
+    /// passes or the run is stopped; then the run ends with the results already received.
+    /// The default is 30 minutes. Use <see cref="System.Threading.Timeout.InfiniteTimeSpan" /> to wait without a limit, or
+    /// <see cref="TimeSpan.Zero" /> to never wait for a background command that declared no timeout.
+    /// </summary>
+    public TimeSpan UntimedBackgroundCommandTimeout { get; init; } = DefaultUntimedBackgroundCommandTimeout;
+
+    /// <summary>
+    /// The default value of <see cref="UntimedBackgroundCommandTimeout" />.
+    /// </summary>
+    public static readonly TimeSpan DefaultUntimedBackgroundCommandTimeout = TimeSpan.FromMinutes(30);
 
     /// <summary>
     /// Gets or sets how long the run waits for a prompt written to the CLI to start its own turn after an earlier turn
