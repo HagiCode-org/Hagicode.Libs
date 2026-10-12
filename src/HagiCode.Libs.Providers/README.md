@@ -76,6 +76,7 @@ var poolDefaults = serviceProvider.GetRequiredService<CliProviderPoolConfigurati
 `Claude Code`、`CodeBuddy`、`Hermes` 现在与 `hagicode-core` 的对应 provider 薄适配层共享同一套 libs-backed 实现。重点是：
 
 - `Claude Code` 继续保留 raw stream / resume 语义，但 `ClaudeCodeProvider` 现在固定按次启动并回收本地 CLI 进程，不再做 warm transport reuse
+- `ClaudeCodeOptions.UserInputHandler`（默认 `null`，此时行为不变）让代理在运行中向用户提问：设置后 provider 会给 CLI 追加 `--permission-prompt-tool stdio`，CLI 因此注册 `AskUserQuestion` 并把权限询问以 `control_request` 发给宿主。`AskUserQuestion` 请求（`ClaudeUserInputRequest`）在后台任务里交给 handler，等待回答期间流不会被阻塞；handler 返回每个问题文本对应的选项 label 或自由文本，provider 写回 `control_response`（`allow` + `updatedInput` = 原输入加 `answers`，多选用逗号加空格拼成一个字符串）。handler 返回 `null`、抛异常、超过 `QuestionTimeout`（默认 30 分钟）都会以 `deny` 加说明回复，CLI 把该调用记入 `permission_denials`，运行仍正常结束；调用方取消则尽力发送 `deny` 后以 `OperationCanceledException` 结束。提问挂起期间，`PromptStartTimeout`、`SubagentBackgroundWorkTimeout` 与监视器截止时间加 `BackgroundWorkGracePeriod` 不会结束运行，问题解决后重新生效。其他 `can_use_tool` 请求不经过 handler，立即以固定文案 `deny`，与 CLI 不批准该工具时的结果一致；CLI 对宿主 `control_response` 的回显会被丢弃。提问按工具名识别（CLI 2.1.159 不带 `requires_user_interaction`，2.1.292 带）。交互请求同时以 `control_request` 流消息、按到达位置交给调用方（`ClaudeUserInputRequest.TryFromCliMessage` 可读回），与 `agent_work_snapshot` 一样，持久化或解析整条流的调用方必须识别并跳过或处理它；provider 自行回复的请求不会向外传递
 - 调用方取消（`CancellationToken`）会以 `OperationCanceledException` 结束流，不会被当作正常的流结束；只有子代理等待计时器触发的静默停止会被吞掉。取消后 transport 会被释放，进程随之回收
 - `CodeBuddy` 的 tool update 归一化与 permission-mode 映射统一落在 `CodebuddyProvider`
 - `Hermes` 的 ACP session reuse、fallback 文本聚合与 lifecycle 诊断统一落在 `HermesProvider`
