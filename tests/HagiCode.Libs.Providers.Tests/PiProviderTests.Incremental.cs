@@ -160,6 +160,47 @@ public sealed partial class PiProviderTests
         messages[^1].Content.GetProperty("stop_reason").GetString().ShouldBe("error");
     }
 
+    [Theory]
+    [InlineData("omniroute", null)]
+    [InlineData("omniroute", "")]
+    [InlineData("omniroute", "   ")]
+    [InlineData("anthropic", null)]
+    [InlineData("anthropic", "  ")]
+    public async Task ExecuteAsync_fails_before_launch_when_provider_has_no_model(string provider, string? model)
+    {
+        var processManager = new StubCliProcessManager { ExecuteResult = LoadFixture("text-turn") };
+        var piProvider = CreateProvider(processManager: processManager);
+
+        var messages = await CollectMessagesAsync(
+            piProvider,
+            new PiOptions { Provider = provider, Model = model, NoSession = true },
+            "hello");
+
+        processManager.LastContext.ShouldBeNull();
+        var failure = messages.ShouldHaveSingleItem();
+        failure.Type.ShouldBe("terminal.failed");
+        var text = failure.Content.GetProperty("text").GetString();
+        text.ShouldNotBeNull();
+        text.ShouldContain(provider);
+        text.ShouldContain("model is required when a provider is set");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_keeps_model_without_provider_and_provider_with_model_unchanged()
+    {
+        var processManager = new StubCliProcessManager { ExecuteResult = LoadFixture("text-turn") };
+        var provider = CreateProvider(processManager: processManager);
+
+        await CollectMessagesAsync(provider, new PiOptions { Model = "claude-sonnet", NoSession = true }, "hello");
+        processManager.LastContext.ShouldNotBeNull();
+        processManager.LastContext.Arguments.ShouldNotContain("--provider");
+        processManager.LastContext.Arguments.SkipWhile(static argument => argument != "--model").Skip(1).First().ShouldBe("claude-sonnet");
+
+        await CollectMessagesAsync(provider, new PiOptions { Provider = "anthropic", Model = "claude-sonnet", NoSession = true }, "hello");
+        processManager.LastContext.Arguments.SkipWhile(static argument => argument != "--provider").Skip(1).First().ShouldBe("anthropic");
+        processManager.LastContext.Arguments.SkipWhile(static argument => argument != "--model").Skip(1).First().ShouldBe("claude-sonnet");
+    }
+
     [Fact]
     public void Mapper_keeps_interleaved_blocks_separate_when_end_events_arrive_late()
     {

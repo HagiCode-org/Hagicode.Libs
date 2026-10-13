@@ -163,6 +163,16 @@ public class PiProvider : ICliProvider<PiOptions>
             "--print"
         };
 
+        // Pi 1.0.0 and later refuse "--provider" without "--model" (exit code 1). Fail before launching instead,
+        // for every provider: omniroute without a model would otherwise be launched as "--model omniroute/".
+        var configuredProvider = ArgumentValueNormalizer.NormalizeOptionalValue(options.Provider);
+        if (configuredProvider is not null && ArgumentValueNormalizer.NormalizeOptionalValue(options.Model) is null)
+        {
+            throw new InvalidOperationException(
+                $"Pi provider '{configuredProvider}' is configured without a model. " +
+                "A model is required when a provider is set; configure a model or clear the provider.");
+        }
+
         var normalizedModel = OmpProvider.NormalizeModelName(options.Model);
         var isOmniRouteSelector = normalizedModel.StartsWith("omniroute/", StringComparison.OrdinalIgnoreCase);
         var providerIsOmniRoute = string.Equals(options.Provider, "omniroute", StringComparison.OrdinalIgnoreCase);
