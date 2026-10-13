@@ -7,11 +7,14 @@ using HagiCode.Libs.Core.Environment;
 using HagiCode.Libs.Core.Process;
 using HagiCode.Libs.Core.Transport;
 using HagiCode.Libs.Providers.Omp;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace HagiCode.Libs.Providers.Pi;
 
 /// <summary>
-/// Implements Pi CLI integration using line-delimited JSON print mode.
+/// Implements Pi CLI integration using line-delimited JSON print mode. A request that carries a
+/// <see cref="PiOptions.UserInputHandler" /> runs in Pi's RPC mode instead, so the agent can ask the user questions.
 /// </summary>
 public class PiProvider : ICliProvider<PiOptions>
 {
@@ -30,6 +33,7 @@ public class PiProvider : ICliProvider<PiOptions>
     private readonly CliProcessManager _processManager;
     private readonly IRuntimeEnvironmentResolver? _runtimeEnvironmentResolver;
     private readonly PiJsonEventMapper _eventMapper = new();
+    private readonly ILogger<PiProvider> _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PiProvider" /> class.
@@ -37,12 +41,20 @@ public class PiProvider : ICliProvider<PiOptions>
     public PiProvider(
         CliExecutableResolver executableResolver,
         CliProcessManager processManager,
-        IRuntimeEnvironmentResolver? runtimeEnvironmentResolver = null)
+        IRuntimeEnvironmentResolver? runtimeEnvironmentResolver = null,
+        ILogger<PiProvider>? logger = null)
     {
         _executableResolver = executableResolver ?? throw new ArgumentNullException(nameof(executableResolver));
         _processManager = processManager ?? throw new ArgumentNullException(nameof(processManager));
         _runtimeEnvironmentResolver = runtimeEnvironmentResolver;
+        _logger = logger ?? NullLogger<PiProvider>.Instance;
     }
+
+    /// <summary>
+    /// How long Pi gets to exit after its standard input was closed (at the end of an RPC run, or after an abort) before the
+    /// process is stopped.
+    /// </summary>
+    internal TimeSpan RpcExitTimeout { get; init; } = TimeSpan.FromSeconds(5);
 
     /// <inheritdoc />
     public string Name => "pi";
@@ -64,6 +76,14 @@ public class PiProvider : ICliProvider<PiOptions>
 
         ValidateThinkingLevel(options.Thinking);
 
+        // A handler switches the run to RPC mode; without one (or with every tool disabled) nothing below differs from the
+        // JSON print path.
+        var usesRpc = UsesRpc(options);
+        if (options.UserInputHandler is not null)
+        {
+            ValidateQuestionTimeout(options);
+        }
+
         try
         {
             var runtimeEnvironment = await ResolveRuntimeEnvironmentAsync(cancellationToken).ConfigureAwait(false);
@@ -73,7 +93,9 @@ public class PiProvider : ICliProvider<PiOptions>
             startContext = new ProcessStartContext
             {
                 ExecutablePath = executablePath,
-                Arguments = BuildCommandArguments(options, prompt),
+                Arguments = usesRpc
+                    ? BuildRpcCommandArguments(options, PiQuestionExtension.EnsureExtracted())
+                    : BuildCommandArguments(options, prompt),
                 WorkingDirectory = ResolveWorkingDirectory(options),
                 EnvironmentVariables = BuildEnvironmentVariables(options, runtimeEnvironment),
                 InputEncoding = Utf8NoBom,
@@ -95,6 +117,30 @@ public class PiProvider : ICliProvider<PiOptions>
         {
             yield return CreateProcessFailureMessage(startupFailure);
             yield break;
+        }
+
+        if (usesRpc)
+        {
+            var outcome = new PiRpcOutcome();
+            await foreach (var message in ExecuteRpcProcessAsync(startContext!, options, prompt, outcome, cancellationToken).ConfigureAwait(false))
+            {
+                yield return message;
+            }
+
+            if (outcome.QuestionToolConflict is null)
+            {
+                yield break;
+            }
+
+            // Pi refused to start because a user extension registers ask_user_question as well, so no question can be asked
+            // this run. Nothing was streamed yet; run the request the way it runs without a handler.
+            _logger.LogWarning(
+                "Pi refused to start with the bundled {ToolName} extension because another extension registers the same tool. " +
+                "Running the request in JSON print mode without questions. Pi said: {PiOutput}",
+                PiUserInputRequest.QuestionToolName,
+                outcome.QuestionToolConflict);
+
+            startContext = startContext! with { Arguments = BuildCommandArguments(options, prompt) };
         }
 
         await foreach (var message in ExecuteProcessAsync(startContext!, options.SessionId, cancellationToken).ConfigureAwait(false))
@@ -163,6 +209,39 @@ public class PiProvider : ICliProvider<PiOptions>
             "--print"
         };
 
+        AddOptionArguments(arguments, options, questionExtensionPath: null);
+        arguments.Add(prompt);
+        return arguments;
+    }
+
+    /// <summary>
+    /// Builds the command line of an RPC run: the same options as the JSON print command, the bundled question extension
+    /// loaded with <c>-e</c>, the question tool added to a tool allowlist, and no prompt (it is sent as an RPC command).
+    /// </summary>
+    internal virtual IReadOnlyList<string> BuildRpcCommandArguments(PiOptions options, string questionExtensionPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(questionExtensionPath);
+
+        var arguments = new List<string>
+        {
+            "--mode",
+            "rpc"
+        };
+
+        AddOptionArguments(arguments, options, questionExtensionPath);
+        return arguments;
+    }
+
+    /// <summary>
+    /// Whether a request runs in RPC mode: it can be asked questions (a handler is set) and Pi has tools to ask them with.
+    /// </summary>
+    internal static bool UsesRpc(PiOptions options)
+    {
+        return options.UserInputHandler is not null && !options.DisableAllTools;
+    }
+
+    private static void AddOptionArguments(List<string> arguments, PiOptions options, string? questionExtensionPath)
+    {
         // Pi 1.0.0 and later refuse "--provider" without "--model" (exit code 1). Fail before launching instead,
         // for every provider: omniroute without a model would otherwise be launched as "--model omniroute/".
         var configuredProvider = ArgumentValueNormalizer.NormalizeOptionalValue(options.Provider);
@@ -217,8 +296,14 @@ public class PiProvider : ICliProvider<PiOptions>
                 arguments.Add("--no-builtin-tools");
             }
 
-            AddJoinedOption(arguments, "--tools", options.AllowedTools);
+            AddJoinedOption(arguments, "--tools", questionExtensionPath is null ? options.AllowedTools : WithQuestionTool(options.AllowedTools));
             AddJoinedOption(arguments, "--exclude-tools", options.ExcludedTools);
+        }
+
+        if (questionExtensionPath is not null)
+        {
+            arguments.Add("-e");
+            arguments.Add(questionExtensionPath);
         }
 
         foreach (var extraArgument in options.ExtraArguments)
@@ -229,9 +314,23 @@ public class PiProvider : ICliProvider<PiOptions>
                 arguments.Add(normalizedArgument);
             }
         }
+    }
 
-        arguments.Add(prompt);
-        return arguments;
+    /// <summary>
+    /// Adds the question tool to a non-empty allowlist, so restricting the tools does not hide the question tool. An empty
+    /// allowlist means every tool is active and stays as it is.
+    /// </summary>
+    private static IReadOnlyList<string> WithQuestionTool(IReadOnlyList<string> allowedTools)
+    {
+        var configured = allowedTools
+            .Select(ArgumentValueNormalizer.NormalizeOptionalValue)
+            .Where(static value => value is not null)
+            .Cast<string>()
+            .ToArray();
+
+        return configured.Length == 0 || configured.Contains(PiUserInputRequest.QuestionToolName, StringComparer.Ordinal)
+            ? allowedTools
+            : [.. configured, PiUserInputRequest.QuestionToolName];
     }
 
     internal virtual IReadOnlyDictionary<string, string?> BuildEnvironmentVariables(
@@ -315,6 +414,51 @@ public class PiProvider : ICliProvider<PiOptions>
         foreach (var message in terminalMessages)
         {
             yield return message;
+        }
+    }
+
+    /// <summary>
+    /// Runs one request through Pi's RPC mode (see <see cref="PiRpcSession" />). The process never outlives the call.
+    /// </summary>
+    internal virtual async IAsyncEnumerable<CliMessage> ExecuteRpcProcessAsync(
+        ProcessStartContext startContext,
+        PiOptions options,
+        string prompt,
+        PiRpcOutcome outcome,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        await using var process = await StartRpcProcessAsync(startContext, cancellationToken).ConfigureAwait(false);
+
+        var settings = new PiRpcSessionSettings(
+            options.SessionId,
+            ResolveWorkingDirectory(options),
+            options.UserInputHandler!,
+            options.QuestionTimeout,
+            RpcExitTimeout);
+        var session = new PiRpcSession(process, _eventMapper.CreateStreamingState(options.SessionId), settings, outcome);
+
+        await foreach (var message in session.RunAsync(prompt, cancellationToken).ConfigureAwait(false))
+        {
+            yield return message;
+        }
+    }
+
+    internal virtual async ValueTask<IPiRpcProcess> StartRpcProcessAsync(
+        ProcessStartContext startContext,
+        CancellationToken cancellationToken)
+    {
+        var handle = await _processManager.StartAsync(startContext, cancellationToken).ConfigureAwait(false);
+        return new PiRpcProcessHandle(_processManager, handle);
+    }
+
+    private static void ValidateQuestionTimeout(PiOptions options)
+    {
+        if (options.QuestionTimeout != Timeout.InfiniteTimeSpan && options.QuestionTimeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.QuestionTimeout,
+                "QuestionTimeout must be positive or Timeout.InfiniteTimeSpan.");
         }
     }
 
