@@ -26,6 +26,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="Fixtures\Pi\*.jsonl" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\HagiCode.Libs.Providers\HagiCode.Libs.Providers.csproj" />
   </ItemGroup>
 </Project>

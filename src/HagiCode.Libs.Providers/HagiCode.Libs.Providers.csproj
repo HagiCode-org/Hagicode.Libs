@@ -26,6 +26,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- The Pi extension that registers ask_user_question; PiQuestionExtension writes it out for `pi -e`. -->
+    <EmbeddedResource Include="Pi\Extensions\ask-user-question.ts" LogicalName="HagiCode.Libs.Providers.Pi.Extensions.ask-user-question.ts" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\" />
     <None Include="..\..\assets\nuget\icon.png" Pack="true" PackagePath="\" Link="icon.png" />
     <None Include="Codex\Vendored\VENDORED.md" Pack="true" PackagePath="vendor/codex/" />
