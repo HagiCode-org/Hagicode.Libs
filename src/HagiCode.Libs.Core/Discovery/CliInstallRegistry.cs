@@ -47,9 +47,10 @@ public static class CliInstallRegistry
             ExecutableCandidates: ["opencode"],
             IsPubliclyInstallable: true),
 
+        // The package requires Node >=22.19.0. It stays local-only and unpinned: the Desktop manifest owns the Pi version.
         new CliInstallDescriptor(
             ProviderName: "Pi",
-            NpmPackage: string.Empty,
+            NpmPackage: "@earendil-works/pi-coding-agent",
             PinnedVersion: string.Empty,
             ExecutableCandidates: ["pi", "pi-cli"],
             IsPubliclyInstallable: false),

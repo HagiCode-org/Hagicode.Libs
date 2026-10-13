@@ -94,11 +94,11 @@ public sealed class CliInstallRegistryTests
     }
 
     [Fact]
-    public void Descriptors_include_pi_with_explicit_local_only_metadata()
+    public void Descriptors_include_pi_with_published_package_but_local_only_and_unpinned()
     {
         var descriptor = CliInstallRegistry.Descriptors.Single(d => d.ProviderName == "Pi");
 
-        descriptor.NpmPackage.ShouldBeEmpty();
+        descriptor.NpmPackage.ShouldBe("@earendil-works/pi-coding-agent");
         descriptor.PinnedVersion.ShouldBeEmpty();
         descriptor.ExecutableCandidates.ShouldBe(["pi", "pi-cli"]);
         descriptor.IsPubliclyInstallable.ShouldBeFalse();
