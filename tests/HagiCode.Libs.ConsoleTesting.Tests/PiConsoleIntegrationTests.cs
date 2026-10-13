@@ -71,6 +71,30 @@ public sealed class PiConsoleIntegrationTests
     }
 
     [Fact]
+    public async Task PiScenarioMessageReader_appends_delta_marked_fragments_exactly_as_they_arrive()
+    {
+        var provider = new ScriptedPiProvider(
+        [
+            CreateMessage("session.started", new { type = "session.started", session_id = "pi-session-1" }),
+            CreateMessage("assistant", new { type = "assistant", session_id = "pi-session-1", text = "The cat.", delta = true }),
+            CreateMessage("assistant", new { type = "assistant", session_id = "pi-session-1", text = "\n", delta = true }),
+            // A fragment equal to the start of the text so far is real content, not a replayed snapshot.
+            CreateMessage("assistant", new { type = "assistant", session_id = "pi-session-1", text = "The", delta = true }),
+            CreateMessage("assistant", new { type = "assistant", session_id = "pi-session-1", text = " dog.", delta = true }),
+            CreateMessage("terminal.completed", new { type = "terminal.completed", session_id = "pi-session-1", text = "The cat.\nThe dog." })
+        ]);
+
+        var result = await PiScenarioMessageReader.ReadExecutionResultAsync(
+            provider,
+            new PiOptions { NoSession = true },
+            "分析当前项目",
+            CancellationToken.None);
+
+        result.Messages.ShouldBe(["The cat.", "\n", "The", " dog."]);
+        result.AssistantText.ShouldBe("The cat.\nThe dog.");
+    }
+
+    [Fact]
     public async Task DispatchAsync_shows_provider_specific_help_text()
     {
         var provider = new FakePiProvider();

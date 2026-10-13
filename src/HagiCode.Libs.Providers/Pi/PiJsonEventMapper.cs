@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using HagiCode.Libs.Core.Process;
@@ -5,13 +6,27 @@ using HagiCode.Libs.Core.Transport;
 
 namespace HagiCode.Libs.Providers.Pi;
 
+/// <summary>
+/// Normalizes Pi <c>--mode json</c> output into shared CLI messages. Two <c>message_update</c> wire formats are supported:
+/// the snapshot format of Pi up to 0.83 (every update carries a full <c>message</c> / <c>partial</c>), and the incremental
+/// format of Pi 0.84 and later (an update carries only the new fragment). The format is recognized per event.
+/// Incremental <c>assistant</c> / <c>assistant.thought</c> messages carry <c>delta: true</c> and contain only the new fragment.
+/// </summary>
 internal sealed class PiJsonEventMapper
 {
-    public IReadOnlyList<CliMessage> Normalize(ProcessResult result, string? requestedSessionId = null)
+    /// <summary>
+    /// How much earlier than the process start a session header may be and still count as created by this run.
+    /// </summary>
+    private static readonly TimeSpan SessionCreationTolerance = TimeSpan.FromSeconds(2);
+
+    public IReadOnlyList<CliMessage> Normalize(
+        ProcessResult result,
+        string? requestedSessionId = null,
+        DateTimeOffset? processStartedAtUtc = null)
     {
         ArgumentNullException.ThrowIfNull(result);
 
-        var state = CreateStreamingState(requestedSessionId);
+        var state = CreateStreamingState(requestedSessionId, processStartedAtUtc);
         var messages = new List<CliMessage>();
 
         using var reader = new StringReader(result.StandardOutput ?? string.Empty);
@@ -24,17 +39,26 @@ internal sealed class PiJsonEventMapper
         return messages;
     }
 
-    internal StreamingState CreateStreamingState(string? requestedSessionId = null)
+    internal StreamingState CreateStreamingState(string? requestedSessionId = null, DateTimeOffset? processStartedAtUtc = null)
     {
-        return new StreamingState(requestedSessionId);
+        return new StreamingState(requestedSessionId, processStartedAtUtc);
     }
 
-    internal sealed class StreamingState(string? requestedSessionId)
+    internal sealed class StreamingState(string? requestedSessionId, DateTimeOffset? processStartedAtUtc)
     {
         private readonly string? _requestedSessionId = NormalizeOptional(requestedSessionId);
+        private readonly DateTimeOffset? _processStartedAtUtc = processStartedAtUtc;
         private readonly List<string> _invalidOutputLines = [];
         private readonly Dictionary<string, ToolCallSnapshot> _toolCallSnapshots = new(StringComparer.Ordinal);
         private readonly HashSet<string> _emittedToolResultKeys = new(StringComparer.Ordinal);
+
+        // Incremental-format state, keyed by contentIndex. Blocks are not strictly sequential on the wire,
+        // so text, thinking and tool-call blocks are tracked separately. Reset on every assistant message.
+        private readonly SortedDictionary<int, StringBuilder> _streamedTextBlocks = [];
+        private readonly SortedDictionary<int, StringBuilder> _streamedThinkingBlocks = [];
+        private bool _incrementalFormatSeen;
+        private bool _streamedTextNotSynced;
+        private JsonElement? _incrementalMessageStart;
 
         private string? _sessionId;
         private string? _assistantText;
@@ -85,13 +109,31 @@ internal sealed class PiJsonEventMapper
                     _sessionId ??= GetString(eventElement, "id");
                     if (!string.IsNullOrWhiteSpace(_sessionId))
                     {
-                        messages.Add(CreateSessionLifecycleMessage(_sessionId!, eventElement, _requestedSessionId));
+                        messages.Add(CreateSessionLifecycleMessage(_sessionId!, eventElement, _requestedSessionId, _processStartedAtUtc));
+                    }
+
+                    break;
+
+                case "message_start":
+                    if (TryGetAssistantMessage(eventElement, out var startedAssistantMessage))
+                    {
+                        ResetIncrementalMessageState();
+                        _incrementalMessageStart = startedAssistantMessage;
                     }
 
                     break;
 
                 case "message_update":
                     ProcessMessageUpdate(eventElement, messages);
+                    break;
+
+                case "tool_execution_start":
+                    // The legacy snapshot path never read this event; keep its output untouched.
+                    if (_incrementalFormatSeen)
+                    {
+                        ProcessToolExecutionStart(eventElement, messages);
+                    }
+
                     break;
 
                 case "message_end":
@@ -116,8 +158,12 @@ internal sealed class PiJsonEventMapper
                             ClearPendingThinking();
                         }
 
+                        if (_incrementalFormatSeen)
+                        {
+                            messages.AddRange(ReconcileIncrementalMessageEnd(assistantMessage));
+                        }
                         // Keep whitespace-only assistant snapshots: "\n"/" " are Markdown block boundaries.
-                        if (!string.IsNullOrEmpty(_assistantText))
+                        else if (!string.IsNullOrEmpty(_assistantText))
                         {
                             if (TryCreateAssistantMessage(_assistantText!, assistantMessage) is { } assistantMessageDelta)
                             {
@@ -130,6 +176,7 @@ internal sealed class PiJsonEventMapper
 
                 case "turn_end":
                     messages.AddRange(ProcessTurnEndToolResults(eventElement));
+                    SyncStreamedTextSnapshot();
 
                     if (TryGetAssistantMessage(eventElement, out var turnMessage))
                     {
@@ -162,6 +209,7 @@ internal sealed class PiJsonEventMapper
 
                 case "agent_end":
                     messages.AddRange(DrainBufferedThinkingMessages());
+                    SyncStreamedTextSnapshot();
 
                     if (_terminalMessage is null && TryGetLastAssistantMessage(eventElement, out var finalAssistantMessage))
                     {
@@ -188,6 +236,8 @@ internal sealed class PiJsonEventMapper
 
         public IReadOnlyList<CliMessage> Complete(int exitCode, string? standardError)
         {
+            SyncStreamedTextSnapshot();
+
             CliMessage? terminalMessage = _terminalMessage;
             if (exitCode != 0)
             {
@@ -223,6 +273,13 @@ internal sealed class PiJsonEventMapper
         {
             if (!TryGetAssistantMessageUpdate(eventElement, out var assistantMessage, out var updateType))
             {
+                // No full message or partial snapshot on the event: Pi 0.84+ incremental format.
+                if (eventElement.TryGetProperty("assistantMessageEvent", out var assistantEvent)
+                    && assistantEvent.ValueKind == JsonValueKind.Object)
+                {
+                    ProcessIncrementalUpdate(assistantEvent, messages);
+                }
+
                 return;
             }
 
@@ -337,31 +394,239 @@ internal sealed class PiJsonEventMapper
                 }
 
                 var toolName = NormalizeOptional(GetString(toolCall, "name")) ?? "tool_call";
-                var argumentsJson = ResolveToolCallArguments(toolCall);
-                var isFirstObservation = !_toolCallSnapshots.TryGetValue(toolCallId, out var previousSnapshot);
-                var hasChanged = !isFirstObservation &&
-                                 (!string.Equals(previousSnapshot!.Name, toolName, StringComparison.Ordinal) ||
-                                  !string.Equals(previousSnapshot.ArgumentsJson, argumentsJson, StringComparison.Ordinal));
-
-                if (!isFirstObservation && !hasChanged)
-                {
-                    continue;
-                }
-
-                _toolCallSnapshots[toolCallId] = new ToolCallSnapshot(toolName, argumentsJson);
-                messages.Add(CreateToolLifecycleMessage(
-                    isFirstObservation ? "tool.call" : "tool.update",
-                    _sessionId,
-                    toolCallId,
-                    toolName,
-                    "running",
-                    rawInput: ParseJsonOrString(argumentsJson),
-                    rawOutput: null,
-                    text: null,
-                    sourceMessage: assistantMessage));
+                ObserveToolCall(toolCallId, toolName, ResolveToolCallArguments(toolCall), assistantMessage, messages);
             }
 
             return messages;
+        }
+
+        /// <summary>
+        /// Emits <c>tool.call</c> on the first observation of a call id and <c>tool.update</c> when its name or arguments change.
+        /// </summary>
+        private void ObserveToolCall(
+            string toolCallId,
+            string toolName,
+            string? argumentsJson,
+            JsonElement? sourceMessage,
+            List<CliMessage> messages)
+        {
+            var isFirstObservation = !_toolCallSnapshots.TryGetValue(toolCallId, out var previousSnapshot);
+            var hasChanged = !isFirstObservation &&
+                             (!string.Equals(previousSnapshot!.Name, toolName, StringComparison.Ordinal) ||
+                              !string.Equals(previousSnapshot.ArgumentsJson, argumentsJson, StringComparison.Ordinal));
+
+            if (!isFirstObservation && !hasChanged)
+            {
+                return;
+            }
+
+            _toolCallSnapshots[toolCallId] = new ToolCallSnapshot(toolName, argumentsJson);
+            messages.Add(CreateToolLifecycleMessage(
+                isFirstObservation ? "tool.call" : "tool.update",
+                _sessionId,
+                toolCallId,
+                toolName,
+                "running",
+                rawInput: ParseJsonOrString(argumentsJson),
+                rawOutput: null,
+                text: null,
+                sourceMessage: sourceMessage));
+        }
+
+        private void ProcessIncrementalUpdate(JsonElement assistantEvent, List<CliMessage> messages)
+        {
+            _incrementalFormatSeen = true;
+
+            var contentIndex = TryGetInt32(assistantEvent, "contentIndex") ?? 0;
+            switch (GetString(assistantEvent, "type"))
+            {
+                case "text_delta":
+                    if (GetString(assistantEvent, "delta") is { Length: > 0 } textFragment)
+                    {
+                        AppendBlock(_streamedTextBlocks, contentIndex, textFragment);
+                        _streamedTextNotSynced = true;
+                        messages.Add(CreateIncrementalMessage("assistant", textFragment));
+                    }
+
+                    break;
+
+                case "thinking_delta":
+                    if (GetString(assistantEvent, "delta") is { Length: > 0 } thinkingFragment)
+                    {
+                        AppendBlock(_streamedThinkingBlocks, contentIndex, thinkingFragment);
+                        messages.Add(CreateIncrementalMessage("assistant.thought", thinkingFragment));
+                    }
+
+                    break;
+
+                case "text_end":
+                    if (CompleteBlock(_streamedTextBlocks, contentIndex, GetString(assistantEvent, "content")) is { } textSuffix)
+                    {
+                        _streamedTextNotSynced = true;
+                        messages.Add(CreateIncrementalMessage("assistant", textSuffix));
+                    }
+
+                    break;
+
+                case "thinking_end":
+                    if (CompleteBlock(_streamedThinkingBlocks, contentIndex, GetString(assistantEvent, "content")) is { } thinkingSuffix)
+                    {
+                        messages.Add(CreateIncrementalMessage("assistant.thought", thinkingSuffix));
+                    }
+
+                    break;
+
+                case "toolcall_start":
+                    if (NormalizeOptional(GetString(assistantEvent, "id")) is { } startedToolCallId)
+                    {
+                        var startedToolName = NormalizeOptional(GetString(assistantEvent, "toolName")) ?? "tool_call";
+                        ObserveToolCall(startedToolCallId, startedToolName, argumentsJson: null, sourceMessage: null, messages);
+                    }
+
+                    break;
+
+                case "toolcall_end":
+                    // toolcall_delta is intentionally ignored: it carries unparseable partial JSON.
+                    if (assistantEvent.TryGetProperty("toolCall", out var completedToolCall)
+                        && completedToolCall.ValueKind == JsonValueKind.Object
+                        && NormalizeOptional(GetString(completedToolCall, "id")) is { } completedToolCallId)
+                    {
+                        var completedToolName = NormalizeOptional(GetString(completedToolCall, "name"))
+                                                ?? (_toolCallSnapshots.TryGetValue(completedToolCallId, out var known) ? known.Name : null)
+                                                ?? "tool_call";
+                        ObserveToolCall(completedToolCallId, completedToolName, ResolveToolCallArguments(completedToolCall), sourceMessage: null, messages);
+                    }
+
+                    break;
+            }
+        }
+
+        private void ProcessToolExecutionStart(JsonElement eventElement, List<CliMessage> messages)
+        {
+            if (NormalizeOptional(GetString(eventElement, "toolCallId")) is not { } toolCallId
+                || !eventElement.TryGetProperty("args", out var argsElement)
+                || argsElement.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+            {
+                return;
+            }
+
+            var toolName = NormalizeOptional(GetString(eventElement, "toolName"))
+                           ?? (_toolCallSnapshots.TryGetValue(toolCallId, out var known) ? known.Name : null)
+                           ?? "tool_call";
+            ObserveToolCall(toolCallId, toolName, argsElement.GetRawText(), sourceMessage: null, messages);
+        }
+
+        private IReadOnlyList<CliMessage> ReconcileIncrementalMessageEnd(JsonElement assistantMessage)
+        {
+            var messages = new List<CliMessage>();
+            var fullText = ExtractAssistantText(assistantMessage);
+            var streamedText = ComposeStreamedText();
+
+            if (fullText is not null)
+            {
+                if (string.Equals(fullText, streamedText, StringComparison.Ordinal))
+                {
+                    _lastAssistantTextSnapshot = fullText;
+                }
+                else if (fullText.StartsWith(streamedText, StringComparison.Ordinal))
+                {
+                    // Only the missing tail; the whole message is never replayed.
+                    messages.Add(CreateIncrementalMessage("assistant", fullText[streamedText.Length..]));
+                    _lastAssistantTextSnapshot = fullText;
+                }
+                else if (streamedText.Length > 0)
+                {
+                    // The final text diverges from what was streamed: emit nothing and keep the streamed text as the
+                    // snapshot, so the terminal message carries the final text for the consumer to reconcile.
+                    _lastAssistantTextSnapshot = streamedText;
+                }
+            }
+
+            ResetIncrementalMessageState();
+            return messages;
+        }
+
+        private void ResetIncrementalMessageState()
+        {
+            _streamedTextBlocks.Clear();
+            _streamedThinkingBlocks.Clear();
+            _streamedTextNotSynced = false;
+            _incrementalMessageStart = null;
+        }
+
+        /// <summary>
+        /// Advances the last-assistant-text snapshot to what has been streamed, so terminal text suppression keeps
+        /// working when a message never reaches its end event.
+        /// </summary>
+        private void SyncStreamedTextSnapshot()
+        {
+            if (!_streamedTextNotSynced)
+            {
+                return;
+            }
+
+            _lastAssistantTextSnapshot = ComposeStreamedText();
+            _streamedTextNotSynced = false;
+        }
+
+        private string ComposeStreamedText()
+        {
+            return string.Concat(_streamedTextBlocks.Values);
+        }
+
+        private static void AppendBlock(SortedDictionary<int, StringBuilder> blocks, int contentIndex, string fragment)
+        {
+            if (!blocks.TryGetValue(contentIndex, out var builder))
+            {
+                builder = new StringBuilder();
+                blocks[contentIndex] = builder;
+            }
+
+            builder.Append(fragment);
+        }
+
+        /// <summary>
+        /// Returns the part of a finished block's content that was not streamed yet, or null when nothing is missing
+        /// (equal content, or streamed text that diverges from the authoritative content).
+        /// </summary>
+        private static string? CompleteBlock(SortedDictionary<int, StringBuilder> blocks, int contentIndex, string? content)
+        {
+            if (content is null)
+            {
+                return null;
+            }
+
+            blocks.TryGetValue(contentIndex, out var builder);
+            var streamed = builder?.ToString() ?? string.Empty;
+            if (content.Length <= streamed.Length || !content.StartsWith(streamed, StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            var suffix = content[streamed.Length..];
+            AppendBlock(blocks, contentIndex, suffix);
+            return suffix;
+        }
+
+        private CliMessage CreateIncrementalMessage(string messageType, string text)
+        {
+            var payload = new Dictionary<string, object?>
+            {
+                ["type"] = messageType,
+                ["text"] = text,
+                ["delta"] = true,
+            };
+
+            AddSessionId(payload, _sessionId);
+            if (_incrementalMessageStart is { } messageStart)
+            {
+                AddIfNotEmpty(payload, "provider", GetString(messageStart, "provider"));
+                AddIfNotEmpty(payload, "model", GetString(messageStart, "model"));
+                AddIfNotEmpty(payload, "response_model", GetString(messageStart, "responseModel"));
+                AddIfNotEmpty(payload, "response_id", GetString(messageStart, "responseId"));
+            }
+
+            return new CliMessage(messageType, JsonSerializer.SerializeToElement(payload));
         }
 
         private IReadOnlyList<CliMessage> ProcessToolResultMessageEnd(JsonElement eventElement)
@@ -550,11 +815,21 @@ internal sealed class PiJsonEventMapper
             invalidOutputLines);
     }
 
-    private static CliMessage CreateSessionLifecycleMessage(string sessionId, JsonElement sessionEvent, string? requestedSessionId)
+    private static CliMessage CreateSessionLifecycleMessage(
+        string sessionId,
+        JsonElement sessionEvent,
+        string? requestedSessionId,
+        DateTimeOffset? processStartedAtUtc)
     {
         var requested = NormalizeOptional(requestedSessionId);
-        var isResumed = requested is not null && string.Equals(sessionId, requested, StringComparison.Ordinal);
-        var isRestarted = requested is not null && !isResumed;
+        var idMatchesRequest = requested is not null && string.Equals(sessionId, requested, StringComparison.Ordinal);
+
+        // Pi 1.x creates a missing session under the requested id and reports the same id back, so an equal id
+        // alone does not mean the session existed. The header carries the session's creation time: a header created
+        // by this very run means "started", an older one means Pi continued an existing session.
+        var isResumed = idMatchesRequest
+                        && WasCreatedByThisRun(GetString(sessionEvent, "timestamp"), processStartedAtUtc) != true;
+        var isRestarted = requested is not null && !idMatchesRequest;
         var messageType = isResumed ? "session.resumed" : "session.started";
 
         var payload = new Dictionary<string, object?>
@@ -578,6 +853,26 @@ internal sealed class PiJsonEventMapper
         }
 
         return new CliMessage(messageType, JsonSerializer.SerializeToElement(payload));
+    }
+
+    /// <summary>
+    /// Whether a session header was created by the current process. Null when it cannot be told (no process start time,
+    /// or a missing or unparseable header timestamp), so the caller falls back to comparing session ids.
+    /// </summary>
+    private static bool? WasCreatedByThisRun(string? headerTimestamp, DateTimeOffset? processStartedAtUtc)
+    {
+        if (processStartedAtUtc is not { } processStartedAt
+            || string.IsNullOrWhiteSpace(headerTimestamp)
+            || !DateTimeOffset.TryParse(
+                headerTimestamp,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                out var createdAt))
+        {
+            return null;
+        }
+
+        return createdAt >= processStartedAt - SessionCreationTolerance;
     }
 
     private static CliMessage CreateAssistantMessage(string? sessionId, string text, JsonElement assistantMessage)

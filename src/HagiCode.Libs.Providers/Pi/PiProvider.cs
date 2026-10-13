@@ -23,7 +23,7 @@ public class PiProvider : ICliProvider<PiOptions>
     /// Values are compared case-insensitively.
     /// </summary>
     internal static readonly IReadOnlySet<string> AllowedThinkingLevels = new HashSet<string>(
-        ["off", "minimal", "low", "medium", "high", "xhigh"],
+        ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
         StringComparer.OrdinalIgnoreCase);
 
     private readonly CliExecutableResolver _executableResolver;
@@ -248,7 +248,9 @@ public class PiProvider : ICliProvider<PiOptions>
         string? requestedSessionId,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var eventState = _eventMapper.CreateStreamingState(requestedSessionId);
+        // Recorded right before the process starts: a session header created after this moment was created by this run.
+        var processStartedAtUtc = DateTimeOffset.UtcNow;
+        var eventState = _eventMapper.CreateStreamingState(requestedSessionId, processStartedAtUtc);
         await using var handle = await _processManager.StartAsync(startContext, cancellationToken).ConfigureAwait(false);
 
         TryCloseInput(handle.StandardInput);

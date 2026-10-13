@@ -11,7 +11,7 @@ using Shouldly;
 
 namespace HagiCode.Libs.Providers.Tests;
 
-public sealed class PiProviderTests
+public sealed partial class PiProviderTests
 {
     private const string RealCliTestsEnvironmentVariable = "HAGICODE_REAL_CLI_TESTS";
     private static readonly string[] PiExecutableCandidates = ["pi", "pi-cli"];
@@ -164,6 +164,7 @@ public sealed class PiProviderTests
         var exception = await Should.ThrowAsync<ArgumentException>(act);
         exception.Message.ShouldContain("Invalid Pi thinking level 'balanced'");
         exception.Message.ShouldContain("medium");
+        exception.Message.ShouldContain("max");
         processManager.LastContext.ShouldBeNull();
     }
 
@@ -174,7 +175,9 @@ public sealed class PiProviderTests
     [InlineData("medium")]
     [InlineData("high")]
     [InlineData("xhigh")]
+    [InlineData("max")]
     [InlineData("HIGH")]
+    [InlineData("MAX")]
     public async Task ExecuteAsync_accepts_documented_thinking_levels(string thinking)
     {
         var processManager = new StubCliProcessManager
@@ -204,7 +207,7 @@ public sealed class PiProviderTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_normalizes_pi_json_events_into_shared_cli_messages()
+    public async Task ExecuteAsync_pi_0_78_snapshot_format_normalizes_json_events_into_shared_cli_messages()
     {
         var processManager = new StubCliProcessManager
         {
@@ -223,6 +226,7 @@ public sealed class PiProviderTests
             },
             "Plan a trip.");
 
+        AssertNoDeltaMarker(messages);
         messages.Select(static message => message.Type).ShouldBe(["session.started", "assistant", "terminal.completed"]);
         messages[0].Content.GetProperty("session_id").GetString().ShouldBe("session-1");
         messages[1].Content.GetProperty("text").GetString().ShouldBe("Trip outline");
@@ -237,7 +241,7 @@ public sealed class PiProviderTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_streams_message_updates_before_process_exit()
+    public async Task ExecuteAsync_pi_0_78_snapshot_format_streams_message_updates_before_process_exit()
     {
         var processManager = new StubCliProcessManager
         {
@@ -269,6 +273,7 @@ public sealed class PiProviderTests
             messages.Add(enumerator.Current);
         }
 
+        AssertNoDeltaMarker(messages);
         messages.ShouldContain(static message => message.Type == "assistant.thought");
         messages.Where(static message => message.Type == "assistant")
             .Select(static message => message.Content.GetProperty("text").GetString())
@@ -277,7 +282,7 @@ public sealed class PiProviderTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_converts_cumulative_text_snapshots_into_incremental_assistant_messages()
+    public async Task ExecuteAsync_pi_0_78_snapshot_format_converts_cumulative_text_snapshots_into_incremental_assistant_messages()
     {
         var processManager = new StubCliProcessManager
         {
@@ -295,6 +300,7 @@ public sealed class PiProviderTests
             },
             "Reply with digits.");
 
+        AssertNoDeltaMarker(messages);
         messages.Where(static message => message.Type == "assistant")
             .Select(static message => message.Content.GetProperty("text").GetString())
             .ShouldBe(["1", "2", "3"]);
@@ -303,7 +309,7 @@ public sealed class PiProviderTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_preserves_whitespace_only_assistant_text_deltas()
+    public async Task ExecuteAsync_pi_0_78_snapshot_format_preserves_whitespace_only_assistant_text_deltas()
     {
         var processManager = new StubCliProcessManager
         {
@@ -321,6 +327,7 @@ public sealed class PiProviderTests
             },
             "Preserve whitespace.");
 
+        AssertNoDeltaMarker(messages);
         var assistantTexts = messages
             .Where(static message => message.Type == "assistant")
             .Select(static message => message.Content.GetProperty("text").GetString())
@@ -365,7 +372,7 @@ public sealed class PiProviderTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_deduplicates_replayed_assistant_prefix_after_tool_turns()
+    public async Task ExecuteAsync_pi_0_78_snapshot_format_deduplicates_replayed_assistant_prefix_after_tool_turns()
     {
         var processManager = new StubCliProcessManager
         {
@@ -383,6 +390,7 @@ public sealed class PiProviderTests
             },
             "Analyze and commit changes.");
 
+        AssertNoDeltaMarker(messages);
         messages.Where(static message => message.Type == "assistant")
             .Select(static message => message.Content.GetProperty("text").GetString())
             .ShouldBe(["Alpha", "Beta"]);
@@ -393,7 +401,7 @@ public sealed class PiProviderTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_normalizes_toolcall_updates_and_results_into_shared_cli_messages()
+    public async Task ExecuteAsync_pi_0_78_snapshot_format_normalizes_toolcall_updates_and_results_into_shared_cli_messages()
     {
         var processManager = new StubCliProcessManager
         {
@@ -411,6 +419,7 @@ public sealed class PiProviderTests
             },
             "List the current directory.");
 
+        AssertNoDeltaMarker(messages);
         messages.Select(static message => message.Type).ShouldBe(
         [
             "session.started",
@@ -455,7 +464,7 @@ public sealed class PiProviderTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_marks_matching_requested_session_id_as_resumed()
+    public async Task ExecuteAsync_marks_matching_requested_session_id_with_older_header_as_resumed()
     {
         var processManager = new StubCliProcessManager
         {

@@ -31,6 +31,15 @@ internal static class PiScenarioMessageReader
             }
 
             if (string.Equals(message.Type, "assistant", StringComparison.OrdinalIgnoreCase) &&
+                IsIncrementalDelta(message.Content) &&
+                TryGetRawText(message.Content, out var deltaText))
+            {
+                // An incremental fragment is exactly the new text: whitespace-only and prefix-equal fragments are real.
+                messages.Add(deltaText);
+                assistantTextBuilder.Append(deltaText);
+                accumulator.AppendDelta(deltaText);
+            }
+            else if (string.Equals(message.Type, "assistant", StringComparison.OrdinalIgnoreCase) &&
                 TryGetText(message.Content, out var assistantText) &&
                 !string.IsNullOrWhiteSpace(assistantText))
             {
@@ -94,6 +103,27 @@ internal static class PiScenarioMessageReader
         return !string.IsNullOrWhiteSpace(text);
     }
 
+    private static bool IsIncrementalDelta(JsonElement content)
+    {
+        return content.ValueKind == JsonValueKind.Object &&
+               content.TryGetProperty("delta", out var deltaElement) &&
+               deltaElement.ValueKind == JsonValueKind.True;
+    }
+
+    private static bool TryGetRawText(JsonElement content, out string text)
+    {
+        text = string.Empty;
+        if (content.ValueKind != JsonValueKind.Object ||
+            !content.TryGetProperty("text", out var textElement) ||
+            textElement.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        text = textElement.GetString() ?? string.Empty;
+        return text.Length > 0;
+    }
+
     private static bool TryGetFailureMessage(JsonElement content, out string? message)
     {
         message = null;
@@ -120,6 +150,11 @@ internal static class PiScenarioMessageReader
     private sealed class AssistantSnapshotAccumulator
     {
         private string? _currentSnapshot;
+
+        public void AppendDelta(string text)
+        {
+            _currentSnapshot = (_currentSnapshot ?? string.Empty) + text;
+        }
 
         public string ReconcileSnapshot(string text)
         {
