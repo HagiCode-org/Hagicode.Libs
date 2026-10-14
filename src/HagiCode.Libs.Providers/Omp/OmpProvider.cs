@@ -6,11 +6,15 @@ using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Environment;
 using HagiCode.Libs.Core.Process;
 using HagiCode.Libs.Core.Transport;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace HagiCode.Libs.Providers.Omp;
 
 /// <summary>
-/// Implements OMP CLI integration using line-delimited JSON print mode.
+/// Implements OMP CLI integration using line-delimited JSON print mode. A request that carries a
+/// <see cref="OmpOptions.UserInputHandler" /> runs in OMP's <c>rpc-ui</c> mode instead, so the agent can ask the user
+/// questions through OMP's built-in <c>ask</c> tool.
 /// </summary>
 public class OmpProvider : ICliProvider<OmpOptions>
 {
@@ -29,6 +33,7 @@ public class OmpProvider : ICliProvider<OmpOptions>
     private readonly CliProcessManager _processManager;
     private readonly IRuntimeEnvironmentResolver? _runtimeEnvironmentResolver;
     private readonly OmpJsonEventMapper _eventMapper = new();
+    private readonly ILogger<OmpProvider> _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="OmpProvider" /> class.
@@ -36,12 +41,20 @@ public class OmpProvider : ICliProvider<OmpOptions>
     public OmpProvider(
         CliExecutableResolver executableResolver,
         CliProcessManager processManager,
-        IRuntimeEnvironmentResolver? runtimeEnvironmentResolver = null)
+        IRuntimeEnvironmentResolver? runtimeEnvironmentResolver = null,
+        ILogger<OmpProvider>? logger = null)
     {
         _executableResolver = executableResolver ?? throw new ArgumentNullException(nameof(executableResolver));
         _processManager = processManager ?? throw new ArgumentNullException(nameof(processManager));
         _runtimeEnvironmentResolver = runtimeEnvironmentResolver;
+        _logger = logger ?? NullLogger<OmpProvider>.Instance;
     }
+
+    /// <summary>
+    /// How long OMP gets to settle after an abort, and to exit after its standard input was closed, before the process is
+    /// stopped.
+    /// </summary>
+    internal TimeSpan RpcExitTimeout { get; init; } = TimeSpan.FromSeconds(5);
 
     /// <inheritdoc />
     public string Name => "omp";
@@ -63,6 +76,14 @@ public class OmpProvider : ICliProvider<OmpOptions>
 
         ValidateThinkingLevel(options.Thinking);
 
+        // A handler switches the run to rpc-ui mode; without one (or with every tool disabled) nothing below differs from the
+        // JSON print path.
+        var usesRpc = UsesRpc(options);
+        if (options.UserInputHandler is not null)
+        {
+            ValidateQuestionTimeout(options);
+        }
+
         try
         {
             var runtimeEnvironment = await ResolveRuntimeEnvironmentAsync(cancellationToken).ConfigureAwait(false);
@@ -72,7 +93,7 @@ public class OmpProvider : ICliProvider<OmpOptions>
             startContext = new ProcessStartContext
             {
                 ExecutablePath = executablePath,
-                Arguments = BuildCommandArguments(options, prompt),
+                Arguments = usesRpc ? BuildRpcCommandArguments(options) : BuildCommandArguments(options, prompt),
                 WorkingDirectory = ResolveWorkingDirectory(options),
                 EnvironmentVariables = BuildEnvironmentVariables(options, runtimeEnvironment),
                 InputEncoding = Utf8NoBom,
@@ -94,6 +115,32 @@ public class OmpProvider : ICliProvider<OmpOptions>
         {
             yield return CreateProcessFailureMessage(startupFailure);
             yield break;
+        }
+
+        if (usesRpc)
+        {
+            var outcome = new OmpRpcOutcome();
+            await foreach (var message in ExecuteRpcProcessAsync(startContext!, options, prompt, outcome, cancellationToken).ConfigureAwait(false))
+            {
+                yield return message;
+            }
+
+            if (outcome.AskDialogRejection is null)
+            {
+                yield break;
+            }
+
+            // This OMP build cannot ask structured questions; nothing was streamed and no prompt was sent. Run the request the
+            // way it runs without a handler.
+            var version = await ReadVersionAsync(startContext!, cancellationToken).ConfigureAwait(false);
+            _logger.LogWarning(
+                "OMP {OmpVersion} rejected set_ask_dialog, so the {ToolName} tool cannot ask structured questions. " +
+                "Running the request in JSON print mode without questions. OMP said: {OmpOutput}",
+                version ?? "(version unknown)",
+                OmpUserInputRequest.QuestionToolName,
+                outcome.AskDialogRejection);
+
+            startContext = startContext! with { Arguments = BuildCommandArguments(options, prompt) };
         }
 
         await foreach (var message in ExecuteProcessAsync(startContext!, options.SessionId, cancellationToken).ConfigureAwait(false))
@@ -192,6 +239,37 @@ public class OmpProvider : ICliProvider<OmpOptions>
             "--print"
         };
 
+        AddOptionArguments(arguments, options, addQuestionTool: false);
+        arguments.Add(prompt);
+        return arguments;
+    }
+
+    /// <summary>
+    /// Builds the command line of an RPC run: the same options as the JSON print command, <c>--mode rpc-ui</c> (never
+    /// <c>--no-ui</c>), the <c>ask</c> tool added to a tool allowlist, and no prompt (it is sent as an RPC command).
+    /// </summary>
+    internal virtual IReadOnlyList<string> BuildRpcCommandArguments(OmpOptions options)
+    {
+        var arguments = new List<string>
+        {
+            "--mode",
+            "rpc-ui"
+        };
+
+        AddOptionArguments(arguments, options, addQuestionTool: true);
+        return arguments;
+    }
+
+    /// <summary>
+    /// Whether a request runs in RPC mode: it can be asked questions (a handler is set) and OMP has tools to ask them with.
+    /// </summary>
+    internal static bool UsesRpc(OmpOptions options)
+    {
+        return options.UserInputHandler is not null && !options.DisableAllTools;
+    }
+
+    private static void AddOptionArguments(List<string> arguments, OmpOptions options, bool addQuestionTool)
+    {
         var normalizedModel = NormalizeModelName(options.Model);
         var isOmniRouteSelector = normalizedModel.StartsWith("omniroute/", StringComparison.OrdinalIgnoreCase);
         var providerIsOmniRoute = string.Equals(options.Provider, "omniroute", StringComparison.OrdinalIgnoreCase);
@@ -231,7 +309,7 @@ public class OmpProvider : ICliProvider<OmpOptions>
         else
         {
             // OMP exposes --tools allowlist only (no --no-builtin-tools / --exclude-tools).
-            AddJoinedOption(arguments, "--tools", options.AllowedTools);
+            AddJoinedOption(arguments, "--tools", addQuestionTool ? WithQuestionTool(options.AllowedTools) : options.AllowedTools);
         }
 
         foreach (var extraArgument in options.ExtraArguments)
@@ -242,9 +320,23 @@ public class OmpProvider : ICliProvider<OmpOptions>
                 arguments.Add(normalizedArgument);
             }
         }
+    }
 
-        arguments.Add(prompt);
-        return arguments;
+    /// <summary>
+    /// Adds the question tool to a non-empty allowlist, so restricting the tools does not hide the question tool. An empty
+    /// allowlist means every tool is active and stays as it is.
+    /// </summary>
+    private static IReadOnlyList<string> WithQuestionTool(IReadOnlyList<string> allowedTools)
+    {
+        var configured = allowedTools
+            .Select(ArgumentValueNormalizer.NormalizeOptionalValue)
+            .Where(static value => value is not null)
+            .Cast<string>()
+            .ToArray();
+
+        return configured.Length == 0 || configured.Contains(OmpUserInputRequest.QuestionToolName, StringComparer.Ordinal)
+            ? allowedTools
+            : [.. configured, OmpUserInputRequest.QuestionToolName];
     }
 
     internal virtual IReadOnlyDictionary<string, string?> BuildEnvironmentVariables(
@@ -326,6 +418,78 @@ public class OmpProvider : ICliProvider<OmpOptions>
         foreach (var message in terminalMessages)
         {
             yield return message;
+        }
+    }
+
+    /// <summary>
+    /// Runs one request through OMP's <c>rpc-ui</c> mode (see <see cref="OmpRpcSession" />). The process never outlives the
+    /// call.
+    /// </summary>
+    internal virtual async IAsyncEnumerable<CliMessage> ExecuteRpcProcessAsync(
+        ProcessStartContext startContext,
+        OmpOptions options,
+        string prompt,
+        OmpRpcOutcome outcome,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        await using var process = await StartRpcProcessAsync(startContext, cancellationToken).ConfigureAwait(false);
+
+        var settings = new OmpRpcSessionSettings(
+            options.SessionId,
+            ResolveWorkingDirectory(options),
+            options.UserInputHandler!,
+            options.QuestionTimeout,
+            RpcExitTimeout);
+        var session = new OmpRpcSession(process, _eventMapper.CreateStreamingState(options.SessionId), settings, outcome);
+
+        await foreach (var message in session.RunAsync(prompt, cancellationToken).ConfigureAwait(false))
+        {
+            yield return message;
+        }
+    }
+
+    internal virtual async ValueTask<IOmpRpcProcess> StartRpcProcessAsync(
+        ProcessStartContext startContext,
+        CancellationToken cancellationToken)
+    {
+        var handle = await _processManager.StartAsync(startContext, cancellationToken).ConfigureAwait(false);
+        return new OmpRpcProcessHandle(_processManager, handle);
+    }
+
+    /// <summary>
+    /// Reads <c>omp --version</c> for the fallback warning. Best effort: <see langword="null" /> when it cannot be read.
+    /// </summary>
+    internal virtual async Task<string?> ReadVersionAsync(ProcessStartContext startContext, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _processManager.ExecuteAsync(
+                new ProcessStartContext
+                {
+                    ExecutablePath = startContext.ExecutablePath,
+                    Arguments = ["--version"],
+                    WorkingDirectory = startContext.WorkingDirectory,
+                    EnvironmentVariables = startContext.EnvironmentVariables,
+                    Timeout = TimeSpan.FromSeconds(10),
+                    OutputEncoding = Utf8NoBom
+                },
+                cancellationToken).ConfigureAwait(false);
+            return result.ExitCode == 0 ? ArgumentValueNormalizer.NormalizeOptionalValue(result.StandardOutput) : null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return null;
+        }
+    }
+
+    private static void ValidateQuestionTimeout(OmpOptions options)
+    {
+        if (options.QuestionTimeout != Timeout.InfiniteTimeSpan && options.QuestionTimeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.QuestionTimeout,
+                "QuestionTimeout must be positive or Timeout.InfiniteTimeSpan.");
         }
     }
 
