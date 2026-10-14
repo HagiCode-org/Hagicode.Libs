@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using HagiCode.Libs.Core.Process;
@@ -365,6 +367,138 @@ public sealed partial class PiProviderTests
         }
     }
 
+    public static TheoryData<string, string> TableFixtureSplits()
+    {
+        var data = new TheoryData<string, string>();
+        foreach (var fixtureId in TableFixtureIds)
+        {
+            foreach (var strategy in TableSplitStrategies)
+            {
+                data.Add(fixtureId, strategy);
+            }
+
+            if (fixtureId == "T6")
+            {
+                data.Add(fixtureId, "S4");
+            }
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(TableFixtureSplits))]
+    public void Mapper_emits_each_table_fragment_as_a_delta_and_reassembles_the_source(string fixtureId, string strategy)
+    {
+        var source = TableFixtures[fixtureId];
+        var fragments = SplitTable(source, strategy);
+
+        var messages = Map(TextStreamLines(fragments).ToArray());
+
+        AssistantTexts(messages).ShouldBe(fragments);
+        messages.Where(static message => message.Type == "assistant").ShouldAllBe(static message => IsDelta(message));
+        string.Concat(AssistantTexts(messages)).ShouldBe(source);
+    }
+
+    [Theory]
+    [MemberData(nameof(TableFixtureSplits))]
+    public void Mapper_adds_no_text_after_text_end_and_message_end_for_a_streamed_table(string fixtureId, string strategy)
+    {
+        var source = TableFixtures[fixtureId];
+        var fragments = SplitTable(source, strategy);
+
+        var messages = MapStreamedText(source, fragments);
+
+        AssistantTexts(messages).ShouldBe(fragments);
+        messages.Where(static message => message.Type == "assistant").ShouldAllBe(static message => IsDelta(message));
+        messages.Single(static message => message.Type == "terminal.completed").Content.TryGetProperty("text", out _).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Mapper_keeps_a_crlf_pair_as_one_fragment_of_a_streamed_table()
+    {
+        var source = TableFixtures["T6"];
+        var fragments = new[] { "| Name | Status |", "\r\n", "| --- | --- |", "\r\n", "| alpha | done |", "\r\n" };
+
+        var messages = MapStreamedText(source, fragments);
+
+        AssistantTexts(messages).ShouldBe(fragments);
+        string.Concat(AssistantTexts(messages)).ShouldBe(source);
+    }
+
+    [Fact]
+    public void Mapper_keeps_cr_and_lf_in_separate_fragments_of_a_streamed_table()
+    {
+        var source = TableFixtures["T6"];
+        var fragments = SplitTable(source, "S4");
+
+        var messages = MapStreamedText(source, fragments);
+
+        AssistantTexts(messages).ShouldBe(fragments);
+        var carriageReturn = Array.IndexOf(fragments, "\r");
+        carriageReturn.ShouldBeGreaterThan(-1);
+        fragments[carriageReturn + 1].ShouldBe("\n");
+        string.Concat(AssistantTexts(messages)).ShouldBe(source);
+        messages.Where(static message => message.Type == "assistant").ShouldAllBe(static message => IsDelta(message));
+    }
+
+    [Fact]
+    public void Mapper_streams_a_table_in_a_second_content_block_after_a_tool_call_without_loss()
+    {
+        var table = TableFixtures["T1"];
+        var fragments = SplitTable(table, "S1");
+        var toolCall = new { type = "toolCall", id = "call-1", name = "bash", arguments = new { command = "ls" } };
+        var lines = new List<string>
+        {
+            SessionLine("s-1", DateTimeOffset.UtcNow),
+            AssistantStartLine(),
+            Update(new { type = "text_delta", contentIndex = 0, delta = "Running it now." }),
+            Update(new { type = "text_end", contentIndex = 0, content = "Running it now." }),
+            Update(new { type = "toolcall_start", contentIndex = 1, id = "call-1", toolName = "bash" }),
+            Update(new { type = "toolcall_end", contentIndex = 1, toolCall })
+        };
+        lines.AddRange(fragments.Select(fragment => Update(new { type = "text_delta", contentIndex = 2, delta = fragment })));
+        lines.Add(Update(new { type = "text_end", contentIndex = 2, content = table }));
+        lines.Add(FinishLine([new { type = "text", text = "Running it now." }, toolCall, new { type = "text", text = table }], "stop"));
+
+        var messages = Map(lines.ToArray());
+
+        var texts = AssistantTexts(messages);
+        texts[0].ShouldBe("Running it now.");
+        texts.Skip(1).ShouldBe(fragments);
+        string.Concat(texts).ShouldBe("Running it now." + table);
+        messages.Where(static message => message.Type == "assistant").ShouldAllBe(static message => IsDelta(message));
+        messages.Count(static message => message.Type == "tool.call").ShouldBe(1);
+        messages.Single(static message => message.Type == "terminal.completed").Content.TryGetProperty("text", out _).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Mapper_streams_a_table_in_a_later_message_after_a_tool_turn_without_mixing_blocks()
+    {
+        var table = TableFixtures["T1"];
+        var fragments = SplitTable(table, "S3");
+        var lines = new List<string>
+        {
+            SessionLine("s-1", DateTimeOffset.UtcNow),
+            AssistantStartLine(),
+            Update(new { type = "text_delta", contentIndex = 0, delta = "Running it now." }),
+            Update(new { type = "text_end", contentIndex = 0, content = "Running it now." }),
+            FinishLine([new { type = "text", text = "Running it now." }], "toolUse"),
+            AssistantStartLine()
+        };
+        lines.AddRange(fragments.Select(fragment => Update(new { type = "text_delta", contentIndex = 0, delta = fragment })));
+        lines.Add(Update(new { type = "text_end", contentIndex = 0, content = table }));
+        lines.Add(FinishLine([new { type = "text", text = table }], "stop"));
+
+        var messages = Map(lines.ToArray());
+
+        var texts = AssistantTexts(messages);
+        texts[0].ShouldBe("Running it now.");
+        texts.Skip(1).ShouldBe(fragments);
+        string.Concat(texts.Skip(1)).ShouldBe(table);
+        messages.Single(static message => message.Type == "terminal.completed").Content.TryGetProperty("text", out _).ShouldBeFalse();
+    }
+
     [Fact]
     public void Mapper_reports_a_session_created_by_this_run_as_started_even_for_a_requested_id()
     {
@@ -499,6 +633,103 @@ public sealed partial class PiProviderTests
                 },
                 cancellationToken);
         }
+    }
+
+    // GFM table fixture catalog from design.md D1, mirrored in each repository.
+    private const string TableT1 = "| Name | Status |\n| --- | --- |\n| alpha | done |\n";
+
+    private const string TableT2 = "Intro line.\n\n| Name | Status |\n| --- | --- |\n| alpha | done |\n\nOutro line.\n";
+
+    private const string TableT3 = "| Item | Count |\n| :--- | ---: |\n| 中文表格 | 3 |\n| trailing cell   | 4   |\n";
+
+    private const string TableT4 = "| - | - |\n| - | - |\n";
+
+    private const string TableT6 = "| Name | Status |\r\n| --- | --- |\r\n| alpha | done |\r\n";
+
+    private const string TableT7 = "- item\n- item\n" + TableT1;
+
+    private static readonly string[] TableFixtureIds = ["T1", "T2", "T3", "T4", "T5-47", "T5-48", "T5-49", "T6", "T7"];
+
+    private static readonly string[] TableSplitStrategies = ["S1", "S2", "S3", "S5-7", "S5-42", "S5-1337"];
+
+    private static readonly IReadOnlyDictionary<string, string> TableFixtures = new Dictionary<string, string>
+    {
+        ["T1"] = TableT1,
+        ["T2"] = TableT2,
+        ["T3"] = TableT3,
+        ["T4"] = TableT4,
+        ["T5-47"] = TableWithRowLength(47),
+        ["T5-48"] = TableWithRowLength(48),
+        ["T5-49"] = TableWithRowLength(49),
+        ["T6"] = TableT6,
+        ["T7"] = TableT7,
+    };
+
+    /// <summary>A table whose three data rows are each exactly <paramref name="rowLength" /> characters, newline included.</summary>
+    private static string TableWithRowLength(int rowLength)
+    {
+        var builder = new StringBuilder("| Name | Status |\n| --- | --- |\n");
+        const string tail = " |\n";
+        for (var index = 1; index <= 3; index++)
+        {
+            var head = $"| r{index} | ";
+            builder.Append(head).Append('x', rowLength - head.Length - tail.Length).Append(tail);
+        }
+
+        return builder.ToString();
+    }
+
+    /// <summary>
+    /// Splits a table with the D1 strategies: S1 tokens, S2 characters, S3 cuts around every newline (<c>|\n</c> kept
+    /// whole), S4 CR and LF apart, S5-seed seeded random cuts. Each split must concatenate back to the source.
+    /// </summary>
+    private static string[] SplitTable(string source, string strategy)
+    {
+        string[] fragments = strategy switch
+        {
+            "S1" => Regex.Matches(source, @"\s+|\w+|[^\w\s]").Select(static match => match.Value).ToArray(),
+            "S2" => source.Select(static character => character.ToString()).ToArray(),
+            "S3" => Regex.Matches(source, @"\|\n|\r\n|\n|[^\r\n]+?(?=\|\n|\r?\n|$)").Select(static match => match.Value).ToArray(),
+            "S4" => Regex.Matches(source, @"\r|\n|[^\S\r\n]+|\w+|[^\w\s]").Select(static match => match.Value).ToArray(),
+            _ when strategy.StartsWith("S5-", StringComparison.Ordinal)
+                => SeededCuts(source, int.Parse(strategy["S5-".Length..], CultureInfo.InvariantCulture)),
+            _ => throw new ArgumentOutOfRangeException(nameof(strategy), strategy, "Unknown split strategy.")
+        };
+
+        string.Concat(fragments).ShouldBe(source);
+        return fragments;
+    }
+
+    private static string[] SeededCuts(string source, int seed)
+    {
+        var random = new Random(seed);
+        var fragments = new List<string>();
+        for (var start = 0; start < source.Length;)
+        {
+            var length = Math.Min(random.Next(1, 13), source.Length - start);
+            fragments.Add(source.Substring(start, length));
+            start += length;
+        }
+
+        return fragments.ToArray();
+    }
+
+    private static IEnumerable<string> TextStreamLines(IEnumerable<string> fragments)
+    {
+        yield return SessionLine("s-1", DateTimeOffset.UtcNow);
+        yield return AssistantStartLine();
+        foreach (var fragment in fragments)
+        {
+            yield return Update(new { type = "text_delta", contentIndex = 0, delta = fragment });
+        }
+    }
+
+    private static IReadOnlyList<CliMessage> MapStreamedText(string source, IEnumerable<string> fragments)
+    {
+        var lines = TextStreamLines(fragments).ToList();
+        lines.Add(Update(new { type = "text_end", contentIndex = 0, content = source }));
+        lines.Add(FinishLine([new { type = "text", text = source }], "stop"));
+        return Map(lines.ToArray());
     }
 
     private static ProcessResult LoadFixture(string name, int exitCode = 0)
