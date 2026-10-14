@@ -6,6 +6,9 @@ using Shouldly;
 
 namespace HagiCode.Libs.Providers.Tests;
 
+// Copilot requests rewrite process-wide environment variables (including PATH), so classes that
+// spawn child processes must not run alongside them.
+[Collection("ProcessEnvironment")]
 public sealed class OpenCodeStandaloneServerHostTests
 {
     [Fact]
