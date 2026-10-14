@@ -78,6 +78,7 @@ var poolDefaults = serviceProvider.GetRequiredService<CliProviderPoolConfigurati
 - `Claude Code` 继续保留 raw stream / resume 语义，但 `ClaudeCodeProvider` 现在固定按次启动并回收本地 CLI 进程，不再做 warm transport reuse
 - `ClaudeCodeOptions.UserInputHandler`（默认 `null`，此时行为不变）让代理在运行中向用户提问：设置后 provider 会给 CLI 追加 `--permission-prompt-tool stdio`，CLI 因此注册 `AskUserQuestion` 并把权限询问以 `control_request` 发给宿主。`AskUserQuestion` 请求（`ClaudeUserInputRequest`）在后台任务里交给 handler，等待回答期间流不会被阻塞；handler 返回每个问题文本对应的选项 label 或自由文本，provider 写回 `control_response`（`allow` + `updatedInput` = 原输入加 `answers`，多选用逗号加空格拼成一个字符串）。handler 返回 `null`、抛异常、超过 `QuestionTimeout`（默认 30 分钟）都会以 `deny` 加说明回复，CLI 把该调用记入 `permission_denials`，运行仍正常结束；调用方取消则尽力发送 `deny` 后以 `OperationCanceledException` 结束。提问挂起期间，`PromptStartTimeout`、`SubagentBackgroundWorkTimeout` 与监视器截止时间加 `BackgroundWorkGracePeriod` 不会结束运行，问题解决后重新生效。其他 `can_use_tool` 请求不经过 handler，立即以固定文案 `deny`，与 CLI 不批准该工具时的结果一致；CLI 对宿主 `control_response` 的回显会被丢弃。提问按工具名识别（CLI 2.1.159 不带 `requires_user_interaction`，2.1.292 带）。交互请求同时以 `control_request` 流消息、按到达位置交给调用方（`ClaudeUserInputRequest.TryFromCliMessage` 可读回），与 `agent_work_snapshot` 一样，持久化或解析整条流的调用方必须识别并跳过或处理它；provider 自行回复的请求不会向外传递。是否设置 `UserInputHandler` 由宿主按每次运行决定，Libs 不施加自己的策略。
 - `PiOptions.UserInputHandler`（默认 `null`，此时命令行、关闭的 stdin、按进程退出结束的行为与扩展都保持不变）让 Pi 代理向用户提问：设置后（且未设置 `DisableAllTools`，否则忽略 handler）provider 改用 `pi --mode rpc`，通过 `-e` 加载内置的 `ask_user_question` 扩展，prompt 作为 RPC `prompt` 命令发送，其余选项含义不变；会话 id 由 `get_state` 取得，以 `agent_settled` 而非进程退出作为运行结束，其余事件仍交给同一个 `PiJsonEventMapper`。问题经一个带版本标记 `hagicode:ask_user_question:v1` 的 `input` 对话框传递（标题 = 标记 + 换行 + JSON，回答 = 值里的 JSON），在后台任务交给 handler；多选用逗号加空格拼成一个字符串。handler 返回 `null`、抛异常或超过 `QuestionTimeout`（默认 30 分钟）都以取消回复该对话框，代理得知用户拒绝回答，运行仍正常结束；其他扩展的对话框一律回复取消，纯通知类请求忽略。调用方取消会先取消未决对话框、发送 `abort`、关闭 stdin，超时仍未退出则终止进程，随后以 `OperationCanceledException` 结束。用户扩展同样注册了 `ask_user_question` 时 Pi 会启动失败（退出码 1、无输出），provider 识别后记录警告并回退到 JSON print 模式（无提问）。问题同时以 `extension_ui_request` 流消息按到达位置交给调用方（`PiUserInputRequest.TryFromCliMessage` 可读回），提问工具自身的调用与结果仍是普通 `tool.*` 消息，由调用方决定是否隐藏。详见根目录 README 的 Pi provider 一节。
+- `OmpOptions.UserInputHandler`（默认 `null`，此时命令行、关闭的 stdin、按进程退出结束的行为都保持不变）让 OMP 代理通过 OMP 内置的 `ask` 工具向用户提问：设置后（且未设置 `DisableAllTools`，否则忽略 handler）provider 改用 `omp --mode rpc-ui`（不加 `--no-ui`、不加扩展；非空的 `AllowedTools` 会追加 `ask`），其余选项含义不变；先发送 `set_ask_dialog`（OMP 每个进程默认关闭结构化提问），成功后用 `get_state` 取会话 id，再以 RPC `prompt` 命令发送提示词；运行以 `session_settled` 而非进程退出结束（`prompt_result` 之后后台任务仍可能唤醒代理），结果按 `prompt_result.status` 判定，其余事件仍交给同一个 `OmpJsonEventMapper`（`rpc-ui` 附在 `message_update` 上、序列化时已包含后续增量的消息快照会先去掉，文本与思考事件与 JSON 模式完全一致；工具调用事件保留 `partial`，因此首条 `tool.call` 就带有真实的调用 id 与工具名）。每个 `ask` 请求在后台任务交给 handler，回答按问题顺序写成 `{id, selectedOptions, customInput?}`：单选只有文本等于某个选项 label 时才选中该项，多选只有文本能按逗号加空格拆成互不重复的选项 label（优先匹配最长 label）时才选中，其余一律作为 `customInput`，从不发送 OMP 会拒绝的形状。handler 返回 `null`、缺少某个问题的回答、抛异常或超过 `QuestionTimeout`（默认 30 分钟）都回复 `{cancelled:true}`；**与 Claude、Pi 不同，OMP 随即以 `aborted` 结束本次运行**，provider 把它当作正常结束（`terminal.completed`，`stop_reason: "aborted"`）；不发送 `timedOut` 标记（OMP 会替用户自动选推荐项并继续）。其他扩展的对话框一律回复取消，纯通知类请求忽略；OMP 自己发来的 `cancel` 帧会取消对应 handler 且不回复。调用方取消只发送 `abort`（不为未决问题单独回复），等 OMP 结束并 settle 后关闭 stdin，超时仍未退出则终止进程，随后以 `OperationCanceledException` 结束。OMP 拒绝 `set_ask_dialog`（没有该命令的旧版本）时不发送提示词，provider 记录带版本的警告并回退到 JSON print 模式（无提问）。问题同时以 `extension_ui_request` 流消息按到达位置交给调用方（`OmpUserInputRequest.TryFromCliMessage` 可读回），`ask` 工具自身的调用与结果仍是普通 `tool.*` 消息。已在 omp 18.10.4 上验证；详见根目录 README 的 OMP provider 一节。
 - 调用方取消（`CancellationToken`）会以 `OperationCanceledException` 结束流，不会被当作正常的流结束；只有子代理等待计时器触发的静默停止会被吞掉。取消后 transport 会被释放，进程随之回收
 - `CodeBuddy` 的 tool update 归一化与 permission-mode 映射统一落在 `CodebuddyProvider`
 - `Hermes` 的 ACP session reuse、fallback 文本聚合与 lifecycle 诊断统一落在 `HermesProvider`
@@ -293,6 +294,41 @@ await foreach (var message in pi.ExecuteAsync(options, "Ask me which database to
 
 The handler runs in a background task per question, so the stream keeps flowing while the user thinks. Dialogs of other Pi extensions are answered cancelled and never reach it. Cancelling the call aborts the run and ends the Pi process. See the repository README (Pi provider) for the wire contract, the failure cases and the opt-in real-CLI tests.
 
+## OMP interactive questions
+
+Set `OmpOptions.UserInputHandler` and the OMP agent can ask the user questions with OMP's built-in `ask` tool (header, option descriptions, multi-select and free text). Without a handler OMP runs as before in `--mode json --print`; with one the provider runs `omp --mode rpc-ui` and enables OMP's structured ask dialog with `set_ask_dialog` before it sends the prompt. Nothing is installed or loaded. Verified against omp 18.10.4; a build that rejects `set_ask_dialog` runs the request in JSON print mode without questions and logs a warning.
+
+```csharp
+var options = new OmpOptions
+{
+    WorkingDirectory = "/path/to/repo", // not the home directory: omp switches to a temp dir there
+    QuestionTimeout = TimeSpan.FromMinutes(10), // default 30 minutes, Timeout.InfiniteTimeSpan for no limit
+    UserInputHandler = async (request, cancellationToken) =>
+    {
+        // request.RequestId identifies the ask call; each question has Id, Header, MultiSelect and Options.
+        var answers = new Dictionary<string, IReadOnlyList<string>>();
+        foreach (var question in request.Questions)
+        {
+            // Offered labels select options (several for a multi-select question); any other text is sent as free text.
+            answers[question.Question] = await AskTheUserAsync(question, cancellationToken);
+        }
+
+        return new OmpUserInputResponse(answers); // null declines: OMP then ends the run as aborted (a normal end)
+    }
+};
+
+await foreach (var message in omp.ExecuteAsync(options, "Ask me which database to use, then set it up."))
+{
+    if (message.Type == OmpUserInputRequest.MessageType &&
+        OmpUserInputRequest.TryFromCliMessage(message, out var question))
+    {
+        // The question as it arrived in the stream (the handler is already running); show it, or ignore it.
+    }
+}
+```
+
+A declined, unanswered or expired question ends the OMP run (`terminal.completed` with `stop_reason: "aborted"`), unlike Claude and Pi, whose agents continue; continue the session with a normal next message (`SessionId`). Dialogs of OMP extensions are answered cancelled and never reach the handler. Cancelling the call sends `abort`, lets OMP close the open question itself and ends the OMP process. See the repository README (OMP provider) for the wire contract, the answer mapping, the failure cases and the opt-in real-CLI tests.
+
 ## Vendored Codex SDK notice
 
 The Codex integration vendors source from `ManagedCode.CodexSharpSDK` under `Codex/Vendored/`.
@@ -337,7 +373,7 @@ Practical boundaries:
 - `kimi` is the canonical built-in provider name; `ProviderRegistry` and the dedicated console also accept `kimi-cli` as an alias.
 - `kiro-cli` is the canonical built-in provider name across the shared provider registry and the dedicated console.
 - `pi` is the canonical built-in provider name; `ProviderRegistry` also accepts `pi-cli` as a compatibility alias and the built-in provider runs Pi through `--mode json --print` one-shot execution, or through `--mode rpc` when `PiOptions.UserInputHandler` is set.
-- `omp` is the canonical built-in provider name; `ProviderRegistry` also accepts `omp-cli` as a compatibility alias and the built-in provider runs OMP through `--mode json --print` one-shot execution.
+- `omp` is the canonical built-in provider name; `ProviderRegistry` also accepts `omp-cli` as a compatibility alias and the built-in provider runs OMP through `--mode json --print` one-shot execution, or through `--mode rpc-ui` when `OmpOptions.UserInputHandler` is set.
 - `reasonix` is the canonical built-in provider name. Reasonix 1.x ACP now only accepts the startup-time `-model` selector; working directory and session resume flow through ACP `session/new` / `session/load`, while permissions, MCP plugins, proxying, and similar policy are expected to live in `reasonix.toml` instead of CLI bootstrap flags.
 - Kiro discovery is strict: the shared provider only supports `kiro-cli` executables. Generic `kiro` launchers are not accepted for implicit discovery, explicit `ExecutablePath`, or readiness checks.
 - `CliInstallRegistry` now treats DeepAgents as local-only validation metadata because the managed runtime expects a `deepagents` executable (or `uvx --from deepagents-cli deepagents --acp`) rather than the legacy `deepagents-acp` npm package.
