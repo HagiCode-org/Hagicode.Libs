@@ -197,9 +197,9 @@ public sealed class CodebuddyProviderTests
     {
         const string diagnostic = "429 您的使用量已超出频率限制，请稍后再试";
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(
-            emitNotifications: false,
+            emitAssistantText: false,
             promptStopReason: "end_turn",
-            promptOutputText: null,
+            promptOutputText: string.Empty,
             diagnosticSummary: diagnostic));
         var messages = new List<CliMessage>();
 
@@ -539,7 +539,8 @@ public sealed class CodebuddyProviderTests
         string? promptOutputText = null,
         bool promptIsError = false,
         bool emitReplayNotifications = false,
-        string? diagnosticSummary = null) : IAcpSessionClient
+        string? diagnosticSummary = null,
+        bool emitAssistantText = true) : IAcpSessionClient
     {
         public int ConnectCalls { get; private set; }
 
@@ -674,21 +675,25 @@ public sealed class CodebuddyProviderTests
                 });
             }
 
-            yield return new AcpNotification(
-                "session/update",
-                JsonSerializer.SerializeToElement(new
-                {
-                    sessionId = LastSessionId ?? resumedSessionId ?? "session-1",
-                    update = new
+            if (emitAssistantText)
+            {
+                yield return new AcpNotification(
+                    "session/update",
+                    JsonSerializer.SerializeToElement(new
                     {
-                        sessionUpdate = "agent_message_chunk",
-                        content = new
+                        sessionId = LastSessionId ?? resumedSessionId ?? "session-1",
+                        update = new
                         {
-                            type = "text",
-                            text = emitReplayNotifications ? "new answer" : "pong"
+                            sessionUpdate = "agent_message_chunk",
+                            content = new
+                            {
+                                type = "text",
+                                text = emitReplayNotifications ? "new answer" : "pong"
+                            }
                         }
-                    }
-                }));
+                    }));
+            }
+
             await Task.Yield();
             yield return new AcpNotification(
                 "session/update",
