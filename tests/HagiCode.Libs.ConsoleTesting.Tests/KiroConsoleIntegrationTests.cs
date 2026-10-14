@@ -25,10 +25,10 @@ public sealed class KiroConsoleIntegrationTests
 
         exitCode.ShouldBe(0);
         var rendered = output.ToString();
-        rendered.ShouldContain("[PASS] kiro / Ping");
-        rendered.ShouldContain("[PASS] kiro / Simple Prompt");
-        rendered.ShouldContain("[PASS] kiro / Complex Prompt");
-        rendered.ShouldContain("[PASS] kiro / Session Resume");
+        rendered.ShouldContain("[PASS] kiro-cli / Ping");
+        rendered.ShouldContain("[PASS] kiro-cli / Simple Prompt");
+        rendered.ShouldContain("[PASS] kiro-cli / Complex Prompt");
+        rendered.ShouldContain("[PASS] kiro-cli / Session Resume");
         rendered.ShouldContain("Summary: 4/4 passed");
     }
 
@@ -63,7 +63,7 @@ public sealed class KiroConsoleIntegrationTests
         var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(["--test-provider", "kiro-cli"], KiroConsoleDefinition.Instance, runner, output);
 
         exitCode.ShouldBe(0);
-        output.ToString().ShouldContain("[PASS] kiro / Ping");
+        output.ToString().ShouldContain("[PASS] kiro-cli / Ping");
     }
 
     [Fact]
@@ -136,7 +136,7 @@ public sealed class KiroConsoleIntegrationTests
             provider.ReceivedOptions[0].ExtraArguments.ShouldBe(["--profile", "smoke"]);
             provider.ReceivedOptions[3].SessionId.ShouldNotBeNullOrWhiteSpace();
             provider.ReceivedOptions[4].WorkingDirectory.ShouldBe(repositoryPath);
-            output.ToString().ShouldContain("[PASS] kiro / Repository Summary");
+            output.ToString().ShouldContain("[PASS] kiro-cli / Repository Summary");
         }
         finally
         {
