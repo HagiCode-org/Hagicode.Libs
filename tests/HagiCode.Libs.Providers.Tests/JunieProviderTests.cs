@@ -12,6 +12,8 @@ namespace HagiCode.Libs.Providers.Tests;
 
 public sealed class JunieProviderTests
 {
+    private const string RealCliTestsEnvironmentVariable = "HAGICODE_REAL_CLI_TESTS";
+
     private static readonly string[] JunieExecutableCandidates = ["junie", "junie-cli"];
 
     [Fact]
@@ -462,6 +464,11 @@ public sealed class JunieProviderTests
     [Trait("Category", "RealCli")]
     public async Task PingAsync_can_validate_installed_junie_cli()
     {
+        if (!IsRealCliTestsEnabled())
+        {
+            return;
+        }
+
         var resolver = new CliExecutableResolver();
         var executablePath = resolver.ResolveFirstAvailablePath(JunieExecutableCandidates);
         if (executablePath is null)
@@ -479,6 +486,13 @@ public sealed class JunieProviderTests
         result.ErrorMessage.ShouldBeNullOrWhiteSpace();
         result.Success.ShouldBeTrue();
         result.Version.ShouldNotBeNullOrWhiteSpace();
+    }
+
+    private static bool IsRealCliTestsEnabled()
+    {
+        var value = Environment.GetEnvironmentVariable(RealCliTestsEnvironmentVariable);
+        return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
     }
 
     private static TestJunieProvider CreateProvider(
