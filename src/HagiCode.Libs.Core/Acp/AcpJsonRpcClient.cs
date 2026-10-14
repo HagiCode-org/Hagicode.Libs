@@ -108,6 +108,15 @@ public sealed class AcpJsonRpcClient : IAsyncDisposable
         return _notifications.Reader.ReadAllAsync(cancellationToken);
     }
 
+    /// <summary>
+    /// Appends a synthetic notification behind everything already received, so consumers see it in wire order.
+    /// </summary>
+    /// <param name="notification">The notification to publish.</param>
+    internal void EnqueueNotification(AcpNotification notification)
+    {
+        _notifications.Writer.TryWrite(notification);
+    }
+
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {

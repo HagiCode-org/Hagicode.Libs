@@ -316,7 +316,9 @@ public sealed class AcpSessionClient : IAcpSessionClient
                 result = promptResult
             }));
 
-        _sessionNotifications.Writer.TryWrite(notification);
+        // Go through the RPC client's queue rather than straight to the session queue: the pump
+        // forwards notifications asynchronously, so a direct write could overtake ones already received.
+        _rpcClient.EnqueueNotification(notification);
     }
 
     private static bool ShouldEnqueuePromptCompletedNotification(JsonElement promptResult)
