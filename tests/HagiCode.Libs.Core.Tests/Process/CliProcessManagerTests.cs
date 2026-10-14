@@ -48,7 +48,7 @@ public sealed class CliProcessManagerTests
         var result = await _manager.ExecuteAsync(new ProcessStartContext
         {
             ExecutablePath = "/bin/sh",
-            Arguments = ["-lc", "sleep 2"],
+            Arguments = ["-lc", "sleep 30"],
             Timeout = TimeSpan.FromMilliseconds(100)
         });
 

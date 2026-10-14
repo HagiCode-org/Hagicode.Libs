@@ -192,11 +192,24 @@ public sealed class SubprocessTransportTests
         });
 
         await transport.ConnectAsync();
-        await Task.Delay(150);
 
-        var exception = await Should.ThrowAsync<InvalidOperationException>(async () =>
-            await transport.SendAsync(new CliMessage("user", JsonSerializer.SerializeToElement(new { text = "hello" }))));
+        // A login shell can take a while to start and exit, so keep sending until the exit is observed.
+        InvalidOperationException? exception = null;
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (exception is null && DateTime.UtcNow < deadline)
+        {
+            try
+            {
+                await transport.SendAsync(new CliMessage("user", JsonSerializer.SerializeToElement(new { text = "hello" })));
+                await Task.Delay(50);
+            }
+            catch (InvalidOperationException ex)
+            {
+                exception = ex;
+            }
+        }
 
+        exception.ShouldNotBeNull();
         exception.Message.ShouldContain("code 23");
         exception.Message.ShouldContain("auth required");
     }
