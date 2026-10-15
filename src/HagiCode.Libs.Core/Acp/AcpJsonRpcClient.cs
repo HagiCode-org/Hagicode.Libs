@@ -15,6 +15,9 @@ public sealed class AcpJsonRpcClient : IAsyncDisposable
     private readonly ConcurrentDictionary<string, PendingRequest> _pendingRequests = new(StringComparer.Ordinal);
     private readonly JsonSerializerOptions _serializerOptions = new(JsonSerializerDefaults.Web);
     private readonly CancellationTokenSource _disposeCts = new();
+    private readonly AcpPermissionRequestHandler? _permissionRequestHandler;
+    private readonly SemaphoreSlim _writeGate = new(1, 1);
+    private readonly ConcurrentDictionary<Task, byte> _inboundRequests = new();
 
     private Task? _listenTask;
     private long _nextRequestId;
@@ -22,12 +25,24 @@ public sealed class AcpJsonRpcClient : IAsyncDisposable
     private bool _disposed;
 
     /// <summary>
+    /// The longest time <see cref="DisposeAsync" /> waits for inbound requests that are still being answered.
+    /// </summary>
+    private static readonly TimeSpan InboundRequestDrainTimeout = TimeSpan.FromSeconds(2);
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="AcpJsonRpcClient" /> class.
     /// </summary>
     /// <param name="transport">The transport used for raw message exchange.</param>
-    public AcpJsonRpcClient(IAcpTransport transport)
+    /// <param name="permissionRequestHandler">
+    /// Optional handler that sees every <c>session/request_permission</c> request after it is published as a notification and
+    /// before the default answer applies. It runs on a thread-pool thread, so the receive loop keeps reading while it waits,
+    /// and its token is cancelled when the client is disposed. A <see langword="null" /> decision, or no handler, keeps the
+    /// default answer.
+    /// </param>
+    public AcpJsonRpcClient(IAcpTransport transport, AcpPermissionRequestHandler? permissionRequestHandler = null)
     {
         _transport = transport ?? throw new ArgumentNullException(nameof(transport));
+        _permissionRequestHandler = permissionRequestHandler;
     }
 
     /// <summary>
@@ -73,7 +88,7 @@ public sealed class AcpJsonRpcClient : IAsyncDisposable
 
         try
         {
-            await _transport.SendMessageAsync(CreateRequestPayload(requestId, method, parameters), cancellationToken);
+            await SendAsync(CreateRequestPayload(requestId, method, parameters), cancellationToken).ConfigureAwait(false);
         }
         catch
         {
@@ -144,6 +159,7 @@ public sealed class AcpJsonRpcClient : IAsyncDisposable
             }
         }
 
+        await WaitForInboundRequestsAsync().ConfigureAwait(false);
         _disposeCts.Dispose();
         await _transport.DisposeAsync().ConfigureAwait(false);
 
@@ -248,11 +264,11 @@ public sealed class AcpJsonRpcClient : IAsyncDisposable
         {
             if (message.TryGetProperty("id", out var requestIdElement))
             {
-                _ = HandleInboundRequestAsync(
+                TrackInboundRequest(HandleInboundRequestAsync(
                     requestIdElement.Clone(),
                     methodElement.GetString()!,
                     message.TryGetProperty("params", out var requestParamsElement) ? requestParamsElement.Clone() : default,
-                    _disposeCts.Token);
+                    _disposeCts.Token));
                 return;
             }
 
@@ -329,19 +345,117 @@ public sealed class AcpJsonRpcClient : IAsyncDisposable
             {
                 "fs/read_text_file" => CreateReadTextFileResponse(parameters),
                 "fs/write_text_file" => await CreateWriteTextFileResponseAsync(parameters, cancellationToken).ConfigureAwait(false),
-                "session/request_permission" => CreateRequestPermissionResponse(parameters),
+                "session/request_permission" when _permissionRequestHandler is null => CreateRequestPermissionResponse(parameters),
+                "session/request_permission" => await DecideRequestPermissionAsync(_permissionRequestHandler!, parameters, cancellationToken).ConfigureAwait(false),
                 _ => throw new InvalidOperationException($"ACP inbound method '{method}' is not supported.")
             };
 
-            await _transport.SendMessageAsync(
+            await SendAsync(
                 CreateResponsePayload(requestIdElement, result),
                 cancellationToken).ConfigureAwait(false);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The client is closing: nobody is left to answer, and a reply with a cancelled token cannot be written.
+        }
         catch (Exception ex)
         {
-            await _transport.SendMessageAsync(
-                CreateErrorPayload(requestIdElement, -32601, ex.Message),
-                cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await SendAsync(
+                    CreateErrorPayload(requestIdElement, -32601, ex.Message),
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // The transport is gone; this fire-and-forget task must not fault unobserved.
+            }
+        }
+    }
+
+    private static async Task<JsonElement> DecideRequestPermissionAsync(
+        AcpPermissionRequestHandler handler,
+        JsonElement parameters,
+        CancellationToken cancellationToken)
+    {
+        var request = AcpPermissionRequest.FromParameters(parameters);
+
+        // Run the handler off the receive loop, and stop waiting when the client closes even if the handler ignores its token.
+        var handlerTask = Task.Run(() => handler(request, cancellationToken), cancellationToken);
+        _ = handlerTask.ContinueWith(
+            static task => _ = task.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+        var decision = await handlerTask.WaitAsync(cancellationToken).ConfigureAwait(false);
+        if (decision is null)
+        {
+            return CreateRequestPermissionResponse(parameters);
+        }
+
+        return decision.SelectedOptionId is { } optionId
+            ? JsonSerializer.SerializeToElement(new
+            {
+                outcome = new
+                {
+                    outcome = "selected",
+                    optionId
+                }
+            })
+            : JsonSerializer.SerializeToElement(new
+            {
+                outcome = new
+                {
+                    outcome = "cancelled"
+                }
+            });
+    }
+
+    private async Task SendAsync(string payload, CancellationToken cancellationToken)
+    {
+        // One write at a time: a delayed permission answer must not interleave with another request on the transport.
+        await _writeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await _transport.SendMessageAsync(payload, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _writeGate.Release();
+        }
+    }
+
+    private void TrackInboundRequest(Task inboundRequest)
+    {
+        if (inboundRequest.IsCompleted)
+        {
+            return;
+        }
+
+        _inboundRequests.TryAdd(inboundRequest, 0);
+        _ = inboundRequest.ContinueWith(
+            static (completed, state) => ((ConcurrentDictionary<Task, byte>)state!).TryRemove(completed, out _),
+            _inboundRequests,
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+    }
+
+    private async Task WaitForInboundRequestsAsync()
+    {
+        var pending = _inboundRequests.Keys.Where(static task => !task.IsCompleted).ToArray();
+        if (pending.Length == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            // Every inbound task handles its own failures; the timeout only bounds a transport write that ignores cancellation.
+            await Task.WhenAll(pending).WaitAsync(InboundRequestDrainTimeout).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
         }
     }
 

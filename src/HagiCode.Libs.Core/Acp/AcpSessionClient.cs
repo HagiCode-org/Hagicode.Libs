@@ -23,10 +23,17 @@ public sealed class AcpSessionClient : IAcpSessionClient
     /// </summary>
     /// <param name="transport">The raw ACP transport.</param>
     /// <param name="agentNameHint">An optional provider hint used when the agent does not advertise capabilities during initialize.</param>
-    public AcpSessionClient(IAcpTransport transport, string? agentNameHint = null)
+    /// <param name="permissionRequestHandler">
+    /// Optional handler that may decide each <c>session/request_permission</c> request before the default answer applies. It is
+    /// passed to the underlying <see cref="AcpJsonRpcClient" />; <see langword="null" /> keeps the default answer for every request.
+    /// </param>
+    public AcpSessionClient(
+        IAcpTransport transport,
+        string? agentNameHint = null,
+        AcpPermissionRequestHandler? permissionRequestHandler = null)
     {
         ArgumentNullException.ThrowIfNull(transport);
-        _rpcClient = new AcpJsonRpcClient(transport);
+        _rpcClient = new AcpJsonRpcClient(transport, permissionRequestHandler);
         _agentNameHint = Process.ArgumentValueNormalizer.NormalizeOptionalValue(agentNameHint);
         _diagnosticsSource = transport as IAcpTransportDiagnosticsSource;
     }
