@@ -10,7 +10,7 @@ namespace HagiCode.Libs.Providers.Tests;
 
 public sealed class CodexProviderTests
 {
-    [Fact]
+    [Test]
     public async Task CreateSessionAsync_runs_sdk_thread_against_resolved_cli_process()
     {
         if (OperatingSystem.IsWindows())
@@ -60,7 +60,7 @@ public sealed class CodexProviderTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task CreateSessionAsync_throws_when_executable_cannot_be_resolved()
     {
         var provider = new CodexProvider(new RecordingCliExecutableResolver(null), logger: NullLogger<CodexProvider>.Instance);
@@ -70,7 +70,7 @@ public sealed class CodexProviderTests
         exception.Message.ShouldContain("Unable to locate the Codex executable");
     }
 
-    [Fact]
+    [Test]
     public async Task PingAsync_uses_resolved_executable_and_runtime_environment()
     {
         var resolver = new RecordingCliExecutableResolver("/tools/codex");

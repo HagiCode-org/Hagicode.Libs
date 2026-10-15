@@ -7,12 +7,11 @@ namespace HagiCode.Libs.Providers.Tests;
 
 public sealed class DshAcpMessageMapperTests
 {
-    [Theory]
-    [InlineData("agent_message_chunk", "assistant")]
-    [InlineData("agent_thought_chunk", "assistant.thought")]
-    [InlineData("tool_call", "tool.call")]
-    [InlineData("tool_call_update", "tool.update")]
-    [InlineData("plan_update", "session.update")]
+    [TestCase("agent_message_chunk", "assistant")]
+    [TestCase("agent_thought_chunk", "assistant.thought")]
+    [TestCase("tool_call", "tool.call")]
+    [TestCase("tool_call_update", "tool.update")]
+    [TestCase("plan_update", "session.update")]
     public void NormalizeNotification_maps_session_update_kinds(string sessionUpdate, string expectedType)
     {
         var messages = DshAcpMessageMapper.NormalizeNotification(SessionUpdate(new
@@ -25,7 +24,7 @@ public sealed class DshAcpMessageMapperTests
         messages[0].Content.GetProperty("session_id").GetString().ShouldBe("session-1");
     }
 
-    [Fact]
+    [Test]
     public void NormalizeNotification_extracts_assistant_text_from_content_block()
     {
         var messages = DshAcpMessageMapper.NormalizeNotification(SessionUpdate(new
@@ -37,7 +36,7 @@ public sealed class DshAcpMessageMapperTests
         messages[0].Content.GetProperty("text").GetString().ShouldBe("hello");
     }
 
-    [Fact]
+    [Test]
     public void NormalizeNotification_maps_error_update_to_terminal_failure()
     {
         var messages = DshAcpMessageMapper.NormalizeNotification(SessionUpdate(new
@@ -50,9 +49,8 @@ public sealed class DshAcpMessageMapperTests
         messages[0].Content.GetProperty("message").GetString().ShouldBe("quota exceeded");
     }
 
-    [Theory]
-    [InlineData("end_turn", "terminal.completed")]
-    [InlineData("cancelled", "terminal.failed")]
+    [TestCase("end_turn", "terminal.completed")]
+    [TestCase("cancelled", "terminal.failed")]
     public void NormalizeNotification_maps_prompt_completed_by_stop_reason(string stopReason, string expectedType)
     {
         var messages = DshAcpMessageMapper.NormalizeNotification(SessionUpdate(new
@@ -65,7 +63,7 @@ public sealed class DshAcpMessageMapperTests
         messages[0].Content.GetProperty("stop_reason").GetString().ShouldBe(stopReason);
     }
 
-    [Fact]
+    [Test]
     public void NormalizeNotification_wraps_other_methods_as_session_notifications()
     {
         var messages = DshAcpMessageMapper.NormalizeNotification(new AcpNotification(
@@ -76,7 +74,7 @@ public sealed class DshAcpMessageMapperTests
         messages[0].Content.GetProperty("method").GetString().ShouldBe("session/request_permission");
     }
 
-    [Fact]
+    [Test]
     public void CreateTerminalMessage_uses_stop_reason_and_result_text()
     {
         var promptResult = JsonSerializer.SerializeToElement(new { stopReason = "end_turn", text = "done" });
@@ -88,7 +86,7 @@ public sealed class DshAcpMessageMapperTests
         message.Content.GetProperty("text").GetString().ShouldBe("done");
     }
 
-    [Fact]
+    [Test]
     public void Result_helpers_tolerate_empty_elements()
     {
         DshAcpMessageMapper.IsSuccessfulStopReason(default).ShouldBeFalse();
@@ -96,9 +94,8 @@ public sealed class DshAcpMessageMapperTests
         text.ShouldBeNull();
     }
 
-    [Theory]
-    [InlineData(false, "session.started")]
-    [InlineData(true, "session.resumed")]
+    [TestCase(false, "session.started")]
+    [TestCase(true, "session.resumed")]
     public void CreateSessionLifecycleMessage_distinguishes_new_and_resumed_sessions(bool isResumed, string expectedType)
     {
         var message = DshAcpMessageMapper.CreateSessionLifecycleMessage(new AcpSessionHandle("session-1", isResumed, default));

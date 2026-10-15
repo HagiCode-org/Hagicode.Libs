@@ -16,7 +16,7 @@ public sealed partial class PiProviderTests
     private const string RealCliTestsEnvironmentVariable = "HAGICODE_REAL_CLI_TESTS";
     private static readonly string[] PiExecutableCandidates = ["pi", "pi-cli"];
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_builds_expected_non_interactive_json_command()
     {
         var processManager = new StubCliProcessManager
@@ -81,7 +81,7 @@ public sealed partial class PiProviderTests
         environmentVariables.ShouldContainKeyAndValue("PATH", "/tmp/bin");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_uses_three_segment_selector_for_omniroute_models()
     {
         var processManager = new StubCliProcessManager
@@ -106,7 +106,7 @@ public sealed partial class PiProviderTests
         processManager.LastContext.Arguments.ShouldContain("omniroute/ds/deepseek-v4-flash");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_converts_two_segment_to_omniroute_selector_when_provider_is_omniroute()
     {
         var processManager = new StubCliProcessManager
@@ -131,20 +131,19 @@ public sealed partial class PiProviderTests
         processManager.LastContext.Arguments.ShouldContain("omniroute/ds/deepseek-v4-flash");
     }
 
-    [Theory]
-    [InlineData("omniroute/ds/deepseek-v4-flash", "omniroute/ds/deepseek-v4-flash")]
-    [InlineData("OmniRoute/glm/glm-4.7", "OmniRoute/glm/glm-4.7")]
-    [InlineData("ds/deepseek-v4-flash", "ds/deepseek-v4-flash")]
-    [InlineData(null, "")]
-    [InlineData("", "")]
-    [InlineData("omniroute/", "omniroute/")]
-    [InlineData("omniroute/omniroute/x/y", "omniroute/omniroute/x/y")]
+    [TestCase("omniroute/ds/deepseek-v4-flash", "omniroute/ds/deepseek-v4-flash")]
+    [TestCase("OmniRoute/glm/glm-4.7", "OmniRoute/glm/glm-4.7")]
+    [TestCase("ds/deepseek-v4-flash", "ds/deepseek-v4-flash")]
+    [TestCase(null, "")]
+    [TestCase("", "")]
+    [TestCase("omniroute/", "omniroute/")]
+    [TestCase("omniroute/omniroute/x/y", "omniroute/omniroute/x/y")]
     public void NormalizeModelName_produces_expected_result(string? input, string expected)
     {
         OmpProvider.NormalizeModelName(input).ShouldBe(expected);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_rejects_invalid_thinking_level_without_starting_a_process()
     {
         var processManager = new StubCliProcessManager
@@ -170,16 +169,15 @@ public sealed partial class PiProviderTests
         processManager.LastContext.ShouldBeNull();
     }
 
-    [Theory]
-    [InlineData("off")]
-    [InlineData("minimal")]
-    [InlineData("low")]
-    [InlineData("medium")]
-    [InlineData("high")]
-    [InlineData("xhigh")]
-    [InlineData("max")]
-    [InlineData("HIGH")]
-    [InlineData("MAX")]
+    [TestCase("off")]
+    [TestCase("minimal")]
+    [TestCase("low")]
+    [TestCase("medium")]
+    [TestCase("high")]
+    [TestCase("xhigh")]
+    [TestCase("max")]
+    [TestCase("HIGH")]
+    [TestCase("MAX")]
     public async Task ExecuteAsync_accepts_documented_thinking_levels(string thinking)
     {
         var processManager = new StubCliProcessManager
@@ -208,7 +206,7 @@ public sealed partial class PiProviderTests
         normalizedThinking.ShouldBe(thinking, StringComparer.OrdinalIgnoreCase);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_pi_0_78_snapshot_format_normalizes_json_events_into_shared_cli_messages()
     {
         var processManager = new StubCliProcessManager
@@ -242,7 +240,7 @@ public sealed partial class PiProviderTests
         messages[2].Content.GetProperty("usage").GetProperty("totalTokens").GetInt32().ShouldBe(15);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_pi_0_78_snapshot_format_streams_message_updates_before_process_exit()
     {
         var processManager = new StubCliProcessManager
@@ -283,7 +281,7 @@ public sealed partial class PiProviderTests
         messages.ShouldContain(static message => message.Type == "terminal.completed");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_pi_0_78_snapshot_format_converts_cumulative_text_snapshots_into_incremental_assistant_messages()
     {
         var processManager = new StubCliProcessManager
@@ -310,7 +308,7 @@ public sealed partial class PiProviderTests
         cumulativeTerminalMessage.Content.TryGetProperty("text", out _).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_pi_0_78_snapshot_format_preserves_whitespace_only_assistant_text_deltas()
     {
         var processManager = new StubCliProcessManager
@@ -339,7 +337,7 @@ public sealed partial class PiProviderTests
         string.Concat(assistantTexts).ShouldBe("## Heading\n\n- [x] 1.1 item tail");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_preserves_golden_markdown_structure_at_mapper_boundary()
     {
         const string golden =
@@ -374,7 +372,7 @@ public sealed partial class PiProviderTests
         assistantText.ShouldContain("Summary done.\n\nSystem follow-up");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_pi_0_78_snapshot_format_deduplicates_replayed_assistant_prefix_after_tool_turns()
     {
         var processManager = new StubCliProcessManager
@@ -403,7 +401,7 @@ public sealed partial class PiProviderTests
         replayTerminalMessage.Content.TryGetProperty("text", out _).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_pi_0_78_snapshot_format_normalizes_toolcall_updates_and_results_into_shared_cli_messages()
     {
         var processManager = new StubCliProcessManager
@@ -448,7 +446,7 @@ public sealed partial class PiProviderTests
         messages[4].Content.TryGetProperty("text", out _).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_omits_terminal_completed_text_when_final_turn_replays_same_assistant_snapshot()
     {
         var processManager = new StubCliProcessManager
@@ -473,7 +471,7 @@ public sealed partial class PiProviderTests
         messages[^1].Content.GetProperty("stop_reason").GetString().ShouldBe("stop");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_marks_matching_requested_session_id_with_older_header_as_resumed()
     {
         var processManager = new StubCliProcessManager
@@ -499,7 +497,7 @@ public sealed partial class PiProviderTests
         messages[0].Content.GetProperty("restarted").GetBoolean().ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_marks_mismatched_requested_session_id_as_restarted()
     {
         var processManager = new StubCliProcessManager
@@ -525,7 +523,7 @@ public sealed partial class PiProviderTests
         messages[0].Content.GetProperty("restarted").GetBoolean().ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_surfaces_non_zero_exit_as_terminal_failure_with_diagnostics()
     {
         var processManager = new StubCliProcessManager
@@ -545,7 +543,7 @@ public sealed partial class PiProviderTests
         messages[^1].Content.GetProperty("invalid_output_lines").EnumerateArray().Select(static value => value.GetString()).ShouldContain("Warning: Model alias fallback");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_reports_invalid_json_output_as_terminal_failure()
     {
         var processManager = new StubCliProcessManager
@@ -564,7 +562,7 @@ public sealed partial class PiProviderTests
         messages[0].Content.GetProperty("invalid_output_lines").EnumerateArray().Select(static value => value.GetString()).ShouldContain("plain text preamble");
     }
 
-    [Fact]
+    [Test]
     public async Task PingAsync_reports_version_when_process_succeeds()
     {
         var processManager = new StubCliProcessManager
@@ -582,7 +580,7 @@ public sealed partial class PiProviderTests
         processManager.LastContext.Arguments.ShouldBe(["--version"]);
     }
 
-    [Fact]
+    [Test]
     public async Task PingAsync_returns_failure_when_executable_is_missing()
     {
         var provider = CreateProvider(executableResolver: new MissingExecutableResolver());
@@ -594,8 +592,8 @@ public sealed partial class PiProviderTests
         result.ErrorMessage.ShouldContain("not found");
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task ExecuteAsync_real_cli_trip_prompt_returns_assistant_output_or_actionable_failure_when_opted_in()
     {
         if (!IsRealCliTestsEnabled())

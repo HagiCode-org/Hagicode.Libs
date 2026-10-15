@@ -6,7 +6,6 @@ using HagiCode.Libs.Core.Process;
 using HagiCode.Libs.Core.Transport;
 using HagiCode.Libs.Providers.Reasonix;
 using Shouldly;
-using Xunit.Abstractions;
 
 namespace HagiCode.Libs.Providers.Tests;
 
@@ -18,7 +17,7 @@ namespace HagiCode.Libs.Providers.Tests;
 /// working directory is a scratch directory; Reasonix reads its providers from the user's Reasonix home. Verified against
 /// Reasonix v2.41.0. A failure message names the Reasonix behavior that changed.
 /// </summary>
-public sealed class ReasonixProviderRealCliUserQuestionTests(ITestOutputHelper output)
+public sealed class ReasonixProviderRealCliUserQuestionTests
 {
     private const string SwitchVariable = "HAGICODE_REAL_CLI_TESTS";
     private const string ModelVariable = "HAGICODE_REAL_CLI_REASONIX_MODEL";
@@ -27,8 +26,8 @@ public sealed class ReasonixProviderRealCliUserQuestionTests(ITestOutputHelper o
     private const string AskPrompt =
         "Use the ask tool exactly once. Ask one question with header \"Color\", question \"Which color should I use?\", options \"Red\" (description \"Warm color\") and \"Blue\" (description \"Cool color\"), and multiSelect false. After I answer, reply with only the color I picked. Do not use any other tool.";
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task A_question_is_asked_answered_with_a_label_and_the_agent_continues_with_the_answer()
     {
         if (!IsEnabled())
@@ -59,8 +58,8 @@ public sealed class ReasonixProviderRealCliUserQuestionTests(ITestOutputHelper o
         run.AssertNoReasonixProcessLeft();
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task An_unanswered_question_times_out_and_the_run_ends_as_a_completion_without_a_provider_error()
     {
         if (!IsEnabled())
@@ -98,9 +97,9 @@ public sealed class ReasonixProviderRealCliUserQuestionTests(ITestOutputHelper o
         var model = Environment.GetEnvironmentVariable(ModelVariable);
         var executable = new CliExecutableResolver().ResolveFirstAvailablePath(["reasonix"])
                          ?? throw new InvalidOperationException("The real CLI lane needs a reasonix executable on PATH.");
-        output.WriteLine($"reasonix executable: {executable}");
-        output.WriteLine($"reasonix version: {await ReadVersionAsync(executable)}");
-        output.WriteLine($"model: {(string.IsNullOrWhiteSpace(model) ? "(reasonix default)" : model)}");
+        TestContext.Out.WriteLine($"reasonix executable: {executable}");
+        TestContext.Out.WriteLine($"reasonix version: {await ReadVersionAsync(executable)}");
+        TestContext.Out.WriteLine($"model: {(string.IsNullOrWhiteSpace(model) ? "(reasonix default)" : model)}");
 
         var manager = new RecordingProcessManager();
         var provider = new ReasonixProvider(new CliExecutableResolver(), manager);
@@ -121,7 +120,7 @@ public sealed class ReasonixProviderRealCliUserQuestionTests(ITestOutputHelper o
         }
 
         var result = new RunResult(messages, manager);
-        output.WriteLine(result.Describe());
+        TestContext.Out.WriteLine(result.Describe());
         return result;
     }
 

@@ -16,7 +16,7 @@ public sealed partial class ClaudeCodeProviderTests
 {
     private const string FirstQuestionText = "Which colour do you prefer?";
 
-    public static TheoryData<string> CliVersions => new() { "2.1.159", "2.1.292" };
+    public static IEnumerable<string> CliVersions => new[] { "2.1.159", "2.1.292" };
 
     private static IReadOnlyList<CliMessage> CapturedSingle(string version) =>
         version == "2.1.159" ? ClaudeUserQuestionCapture.V2159Single : ClaudeUserQuestionCapture.V2292Single;
@@ -45,7 +45,7 @@ public sealed partial class ClaudeCodeProviderTests
     private static ClaudeUserInputResponse Answers(params (string Question, string[] Values)[] answers) =>
         new(answers.ToDictionary(static pair => pair.Question, static pair => (IReadOnlyList<string>)pair.Values));
 
-    [Fact]
+    [Test]
     public void BuildCommandArguments_adds_the_permission_prompt_tool_after_the_replay_flag_only_with_a_handler()
     {
         var provider = CreateProvider();
@@ -65,9 +65,8 @@ public sealed partial class ClaudeCodeProviderTests
         withoutHandler.ShouldBe(withHandler.Where((_, position) => position != index && position != index + 1).ToArray());
     }
 
-    [Theory]
-    [InlineData(0)]
-    [InlineData(-1)]
+    [TestCase(0)]
+    [TestCase(-1)]
     public async Task ExecuteAsync_rejects_a_non_positive_question_timeout(int seconds)
     {
         var provider = CreateProvider();
@@ -76,7 +75,7 @@ public sealed partial class ClaudeCodeProviderTests
         await Should.ThrowAsync<ArgumentOutOfRangeException>(async () => await CollectAsync(provider, options));
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_accepts_an_infinite_question_timeout()
     {
         var provider = CreateProvider();
@@ -86,8 +85,7 @@ public sealed partial class ClaudeCodeProviderTests
         messages.ShouldNotBeEmpty();
     }
 
-    [Theory]
-    [MemberData(nameof(CliVersions))]
+    [TestCaseSource(nameof(CliVersions))]
     public void Captures_have_the_layout_the_scripted_transport_relies_on(string version)
     {
         foreach (var capture in new[] { CapturedSingle(version), CapturedMulti(version), CapturedDenied(version), CapturedWriteDenied(version) })
@@ -97,8 +95,7 @@ public sealed partial class ClaudeCodeProviderTests
         }
     }
 
-    [Theory]
-    [MemberData(nameof(CliVersions))]
+    [TestCaseSource(nameof(CliVersions))]
     public void The_cli_echo_of_a_control_response_is_not_a_prompt_replay_and_is_recognized_as_an_echo(string version)
     {
         var echo = CapturedSingle(version)[4];
@@ -113,8 +110,7 @@ public sealed partial class ClaudeCodeProviderTests
         tracker.HostPromptAwaitingStart.ShouldBeTrue();
     }
 
-    [Theory]
-    [MemberData(nameof(CliVersions))]
+    [TestCaseSource(nameof(CliVersions))]
     public void TryFromCliMessage_reads_the_question_request_of_both_cli_versions(string version)
     {
         var request = CapturedSingle(version)[3];
@@ -133,15 +129,14 @@ public sealed partial class ClaudeCodeProviderTests
         parsed.Input.GetProperty("questions").GetArrayLength().ShouldBe(1);
     }
 
-    [Theory]
-    [MemberData(nameof(CliVersions))]
+    [TestCaseSource(nameof(CliVersions))]
     public void TryFromCliMessage_does_not_read_a_permission_request_for_another_tool(string version)
     {
         ClaudeUserInputRequest.TryFromCliMessage(CapturedWriteDenied(version)[3], out _).ShouldBeFalse();
         ClaudeUserInputRequest.TryFromCliMessage(CapturedSingle(version)[2], out _).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public void ClaudeUserInputRequest_reports_requires_user_interaction_only_where_the_cli_sends_it()
     {
         ClaudeControlProtocol.TryParseRequest(ClaudeUserQuestionCapture.V2292Single[3], out var current).ShouldBeTrue();
@@ -153,7 +148,7 @@ public sealed partial class ClaudeCodeProviderTests
         shipped.IsUserQuestion.ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public void The_tracker_suspends_every_bound_while_a_question_is_pending_and_restores_them_afterwards()
     {
         var tracker = new ClaudeStreamCompletionTracker(TimeSpan.FromMinutes(1));
@@ -181,8 +176,7 @@ public sealed partial class ClaudeCodeProviderTests
         tracker.CurrentWait.ShouldBe(ClaudeStreamCompletionTracker.PendingWait.UserQuestion);
     }
 
-    [Theory]
-    [MemberData(nameof(CliVersions))]
+    [TestCaseSource(nameof(CliVersions))]
     public async Task ExecuteAsync_answers_a_single_choice_question_with_the_label_of_the_chosen_option(string version)
     {
         var capture = CapturedSingle(version);
@@ -214,7 +208,7 @@ public sealed partial class ClaudeCodeProviderTests
         run.Messages[^1].Content.GetProperty("result").GetString().ShouldBe("ANSWER=Blue");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_sends_free_text_that_matches_no_option_unchanged()
     {
         var capture = CapturedSingle("2.1.292");
@@ -236,8 +230,7 @@ public sealed partial class ClaudeCodeProviderTests
         transport.WrittenLines().ShouldAllBe(static line => !line.Contains('\n'));
     }
 
-    [Theory]
-    [MemberData(nameof(CliVersions))]
+    [TestCaseSource(nameof(CliVersions))]
     public async Task ExecuteAsync_joins_multi_select_answers_with_a_comma_and_a_space(string version)
     {
         var capture = CapturedMulti(version);
@@ -260,7 +253,7 @@ public sealed partial class ClaudeCodeProviderTests
         run.Messages[^1].Content.GetProperty("result").GetString().ShouldBe("ANSWER=Dark theme, Mobile layout, Custom thing");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_answers_every_question_of_one_request_keyed_by_its_text()
     {
         var transport = new QuestionTransport();
@@ -286,7 +279,7 @@ public sealed partial class ClaudeCodeProviderTests
         answers["Run the tests?"]!.GetValue<string>().ShouldBe("No");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_keeps_streaming_while_a_question_is_pending_and_yields_the_request_in_order()
     {
         var capture = CapturedSingle("2.1.292");
@@ -321,7 +314,7 @@ public sealed partial class ClaudeCodeProviderTests
         await run.Completion.WaitAsync(TimeSpan.FromSeconds(10));
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_yields_the_request_in_order_while_the_turn_delivery_holds_the_turn()
     {
         // The turn starts before the prompt is replayed, so the delivery holds it; the request is held with it and comes
@@ -348,8 +341,7 @@ public sealed partial class ClaudeCodeProviderTests
         await run.CancelAndWaitAsync();
     }
 
-    [Theory]
-    [MemberData(nameof(CliVersions))]
+    [TestCaseSource(nameof(CliVersions))]
     public async Task ExecuteAsync_denies_a_permission_request_for_another_tool_without_asking_the_handler(string version)
     {
         var capture = CapturedWriteDenied(version);
@@ -378,7 +370,7 @@ public sealed partial class ClaudeCodeProviderTests
         DescribeTypes(run.Messages).ShouldBe(["system:init", "assistant", "user", "assistant", "result"]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_denies_a_question_when_no_handler_is_set_and_does_not_hang()
     {
         var capture = CapturedSingle("2.1.292");
@@ -396,7 +388,7 @@ public sealed partial class ClaudeCodeProviderTests
         DescribeTypes(run.Messages).ShouldNotContain("control_request");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_writes_nothing_but_the_prompt_when_no_handler_is_set_and_the_cli_sends_no_request()
     {
         var transport = new QuestionTransport();
@@ -412,7 +404,7 @@ public sealed partial class ClaudeCodeProviderTests
         transport.Sent.Select(static message => message.Type).ShouldBe(["user"]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_ignores_a_control_request_of_another_subtype()
     {
         var transport = new QuestionTransport();
@@ -429,7 +421,7 @@ public sealed partial class ClaudeCodeProviderTests
         DescribeTypes(run.Messages).ShouldNotContain("control_request");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_does_not_let_the_existing_wait_bounds_end_a_run_that_waits_for_an_answer()
     {
         // After the first turn a Monitor still runs, so the run is in a bounded wait: its timeout plus the grace period.
@@ -462,7 +454,7 @@ public sealed partial class ClaudeCodeProviderTests
         transport.ControlResponses().Count.ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_denies_a_question_that_stays_unanswered_past_the_question_timeout()
     {
         var capture = CapturedDenied("2.1.292");
@@ -492,7 +484,7 @@ public sealed partial class ClaudeCodeProviderTests
         ClaudeStreamCompletionTracker.IsErrorResult(run.Messages[^1].Content).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_denies_a_pending_question_when_the_caller_cancels_before_disposing_the_transport()
     {
         var capture = CapturedSingle("2.1.292");
@@ -524,7 +516,7 @@ public sealed partial class ClaudeCodeProviderTests
         events.IndexOf("dispose").ShouldBeGreaterThan(events.IndexOf("send:control_response"));
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_releases_a_pending_handler_when_the_run_ends_without_a_cancellation()
     {
         var capture = CapturedSingle("2.1.292");
@@ -560,7 +552,7 @@ public sealed partial class ClaudeCodeProviderTests
         transport.ControlResponses().ShouldBeEmpty();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_denies_with_the_failure_message_when_the_handler_throws_and_keeps_the_run_going()
     {
         var capture = CapturedDenied("2.1.292");
@@ -580,7 +572,7 @@ public sealed partial class ClaudeCodeProviderTests
         run.Messages[^1].Type.ShouldBe("result");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_denies_when_the_handler_returns_no_answer()
     {
         var capture = CapturedDenied("2.1.159");
@@ -599,7 +591,7 @@ public sealed partial class ClaudeCodeProviderTests
         decision["message"]!.GetValue<string>().ShouldBe(ClaudeControlProtocol.NoAnswerMessage);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_does_not_deliver_the_cli_echo_of_its_own_response()
     {
         var capture = CapturedSingle("2.1.292");
@@ -617,7 +609,7 @@ public sealed partial class ClaudeCodeProviderTests
         run.Messages.ShouldNotContain(static message => message.Type == "control_response");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_orders_a_question_between_the_agent_work_snapshots_around_it()
     {
         var transport = new QuestionTransport();
@@ -660,7 +652,7 @@ public sealed partial class ClaudeCodeProviderTests
         snapshots[^1]!.Items.ShouldHaveSingleItem().Status.ShouldBe(AgentWorkStatuses.Completed);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_writes_whole_lines_when_the_receive_loop_and_two_questions_write_at_once()
     {
         var transport = new QuestionTransport { ChunkedWrites = true };
@@ -699,7 +691,7 @@ public sealed partial class ClaudeCodeProviderTests
             .ShouldBe(["req-a", "req-b", "req-write"]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_gives_up_the_request_it_cannot_parse_as_a_question_with_a_deny()
     {
         // A question request without a tool_use_id cannot be tied to an assistant message and is not put to the user.

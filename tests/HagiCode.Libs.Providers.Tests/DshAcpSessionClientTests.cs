@@ -7,7 +7,7 @@ namespace HagiCode.Libs.Providers.Tests;
 
 public sealed class DshAcpSessionClientTests
 {
-    [Fact]
+    [Test]
     public async Task StartSessionAsync_sends_provider_and_model_as_dsh_selector_value()
     {
         var inner = new RecordingAcpSessionClient();
@@ -20,7 +20,7 @@ public sealed class DshAcpSessionClientTests
         modelCall.Parameters.GetProperty("value").GetString().ShouldBe("[\"omniroute\",\"claude/claude-haiku-5-5\"]");
     }
 
-    [Fact]
+    [Test]
     public async Task StartSessionAsync_forwards_model_unsplit_and_trims_boundary_whitespace()
     {
         var inner = new RecordingAcpSessionClient();
@@ -32,7 +32,7 @@ public sealed class DshAcpSessionClientTests
             .Parameters.GetProperty("value").GetString().ShouldBe("[\"openrouter\",\"vendor/model/variant\"]");
     }
 
-    [Fact]
+    [Test]
     public async Task StartSessionAsync_skips_model_selection_when_model_is_blank()
     {
         var inner = new RecordingAcpSessionClient();
@@ -43,9 +43,8 @@ public sealed class DshAcpSessionClientTests
         inner.Calls.Select(static call => call.Method).ShouldBe(["session/new"]);
     }
 
-    [Theory]
-    [InlineData(null)]
-    [InlineData("   ")]
+    [TestCase(null)]
+    [TestCase("   ")]
     public async Task StartSessionAsync_rejects_model_without_provider_before_creating_session(string? provider)
     {
         var inner = new RecordingAcpSessionClient();

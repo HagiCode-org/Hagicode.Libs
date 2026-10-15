@@ -15,7 +15,7 @@ public sealed class KimiProviderTests
     private const string RealCliTestsEnvironmentVariable = "HAGICODE_REAL_CLI_TESTS";
     private static readonly string[] KimiExecutableCandidates = ["kimi", "kimi-cli"];
 
-    [Fact]
+    [Test]
     public void BuildCommandArguments_trims_tokens_and_omits_duplicate_acp_entries()
     {
         var provider = CreateProvider();
@@ -28,7 +28,7 @@ public sealed class KimiProviderTests
         arguments.ShouldBe(["acp", "--profile", "smoke"]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_uses_custom_executable_authenticates_and_streams_normalized_messages()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(advertiseAuth: true));
@@ -74,7 +74,7 @@ public sealed class KimiProviderTests
         messages.Select(static message => message.Type).ShouldBe(["session.started", "assistant", "terminal.completed"]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_uses_supplied_session_identifier_for_session_reuse()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(resumedSessionId: "session-resume"));
@@ -94,7 +94,7 @@ public sealed class KimiProviderTests
         messages.First().Type.ShouldBe("session.resumed");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_creates_fresh_session_client_for_each_execution()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient());
@@ -112,7 +112,7 @@ public sealed class KimiProviderTests
         provider.SessionClient.PromptCalls.ShouldBe(2);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_resumed_session_filters_non_streamed_replay_chunks_before_emitting_current_turn()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(
@@ -138,7 +138,7 @@ public sealed class KimiProviderTests
         assistantMessages.ShouldBe(["CURRENT-TURN"]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_falls_back_to_prompt_result_when_notification_loop_ends_via_internal_cancellation()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(emitNotifications: false, promptStopReason: "fallback"));
@@ -153,7 +153,7 @@ public sealed class KimiProviderTests
         messages[1].Content.GetProperty("text").GetString().ShouldBe("pong");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_falls_back_to_multiline_prompt_result_without_flattening_line_breaks()
     {
         const string multilineResult = "Paragraph one.\n\n- item one\n- item two\n\n| Repo | Value |\n| --- | --- |\n| core | yes |";
@@ -173,7 +173,7 @@ public sealed class KimiProviderTests
         messages[2].Content.GetProperty("text").GetString().ShouldBe(multilineResult);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_authentication_failure_surfaces_bootstrap_context()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(advertiseAuth: true, authenticationAccepted: false));
@@ -189,7 +189,7 @@ public sealed class KimiProviderTests
         exception.Message.ShouldContain("rejected");
     }
 
-    [Fact]
+    [Test]
     public async Task PingAsync_reports_initialize_details_when_bootstrap_succeeds()
     {
         var provider = CreateProvider();
@@ -202,7 +202,7 @@ public sealed class KimiProviderTests
         provider.SessionClient!.InitializeCalls.ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public async Task PingAsync_returns_failure_when_executable_is_missing()
     {
         var provider = CreateProvider(executableResolver: new MissingExecutableResolver());
@@ -214,7 +214,7 @@ public sealed class KimiProviderTests
         result.ErrorMessage.ShouldContain("not found");
     }
 
-    [Fact]
+    [Test]
     public async Task PingAsync_attempts_authentication_when_initialize_requires_it()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(advertiseAuth: true));
@@ -228,7 +228,7 @@ public sealed class KimiProviderTests
         provider.SessionClient.BootstrapInvocations[0].Parameters.GetProperty("methodId").GetString().ShouldBe("token");
     }
 
-    [Fact]
+    [Test]
     public async Task PingAsync_returns_actionable_failure_when_authentication_bootstrap_is_rejected()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(advertiseAuth: true, authenticationAccepted: false));
@@ -241,7 +241,7 @@ public sealed class KimiProviderTests
         result.ErrorMessage.ShouldContain("rejected");
     }
 
-    [Fact]
+    [Test]
     public void NormalizeNotification_maps_assistant_kind_to_shared_assistant_message()
     {
         var notification = new AcpNotification(
@@ -263,7 +263,7 @@ public sealed class KimiProviderTests
         messages[0].Content.GetProperty("text").GetString().ShouldBe("pong");
     }
 
-    [Fact]
+    [Test]
     public void NormalizeNotification_preserves_multiline_content_arrays_and_newline_only_fragments()
     {
         var notification = new AcpNotification(
@@ -290,7 +290,7 @@ public sealed class KimiProviderTests
         messages[0].Content.GetProperty("text").GetString().ShouldBe("Paragraph one.\n\n- item one\n- item two");
     }
 
-    [Fact]
+    [Test]
     public void NormalizeNotification_preserves_space_only_fragments_inside_content_arrays()
     {
         var notification = new AcpNotification(
@@ -317,7 +317,7 @@ public sealed class KimiProviderTests
         messages[0].Content.GetProperty("text").GetString().ShouldBe("foo bar");
     }
 
-    [Fact]
+    [Test]
     public void NormalizeNotification_maps_error_updates_to_terminal_failure()
     {
         var notification = new AcpNotification(
@@ -339,8 +339,8 @@ public sealed class KimiProviderTests
         messages[0].Content.GetProperty("message").GetString().ShouldBe("auth denied");
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task PingAsync_can_validate_installed_kimi_cli_when_opted_in()
     {
         if (!IsRealCliTestsEnabled())

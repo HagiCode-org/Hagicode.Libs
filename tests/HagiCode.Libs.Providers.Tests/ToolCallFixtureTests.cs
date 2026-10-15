@@ -8,8 +8,7 @@ public sealed class ToolCallFixtureTests
     public static IEnumerable<object[]> ToolCallEmittingProviders() =>
         ToolCallFixtureCatalog.ToolCallEmittingProviders.OrderBy(static name => name, StringComparer.Ordinal).Select(static name => new object[] { name });
 
-    [Theory]
-    [MemberData(nameof(ToolCallEmittingProviders))]
+    [TestCaseSource(nameof(ToolCallEmittingProviders))]
     public void Fixtures_replay_to_their_expected_tool_kinds(string provider)
     {
         var files = ToolCallFixtureFile.LoadProvider(provider);
@@ -33,7 +32,7 @@ public sealed class ToolCallFixtureTests
         }
     }
 
-    [Fact]
+    [Test]
     public void Reasonix_write_file_resolves_to_write_and_dsh_bash_resolves_to_shell()
     {
         var reasonix = ToolCallFixtureFile.LoadProvider("reasonix").Single();

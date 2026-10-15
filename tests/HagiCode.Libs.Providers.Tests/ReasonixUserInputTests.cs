@@ -13,14 +13,13 @@ namespace HagiCode.Libs.Providers.Tests;
 /// </summary>
 public sealed class ReasonixUserInputTests
 {
-    public static TheoryData<string> AskFixtures => new()
+    public static IEnumerable<string> AskFixtures => new[]
     {
         "ask-single", "ask-two-questions", "ask-multi", "ask-reject-option", "ask-cancelled-outcome", "ask-two-turns",
         "ask-delayed-answer", "ask-stop-pending", "ask-resume-pending-part1", "ask-resume-pending"
     };
 
-    [Theory]
-    [MemberData(nameof(AskFixtures))]
+    [TestCaseSource(nameof(AskFixtures))]
     public void Every_ask_fixture_loads_and_each_recorded_question_request_is_recognized(string fixture)
     {
         var records = ReasonixTranscriptFixtures.Load(fixture);
@@ -37,7 +36,7 @@ public sealed class ReasonixUserInputTests
         }
     }
 
-    [Fact]
+    [Test]
     public void A_single_question_is_read_with_header_text_descriptions_and_without_the_cancel_option()
     {
         var request = ParseOnly("ask-single");
@@ -58,7 +57,7 @@ public sealed class ReasonixUserInputTests
         request.CancelOptionId.ShouldBe("q1:cancel");
     }
 
-    [Fact]
+    [Test]
     public void A_multi_select_question_keeps_the_flag_as_reasonix_reported_it()
     {
         var request = ParseOnly("ask-multi");
@@ -68,7 +67,7 @@ public sealed class ReasonixUserInputTests
         request.Question.Options.ShouldAllBe(static option => option.Description == string.Empty);
     }
 
-    [Fact]
+    [Test]
     public void Raw_input_keys_are_read_case_insensitively()
     {
         var parameters = PermissionNode("ask-single");
@@ -83,7 +82,7 @@ public sealed class ReasonixUserInputTests
         request.Question.MultiSelect.ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public void Without_raw_input_the_option_names_become_labels_with_empty_descriptions()
     {
         var parameters = PermissionNode("ask-single");
@@ -100,7 +99,7 @@ public sealed class ReasonixUserInputTests
         ]);
     }
 
-    [Fact]
+    [Test]
     public void A_question_without_a_selectable_option_is_detected_but_not_readable_and_declines_with_the_cancel_option()
     {
         var parameters = PermissionNode("ask-single");
@@ -117,7 +116,7 @@ public sealed class ReasonixUserInputTests
         ReasonixUserInputRequest.CreateDecline(permission).SelectedOptionId.ShouldBe("q1:cancel");
     }
 
-    [Fact]
+    [Test]
     public void A_question_without_any_option_declines_with_the_cancelled_outcome()
     {
         var parameters = PermissionNode("ask-single");
@@ -129,7 +128,7 @@ public sealed class ReasonixUserInputTests
         ReasonixUserInputRequest.CreateDecline(permission).IsCancelled.ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public void A_gate_tool_approval_is_not_a_question()
     {
         var permission = AcpPermissionRequest.FromParameters(PermissionParameters(ReasonixTranscriptFixtures.Load("permission-turn")).First());
@@ -139,7 +138,7 @@ public sealed class ReasonixUserInputTests
         ReasonixUserInputRequest.TryParse(permission, out _).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public void An_ask_tool_call_id_with_non_question_option_ids_is_not_a_question()
     {
         var parameters = PermissionNode("ask-single");
@@ -150,9 +149,8 @@ public sealed class ReasonixUserInputTests
         ReasonixUserInputRequest.IsQuestionRequest(AcpPermissionRequest.FromParameters(ToElement(parameters))).ShouldBeFalse();
     }
 
-    [Theory]
-    [InlineData("ask-1-q1")]
-    [InlineData("ask-1f339eb0-12-q1")]
+    [TestCase("ask-1-q1")]
+    [TestCase("ask-1f339eb0-12-q1")]
     public void Both_the_short_and_the_recorded_tool_call_id_forms_are_questions(string toolCallId)
     {
         var parameters = PermissionNode("ask-single");
@@ -161,7 +159,7 @@ public sealed class ReasonixUserInputTests
         Parse(parameters).RequestId.ShouldBe(toolCallId);
     }
 
-    [Fact]
+    [Test]
     public void A_routed_question_notification_becomes_one_question_message_that_reads_back_the_same_question()
     {
         var notification = new AcpNotification("session/request_permission", ToElement(PermissionNode("ask-single")));
@@ -176,7 +174,7 @@ public sealed class ReasonixUserInputTests
         ReasonixAcpMessageMapper.NormalizeNotification(notification).ShouldHaveSingleItem().Type.ShouldBe("session.notification");
     }
 
-    [Fact]
+    [Test]
     public void TryFromCliMessage_rejects_other_message_types()
     {
         var message = new HagiCode.Libs.Core.Transport.CliMessage("session.notification", ToElement(new JsonObject
@@ -189,9 +187,8 @@ public sealed class ReasonixUserInputTests
 
     // ------------------------------------------------------------ answer mapping
 
-    [Theory]
-    [InlineData("Red", "q1:1")]
-    [InlineData("Blue", "q1:2")]
+    [TestCase("Red", "q1:1")]
+    [TestCase("Blue", "q1:2")]
     public void An_exact_label_selects_its_option(string label, string optionId)
     {
         var request = ParseOnly("ask-single");
@@ -199,11 +196,10 @@ public sealed class ReasonixUserInputTests
         Answer(request, label).ToOutcome(request).SelectedOptionId.ShouldBe(optionId);
     }
 
-    [Theory]
-    [InlineData("Purple")]
-    [InlineData("blue")]
-    [InlineData("Blue ")]
-    [InlineData("")]
+    [TestCase("Purple")]
+    [TestCase("blue")]
+    [TestCase("Blue ")]
+    [TestCase("")]
     public void Text_that_is_not_an_offered_label_declines_with_the_cancel_option(string text)
     {
         var request = ParseOnly("ask-single");
@@ -211,7 +207,7 @@ public sealed class ReasonixUserInputTests
         Answer(request, text).ToOutcome(request).SelectedOptionId.ShouldBe("q1:cancel");
     }
 
-    [Fact]
+    [Test]
     public void An_empty_answer_more_than_one_value_or_a_missing_question_declines()
     {
         var request = ParseOnly("ask-single");
@@ -223,7 +219,7 @@ public sealed class ReasonixUserInputTests
             .ToOutcome(request).SelectedOptionId.ShouldBe("q1:cancel");
     }
 
-    [Fact]
+    [Test]
     public void A_multi_select_question_with_two_labels_declines_instead_of_sending_one_of_them()
     {
         var request = ParseOnly("ask-multi");
@@ -232,7 +228,7 @@ public sealed class ReasonixUserInputTests
         Answer(request, "Cheese", "Olives").ToOutcome(request).SelectedOptionId.ShouldBe("q1:cancel");
     }
 
-    [Fact]
+    [Test]
     public void A_duplicate_label_selects_the_first_option_with_that_label()
     {
         var request = Parse(WithRawOptions(PermissionNode("ask-single"), ("Same", "first"), ("Same", "second")));
@@ -241,7 +237,7 @@ public sealed class ReasonixUserInputTests
         Answer(request, "Same").ToOutcome(request).SelectedOptionId.ShouldBe("q1:1");
     }
 
-    [Fact]
+    [Test]
     public void A_label_that_contains_a_comma_is_matched_as_a_whole()
     {
         var request = Parse(WithRawOptions(PermissionNode("ask-single"), ("Red, dark", ""), ("Blue", "")));
@@ -251,7 +247,7 @@ public sealed class ReasonixUserInputTests
         Answer(request, "Red").ToOutcome(request).SelectedOptionId.ShouldBe("q1:cancel");
     }
 
-    [Fact]
+    [Test]
     public void Without_a_cancel_option_a_decline_is_the_cancelled_outcome()
     {
         var parameters = PermissionNode("ask-single");
@@ -266,7 +262,7 @@ public sealed class ReasonixUserInputTests
 
     // ------------------------------------------------------------ pending questions
 
-    [Fact]
+    [Test]
     public async Task An_answer_selects_the_option_and_is_not_a_decline()
     {
         ReasonixUserInputRequest? seen = null;
@@ -283,7 +279,7 @@ public sealed class ReasonixUserInputTests
         questions.HasDeclinedQuestion.ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task A_null_answer_declines_and_is_recorded()
     {
         var questions = CreatePending((_, _) => Task.FromResult<ReasonixUserInputResponse?>(null));
@@ -294,7 +290,7 @@ public sealed class ReasonixUserInputTests
         questions.HasDeclinedQuestion.ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public async Task The_question_timeout_cancels_the_handler_and_declines()
     {
         CancellationToken handlerToken = default;
@@ -314,7 +310,7 @@ public sealed class ReasonixUserInputTests
         questions.HasDeclinedQuestion.ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public async Task The_question_timeout_also_ends_a_handler_that_ignores_its_token()
     {
         var questions = CreatePending(
@@ -327,7 +323,7 @@ public sealed class ReasonixUserInputTests
         questions.HasDeclinedQuestion.ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public async Task A_failing_handler_declines()
     {
         var questions = CreatePending((_, _) => throw new InvalidOperationException("handler broke"));
@@ -338,7 +334,7 @@ public sealed class ReasonixUserInputTests
         questions.HasDeclinedQuestion.ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public async Task Caller_cancellation_answers_cancelled_without_recording_a_decline()
     {
         using var caller = new CancellationTokenSource();
@@ -361,7 +357,7 @@ public sealed class ReasonixUserInputTests
         questions.HasDeclinedQuestion.ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task Closing_the_client_answers_cancelled_without_recording_a_decline()
     {
         using var client = new CancellationTokenSource();
@@ -379,7 +375,7 @@ public sealed class ReasonixUserInputTests
         questions.HasDeclinedQuestion.ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task A_tool_approval_is_left_to_the_default_answer_and_never_reaches_the_handler()
     {
         var calls = 0;
@@ -395,7 +391,7 @@ public sealed class ReasonixUserInputTests
         questions.HasDeclinedQuestion.ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task An_unreadable_question_is_declined_without_calling_the_handler()
     {
         var calls = 0;

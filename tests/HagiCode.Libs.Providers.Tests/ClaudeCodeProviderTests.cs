@@ -19,7 +19,7 @@ public sealed partial class ClaudeCodeProviderTests
     private const string WindowsTestLocaleEnvironmentVariable = "HAGICODE_WINDOWS_TEST_LOCALE";
     private static readonly string[] ClaudeExecutableCandidates = ["claude", "claude-code"];
 
-    [Fact]
+    [Test]
     public void BuildCommandArguments_includes_expected_switches()
     {
         var provider = CreateProvider();
@@ -45,10 +45,9 @@ public sealed partial class ClaudeCodeProviderTests
         arguments.ShouldContain("--replay-user-messages");
     }
 
-    [Theory]
-    [InlineData(null, null)]
-    [InlineData("session-id", null)]
-    [InlineData(null, "resume-id")]
+    [TestCase(null, null)]
+    [TestCase("session-id", null)]
+    [TestCase(null, "resume-id")]
     public void BuildCommandArguments_without_a_handler_neither_prompts_nor_disallows_ask_user_question(string? sessionId, string? resume)
     {
         var provider = CreateProvider();
@@ -64,7 +63,7 @@ public sealed partial class ClaudeCodeProviderTests
         arguments.Any(static argument => argument.Contains("AskUserQuestion", StringComparison.Ordinal)).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public void BuildCommandArguments_with_a_handler_prompts_through_stdio_and_adds_no_disallowed_tools()
     {
         var provider = CreateProvider();
@@ -81,7 +80,7 @@ public sealed partial class ClaudeCodeProviderTests
         arguments.Any(static argument => argument.Contains("AskUserQuestion", StringComparison.Ordinal)).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public void BuildCommandArguments_passes_caller_disallowed_tools_through_untouched_with_or_without_a_handler()
     {
         var provider = CreateProvider();
@@ -103,7 +102,7 @@ public sealed partial class ClaudeCodeProviderTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_launches_without_a_permission_prompt_tool_or_ask_user_question_exclusion_when_no_handler_is_set()
     {
         var provider = CreateProvider();
@@ -119,7 +118,7 @@ public sealed partial class ClaudeCodeProviderTests
         provider.LastStartContext.Arguments.ShouldNotContain("--disallowedTools");
     }
 
-    [Fact]
+    [Test]
     public void BuildCommandArguments_omits_session_id_when_resume_is_specified()
     {
         var provider = CreateProvider();
@@ -134,7 +133,7 @@ public sealed partial class ClaudeCodeProviderTests
         arguments.ShouldNotContain("--session-id");
     }
 
-    [Fact]
+    [Test]
     public void BuildCommandArguments_trims_optional_values_and_omits_empty_after_trim_pairs()
     {
         var provider = CreateProvider();
@@ -169,11 +168,10 @@ public sealed partial class ClaudeCodeProviderTests
         ]);
     }
 
-    [Theory]
-    [InlineData(null, null)]
-    [InlineData("session-id", null)]
-    [InlineData(null, "resume-id")]
-    [InlineData("session-id", "resume-id")]
+    [TestCase(null, null)]
+    [TestCase("session-id", null)]
+    [TestCase(null, "resume-id")]
+    [TestCase("session-id", "resume-id")]
     public void BuildCommandArguments_never_emits_continue(string? sessionId, string? resume)
     {
         var provider = CreateProvider();
@@ -188,7 +186,7 @@ public sealed partial class ClaudeCodeProviderTests
         arguments.ShouldNotContain("-c");
     }
 
-    [Fact]
+    [Test]
     public void BuildCommandArguments_sends_only_resume_when_resume_and_session_id_are_both_set()
     {
         var provider = CreateProvider();
@@ -204,10 +202,9 @@ public sealed partial class ClaudeCodeProviderTests
         arguments.ShouldNotContain("--continue");
     }
 
-    [Theory]
-    [InlineData("continue")]
-    [InlineData("Continue")]
-    [InlineData("CONTINUE")]
+    [TestCase("continue")]
+    [TestCase("Continue")]
+    [TestCase("CONTINUE")]
     public void BuildCommandArguments_rejects_continue_in_extra_args(string key)
     {
         var provider = CreateProvider();
@@ -221,7 +218,7 @@ public sealed partial class ClaudeCodeProviderTests
         exception.Message.ShouldContain("Resume");
     }
 
-    [Fact]
+    [Test]
     public void BuildCommandArguments_forwards_append_system_prompt_unchanged()
     {
         var provider = CreateProvider();
@@ -236,9 +233,8 @@ public sealed partial class ClaudeCodeProviderTests
         arguments.Count(static argument => argument == "--append-system-prompt").ShouldBe(1);
     }
 
-    [Theory]
-    [InlineData(null)]
-    [InlineData("   ")]
+    [TestCase(null)]
+    [TestCase("   ")]
     public void BuildCommandArguments_omits_append_system_prompt_when_not_supplied(string? appendSystemPrompt)
     {
         var provider = CreateProvider();
@@ -252,12 +248,11 @@ public sealed partial class ClaudeCodeProviderTests
         arguments.ShouldNotContain("--append-system-prompt");
     }
 
-    [Theory]
-    [InlineData("low")]
-    [InlineData("medium")]
-    [InlineData("high")]
-    [InlineData("xhigh")]
-    [InlineData("max")]
+    [TestCase("low")]
+    [TestCase("medium")]
+    [TestCase("high")]
+    [TestCase("xhigh")]
+    [TestCase("max")]
     public void BuildCommandArguments_forwards_each_supported_effort_level(string level)
     {
         var provider = CreateProvider();
@@ -270,7 +265,7 @@ public sealed partial class ClaudeCodeProviderTests
         arguments.ShouldContain("--effort", level);
     }
 
-    [Fact]
+    [Test]
     public void BuildCommandArguments_normalizes_effort_casing_and_whitespace()
     {
         var provider = CreateProvider();
@@ -283,10 +278,9 @@ public sealed partial class ClaudeCodeProviderTests
         arguments.ShouldContain("--effort", "xhigh");
     }
 
-    [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    [InlineData("   ")]
+    [TestCase(null)]
+    [TestCase("")]
+    [TestCase("   ")]
     public void BuildCommandArguments_omits_effort_when_value_is_empty(string? effort)
     {
         var provider = CreateProvider();
@@ -299,7 +293,7 @@ public sealed partial class ClaudeCodeProviderTests
         arguments.ShouldNotContain("--effort");
     }
 
-    [Fact]
+    [Test]
     public void BuildCommandArguments_throws_for_unsupported_effort_level()
     {
         var provider = CreateProvider();
@@ -314,7 +308,7 @@ public sealed partial class ClaudeCodeProviderTests
         exception.Message.ShouldContain("max");
     }
 
-    [Fact]
+    [Test]
     public void AllowedEffortLevels_contains_exactly_the_supported_levels()
     {
         var expected = new[]
@@ -337,7 +331,7 @@ public sealed partial class ClaudeCodeProviderTests
         ClaudeCodeProvider.AllowedEffortLevels.Contains("ULTRA").ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_forwards_effort_to_the_launched_process_arguments()
     {
         var provider = CreateProvider();
@@ -356,7 +350,7 @@ public sealed partial class ClaudeCodeProviderTests
         provider.LastStartContext.Arguments.ShouldContain("--effort", "xhigh");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_omits_effort_argument_when_not_configured()
     {
         var provider = CreateProvider();
@@ -374,10 +368,9 @@ public sealed partial class ClaudeCodeProviderTests
         provider.LastStartContext.Arguments.ShouldNotContain("--effort");
     }
 
-    [Theory]
-    [InlineData("summarized")]
-    [InlineData("omitted")]
-    [InlineData("highlights")]
+    [TestCase("summarized")]
+    [TestCase("omitted")]
+    [TestCase("highlights")]
     public void BuildCommandArguments_forwards_each_supported_thinking_display_mode(string mode)
     {
         var provider = CreateProvider();
@@ -391,7 +384,7 @@ public sealed partial class ClaudeCodeProviderTests
         arguments.Count(static argument => argument == "--thinking-display").ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public void BuildCommandArguments_normalizes_thinking_display_casing_and_whitespace()
     {
         var provider = CreateProvider();
@@ -404,10 +397,9 @@ public sealed partial class ClaudeCodeProviderTests
         arguments.ShouldContain("--thinking-display", "summarized");
     }
 
-    [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    [InlineData("   ")]
+    [TestCase(null)]
+    [TestCase("")]
+    [TestCase("   ")]
     public void BuildCommandArguments_omits_thinking_display_when_value_is_empty(string? thinkingDisplay)
     {
         var provider = CreateProvider();
@@ -420,7 +412,7 @@ public sealed partial class ClaudeCodeProviderTests
         arguments.ShouldNotContain("--thinking-display");
     }
 
-    [Fact]
+    [Test]
     public void BuildCommandArguments_throws_for_unsupported_thinking_display_mode()
     {
         var provider = CreateProvider();
@@ -436,7 +428,7 @@ public sealed partial class ClaudeCodeProviderTests
         exception.Message.ShouldContain("highlights");
     }
 
-    [Fact]
+    [Test]
     public void AllowedThinkingDisplayModes_contains_exactly_the_supported_modes()
     {
         ClaudeCodeProvider.AllowedThinkingDisplayModes
@@ -448,7 +440,7 @@ public sealed partial class ClaudeCodeProviderTests
         ClaudeCodeProvider.AllowedThinkingDisplayModes.Contains("verbose").ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_rejects_unsupported_thinking_display_before_starting_any_process()
     {
         var provider = CreateProvider();
@@ -470,7 +462,7 @@ public sealed partial class ClaudeCodeProviderTests
         provider.SentMessages.ShouldBeEmpty();
     }
 
-    [Fact]
+    [Test]
     public void BuildCommandArguments_does_not_derive_thinking_display_from_the_settings_argument()
     {
         var provider = CreateProvider();
@@ -485,7 +477,7 @@ public sealed partial class ClaudeCodeProviderTests
         arguments.ShouldNotContain("--thinking-display");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_forwards_thinking_display_to_the_launched_process_arguments()
     {
         var provider = CreateProvider();
@@ -504,7 +496,7 @@ public sealed partial class ClaudeCodeProviderTests
         provider.LastStartContext.Arguments.ShouldContain("--thinking-display", "summarized");
     }
 
-    [Fact]
+    [Test]
     public void RemoveThinkingDisplayArguments_removes_typed_extra_and_bare_flags_but_keeps_everything_else()
     {
         var provider = CreateProvider();
@@ -546,7 +538,7 @@ public sealed partial class ClaudeCodeProviderTests
             .ShouldBe(["--model", "claude-sonnet"]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_relaunches_once_without_thinking_display_when_the_cli_rejects_it_on_receive()
     {
         var executablePath = UniqueExecutablePath();
@@ -567,7 +559,7 @@ public sealed partial class ClaudeCodeProviderTests
         provider.StartContexts[1].WorkingDirectory.ShouldBe(provider.StartContexts[0].WorkingDirectory);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_relaunches_once_without_thinking_display_when_the_cli_rejects_it_on_send()
     {
         var provider = CreateProvider(
@@ -582,7 +574,7 @@ public sealed partial class ClaudeCodeProviderTests
         provider.SentMessages.ShouldHaveSingleItem();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_does_not_ask_a_rejecting_executable_for_thinking_display_again()
     {
         var executablePath = UniqueExecutablePath();
@@ -599,7 +591,7 @@ public sealed partial class ClaudeCodeProviderTests
         provider.StartContexts[2].Arguments.ShouldNotContain("--thinking-display");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_keeps_sending_thinking_display_to_other_executables_after_one_rejected_it()
     {
         var rejectingPath = UniqueExecutablePath();
@@ -615,7 +607,7 @@ public sealed partial class ClaudeCodeProviderTests
         provider.StartContexts[2].Arguments.ShouldContain("--thinking-display", "summarized");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_does_not_mask_unrelated_launch_failures_with_a_relaunch()
     {
         var executablePath = UniqueExecutablePath();
@@ -637,7 +629,7 @@ public sealed partial class ClaudeCodeProviderTests
         provider.StartContexts[1].Arguments.ShouldContain("--thinking-display", "summarized");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_does_not_relaunch_when_the_flag_was_never_sent()
     {
         var failure = ThinkingDisplayRejection();
@@ -652,7 +644,7 @@ public sealed partial class ClaudeCodeProviderTests
         provider.CreatedTransportCount.ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_does_not_relaunch_after_a_message_was_already_streamed()
     {
         var executablePath = UniqueExecutablePath();
@@ -678,7 +670,7 @@ public sealed partial class ClaudeCodeProviderTests
         provider.SentMessages.ShouldHaveSingleItem();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_surfaces_a_terminal_error_message_after_output_without_relaunching()
     {
         var provider = CreateProvider(
@@ -696,7 +688,7 @@ public sealed partial class ClaudeCodeProviderTests
         provider.CreatedTransportCount.ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_real_subprocess_that_rejects_thinking_display_completes_through_the_fallback()
     {
         if (OperatingSystem.IsWindows())
@@ -746,7 +738,7 @@ public sealed partial class ClaudeCodeProviderTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_runs_at_most_one_replacement_attempt()
     {
         var provider = CreateProvider(
@@ -763,7 +755,7 @@ public sealed partial class ClaudeCodeProviderTests
         provider.CreatedTransportCount.ShouldBe(2);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_uses_custom_executable_and_streams_messages()
     {
         var provider = CreateProvider();
@@ -789,7 +781,7 @@ public sealed partial class ClaudeCodeProviderTests
         provider.SentMessages[0].Content.GetProperty("message").GetProperty("content").GetString().ShouldBe("hello");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_starts_the_process_in_the_working_directory()
     {
         var provider = CreateProvider();
@@ -808,7 +800,7 @@ public sealed partial class ClaudeCodeProviderTests
         provider.LastStartContext.WorkingDirectory.ShouldBe("/repo/project");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_uses_utf8_without_bom_for_stream_json_transport()
     {
         var provider = CreateProvider();
@@ -824,7 +816,7 @@ public sealed partial class ClaudeCodeProviderTests
         provider.LastStartContext.OutputEncoding.GetPreamble().ShouldBeEmpty();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_creates_fresh_transport_for_each_invocation_even_when_session_id_matches()
     {
         var provider = CreateProvider();
@@ -854,7 +846,7 @@ public sealed partial class ClaudeCodeProviderTests
         provider.SentMessages.Count.ShouldBe(2);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_emits_one_shot_debug_metadata_without_pooling_fields()
     {
         var provider = CreateProvider();
@@ -879,7 +871,7 @@ public sealed partial class ClaudeCodeProviderTests
         messages[0].Content.TryGetProperty("resume_mode", out _).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_keeps_event_timestamp_unchanged_and_mirrors_it_into_payload()
     {
         var eventTime = new DateTimeOffset(2026, 10, 6, 14, 32, 5, TimeSpan.FromHours(8));
@@ -907,7 +899,7 @@ public sealed partial class ClaudeCodeProviderTests
             .ShouldBe(messages[0].EventTimestamp);
     }
 
-    [Fact]
+    [Test]
     public void CliMessage_stamps_read_time_once_in_utc_when_not_supplied()
     {
         var before = DateTimeOffset.UtcNow;
@@ -920,12 +912,11 @@ public sealed partial class ClaudeCodeProviderTests
         (message with { Content = message.Content }).EventTimestamp.ShouldBe(message.EventTimestamp);
     }
 
-    [Theory]
-    [InlineData("""{"type":"a","event_timestamp":"2026-10-06T06:32:05Z"}""", true)]
-    [InlineData("""{"type":"a","timestamp":"2026-10-06T14:32:05+08:00"}""", true)]
-    [InlineData("""{"type":"a","timestamp":"not a time"}""", false)]
-    [InlineData("""{"type":"a","timestamp":"0001-01-01T00:00:00Z"}""", false)]
-    [InlineData("""{"type":"a"}""", false)]
+    [TestCase("""{"type":"a","event_timestamp":"2026-10-06T06:32:05Z"}""", true)]
+    [TestCase("""{"type":"a","timestamp":"2026-10-06T14:32:05+08:00"}""", true)]
+    [TestCase("""{"type":"a","timestamp":"not a time"}""", false)]
+    [TestCase("""{"type":"a","timestamp":"0001-01-01T00:00:00Z"}""", false)]
+    [TestCase("""{"type":"a"}""", false)]
     public void TryReadPayloadTimestamp_accepts_only_valid_non_default_times(string json, bool expected)
     {
         using var document = JsonDocument.Parse(json);
@@ -937,7 +928,7 @@ public sealed partial class ClaudeCodeProviderTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_surfaces_error_once_without_local_retry_when_session_context_is_available()
     {
         var provider = CreateProvider(messageBatches:
@@ -966,7 +957,7 @@ public sealed partial class ClaudeCodeProviderTests
         provider.SentMessages[0].Content.GetProperty("message").GetProperty("content").GetString().ShouldBe("continue the task");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_surfaces_error_once_when_session_context_is_missing()
     {
         var provider = CreateProvider(messageBatches:
@@ -992,7 +983,7 @@ public sealed partial class ClaudeCodeProviderTests
         provider.SentMessages.ShouldHaveSingleItem();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_stops_at_single_turn_result_and_does_not_read_further()
     {
         var provider = CreateProvider(messageBatches:
@@ -1010,7 +1001,7 @@ public sealed partial class ClaudeCodeProviderTests
         DescribeTypes(messages).ShouldBe(["system:init", "assistant", "result"]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_keeps_streaming_past_launch_turn_result_while_subagent_is_running()
     {
         // Real stream order for `Agent` with is_backgrounded=true: the turn that launched the subagent ends with its own
@@ -1054,7 +1045,7 @@ public sealed partial class ClaudeCodeProviderTests
         provider.DisposedTransportCount.ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_waits_for_follow_up_turn_result_when_subagent_finished_before_launch_turn_result()
     {
         // A fast subagent completes before the launch turn's "result" is flushed: the follow-up turn has already started
@@ -1081,7 +1072,7 @@ public sealed partial class ClaudeCodeProviderTests
         messages.Any(static message => message.Content.TryGetProperty("marker", out _)).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_does_not_wait_for_background_shell_tasks()
     {
         var provider = CreateProvider(messageBatches:
@@ -1105,7 +1096,7 @@ public sealed partial class ClaudeCodeProviderTests
         DescribeTypes(messages).ShouldBe(["system:init", "system:background_tasks_changed", "result"]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_keeps_streaming_while_a_background_command_without_a_timeout_is_running()
     {
         // The agent starts a build in the background without a timeout and ends its turn to wait for the exit notification.
@@ -1135,7 +1126,7 @@ public sealed partial class ClaudeCodeProviderTests
         messages.Any(static message => message.Content.TryGetProperty("marker", out _)).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_stops_waiting_for_a_background_command_without_a_timeout_when_the_cap_passes()
     {
         // The CLI never ends such a command, so the host's own cap is the only bound; a dev server must not hold the run
@@ -1174,7 +1165,7 @@ public sealed partial class ClaudeCodeProviderTests
         provider.DisposedTransportCount.ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_does_not_wait_for_a_background_command_without_a_timeout_when_the_cap_is_zero()
     {
         var provider = CreateProvider(messageBatches:
@@ -1204,7 +1195,7 @@ public sealed partial class ClaudeCodeProviderTests
         messages.Any(static message => message.Content.TryGetProperty("marker", out _)).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public void Tracker_bounds_a_background_command_without_a_timeout_by_the_cap_alone()
     {
         var tracker = new ClaudeStreamCompletionTracker(
@@ -1219,7 +1210,7 @@ public sealed partial class ClaudeCodeProviderTests
         tracker.RemainingBackgroundWork.ShouldBeGreaterThan(TimeSpan.FromMinutes(29));
     }
 
-    [Fact]
+    [Test]
     public void Tracker_waits_without_a_limit_for_a_background_command_without_a_timeout_when_the_cap_is_infinite()
     {
         var tracker = new ClaudeStreamCompletionTracker(
@@ -1232,7 +1223,7 @@ public sealed partial class ClaudeCodeProviderTests
         tracker.RemainingBackgroundWork.ShouldBe(Timeout.InfiniteTimeSpan);
     }
 
-    [Fact]
+    [Test]
     public void Tracker_does_not_wait_for_a_background_command_without_a_timeout_by_default()
     {
         // A tracker built without the cap behaves as before: only a declared timeout is awaited.
@@ -1242,7 +1233,7 @@ public sealed partial class ClaudeCodeProviderTests
         tracker.CurrentWait.ShouldBe(ClaudeStreamCompletionTracker.PendingWait.None);
     }
 
-    [Fact]
+    [Test]
     public void Tracker_ends_the_wait_for_a_background_command_without_a_timeout_when_it_reports_back()
     {
         var tracker = new ClaudeStreamCompletionTracker(
@@ -1257,9 +1248,8 @@ public sealed partial class ClaudeCodeProviderTests
         tracker.Observe(StreamMessage("result", new { is_error = false })).ShouldBeTrue();
     }
 
-    [Theory]
-    [InlineData(-5)]
-    [InlineData(-60)]
+    [TestCase(-5)]
+    [TestCase(-60)]
     public async Task ExecuteAsync_rejects_a_negative_untimed_background_command_timeout(int seconds)
     {
         var provider = CreateProvider();
@@ -1274,7 +1264,7 @@ public sealed partial class ClaudeCodeProviderTests
         });
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_keeps_streaming_while_a_monitor_armed_by_the_main_agent_is_watching()
     {
         // Real stream order (Claude Code 2.1.296): the main agent arms a Monitor and ends its turn. A Monitor is reported as
@@ -1309,7 +1299,7 @@ public sealed partial class ClaudeCodeProviderTests
         messages.Any(static message => message.Content.TryGetProperty("marker", out _)).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_keeps_streaming_while_a_background_command_with_a_timeout_is_running()
     {
         // The main agent starts a waiter in the background with an explicit timeout and ends its turn. The CLI wakes it
@@ -1339,7 +1329,7 @@ public sealed partial class ClaudeCodeProviderTests
         messages.Any(static message => message.Content.TryGetProperty("marker", out _)).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_waits_for_a_background_command_until_the_cli_stops_it_at_its_timeout()
     {
         // The CLI enforces the declared timeout of a background command: it reports the task as stopped and wakes the
@@ -1364,7 +1354,7 @@ public sealed partial class ClaudeCodeProviderTests
         messages[^1].Content.GetProperty("result").GetString().ShouldBe("NOTIFIED killed");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_keeps_waiting_when_the_monitor_task_list_arrives_after_task_started()
     {
         var provider = CreateProvider(messageBatches:
@@ -1389,7 +1379,7 @@ public sealed partial class ClaudeCodeProviderTests
         messages[^1].Content.GetProperty("result").GetString().ShouldBe("monitor ended");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_stops_waiting_for_a_monitor_after_timeout()
     {
         var provider = CreateProvider(
@@ -1429,7 +1419,7 @@ public sealed partial class ClaudeCodeProviderTests
         provider.DisposedTransportCount.ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_stops_at_error_result_even_when_a_monitor_is_watching()
     {
         var provider = CreateProvider(messageBatches:
@@ -1451,9 +1441,8 @@ public sealed partial class ClaudeCodeProviderTests
         messages.Any(static message => message.Content.TryGetProperty("marker", out _)).ShouldBeFalse();
     }
 
-    [Theory]
-    [InlineData(0)]
-    [InlineData(-5)]
+    [TestCase(0)]
+    [TestCase(-5)]
     public async Task ExecuteAsync_rejects_non_positive_background_work_grace_period(int seconds)
     {
         var provider = CreateProvider();
@@ -1468,7 +1457,7 @@ public sealed partial class ClaudeCodeProviderTests
         });
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_keeps_streaming_while_subagent_background_task_outlives_the_subagent()
     {
         // Real stream order (Claude Code 2.1.292): a background subagent starts its own background command and ends its
@@ -1533,7 +1522,7 @@ public sealed partial class ClaudeCodeProviderTests
         messages.Any(static message => message.Content.TryGetProperty("marker", out _)).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_waits_for_the_turn_that_handles_a_notification_queued_during_the_final_answer()
     {
         // Real stream (ClaudeAgentWorkCapture.NotificationQueuedDuringFinalAnswer): the subagent finishes while the main
@@ -1556,7 +1545,7 @@ public sealed partial class ClaudeCodeProviderTests
         messages.Any(static message => message.Content.TryGetProperty("marker", out _)).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_does_not_wait_for_a_notification_the_agent_received_at_a_tool_boundary()
     {
         // Real stream (ClaudeAgentWorkCapture.NotificationConsumedAtToolBoundary): the CLI attached the notification to the
@@ -1575,9 +1564,8 @@ public sealed partial class ClaudeCodeProviderTests
         messages.Any(static message => message.Content.TryGetProperty("marker", out _)).ShouldBeFalse();
     }
 
-    [Theory]
-    [InlineData("tool-result")]
-    [InlineData("replay")]
+    [TestCase("tool-result")]
+    [TestCase("replay")]
     public async Task ExecuteAsync_treats_either_sign_of_delivery_as_the_end_of_a_queued_notification(string sign)
     {
         // The two signs are independent: a tool result of the main agent after the notification, or the CLI replaying it.
@@ -1605,7 +1593,7 @@ public sealed partial class ClaudeCodeProviderTests
         messages.Any(static message => message.Content.TryGetProperty("marker", out _)).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_keeps_waiting_when_only_a_subagent_gets_a_tool_result_after_the_notification()
     {
         // A subagent's own tool results (parent_tool_use_id) are boundaries of the subagent's turn, not of the main agent's.
@@ -1636,7 +1624,7 @@ public sealed partial class ClaudeCodeProviderTests
         messages.Any(static message => message.Content.TryGetProperty("marker", out _)).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_ends_when_a_queued_notification_never_starts_a_turn()
     {
         var provider = CreateProvider(
@@ -1672,7 +1660,7 @@ public sealed partial class ClaudeCodeProviderTests
         provider.DisposedTransportCount.ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public void Tracker_holds_the_run_open_for_a_notification_queued_before_the_result_until_its_turn_starts()
     {
         var tracker = new ClaudeStreamCompletionTracker(TimeSpan.FromMinutes(1));
@@ -1691,7 +1679,7 @@ public sealed partial class ClaudeCodeProviderTests
         tracker.CurrentWait.ShouldBe(ClaudeStreamCompletionTracker.PendingWait.None);
     }
 
-    [Fact]
+    [Test]
     public void Tracker_does_not_wait_for_a_notification_of_a_task_a_subagent_owns()
     {
         // That notification goes to the subagent, which the CLI resumes; only the subagent's own notification reaches the
@@ -1716,7 +1704,7 @@ public sealed partial class ClaudeCodeProviderTests
         tracker.Observe(StreamMessage("result", new { is_error = false })).ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public void Tracker_ignores_the_stopped_notifications_a_resumed_session_replays_for_tasks_it_never_started()
     {
         var tracker = new ClaudeStreamCompletionTracker(TimeSpan.FromMinutes(1));
@@ -1728,7 +1716,7 @@ public sealed partial class ClaudeCodeProviderTests
         tracker.Observe(StreamMessage("result", new { is_error = false })).ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public void The_replay_of_a_task_notification_is_not_the_replay_of_the_host_prompt()
     {
         var replay = NotificationReplay("agent-1");
@@ -1744,9 +1732,8 @@ public sealed partial class ClaudeCodeProviderTests
         tracker.HostPromptAwaitingStart.ShouldBeTrue();
     }
 
-    [Theory]
-    [InlineData(0)]
-    [InlineData(-5)]
+    [TestCase(0)]
+    [TestCase(-5)]
     public async Task ExecuteAsync_rejects_non_positive_notification_turn_timeout(int milliseconds)
     {
         var provider = CreateProvider();
@@ -1761,7 +1748,7 @@ public sealed partial class ClaudeCodeProviderTests
         });
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_stops_waiting_for_subagent_background_task_after_timeout()
     {
         var provider = CreateProvider(
@@ -1787,7 +1774,7 @@ public sealed partial class ClaudeCodeProviderTests
         provider.DisposedTransportCount.ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_waits_for_host_prompt_turn_after_an_injected_turn_ends_first()
     {
         // On resume the CLI runs an injected turn for a stopped background-task notification before the host prompt.
@@ -1810,7 +1797,7 @@ public sealed partial class ClaudeCodeProviderTests
         messages[^1].Content.GetProperty("result").GetString().ShouldBe("final answer");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_resends_the_prompt_once_when_the_host_turn_does_not_start()
     {
         var provider = CreateProvider(
@@ -1848,7 +1835,7 @@ public sealed partial class ClaudeCodeProviderTests
         provider.SentMessages.Count(static message => message.Type == "user").ShouldBe(2);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_ends_when_the_resent_prompt_does_not_start_either()
     {
         var provider = CreateProvider(
@@ -1878,7 +1865,7 @@ public sealed partial class ClaudeCodeProviderTests
         provider.DisposedTransportCount.ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_still_delivers_a_turn_with_output_when_the_prompt_is_never_replayed()
     {
         var provider = CreateProvider(
@@ -1898,9 +1885,8 @@ public sealed partial class ClaudeCodeProviderTests
         messages[^1].Content.GetProperty("result").GetString().ShouldBe("answer without replay");
     }
 
-    [Theory]
-    [InlineData(0)]
-    [InlineData(-5)]
+    [TestCase(0)]
+    [TestCase(-5)]
     public async Task ExecuteAsync_rejects_non_positive_prompt_start_timeout(int milliseconds)
     {
         var provider = CreateProvider();
@@ -1915,7 +1901,7 @@ public sealed partial class ClaudeCodeProviderTests
         });
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_propagates_caller_cancellation_while_waiting_for_subagent_background_task()
     {
         var provider = CreateProvider(
@@ -1938,7 +1924,7 @@ public sealed partial class ClaudeCodeProviderTests
         });
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_stop_interrupts_the_wait_for_background_work_armed_by_the_main_agent()
     {
         // The wait can last as long as the timeout the agent declared (two hours here), so a caller's stop must end it at once.
@@ -1982,7 +1968,7 @@ public sealed partial class ClaudeCodeProviderTests
         provider.DisposedTransportCount.ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_cancellation_mid_stream_throws_and_disposes_transport()
     {
         var provider = CreateProvider(
@@ -2007,9 +1993,8 @@ public sealed partial class ClaudeCodeProviderTests
         provider.DisposedTransportCount.ShouldBe(1);
     }
 
-    [Theory]
-    [InlineData(0)]
-    [InlineData(-5)]
+    [TestCase(0)]
+    [TestCase(-5)]
     public async Task ExecuteAsync_rejects_non_positive_subagent_background_work_timeout(int seconds)
     {
         var provider = CreateProvider();
@@ -2024,7 +2009,7 @@ public sealed partial class ClaudeCodeProviderTests
         });
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_stops_at_error_result_even_when_subagent_is_still_running()
     {
         var provider = CreateProvider(messageBatches:
@@ -2042,7 +2027,7 @@ public sealed partial class ClaudeCodeProviderTests
         DescribeTypes(messages).ShouldBe(["system:init", "system:background_tasks_changed", "result"]);
     }
 
-    [Fact]
+    [Test]
     public async Task PingAsync_reports_version_when_process_succeeds()
     {
         var processManager = new StubCliProcessManager
@@ -2057,7 +2042,7 @@ public sealed partial class ClaudeCodeProviderTests
         result.Version.ShouldBe("1.2.3");
     }
 
-    [Fact]
+    [Test]
     public async Task PingAsync_returns_failure_when_executable_is_missing()
     {
         var provider = CreateProvider(executableResolver: new MissingExecutableResolver());
@@ -2069,8 +2054,8 @@ public sealed partial class ClaudeCodeProviderTests
         result.ErrorMessage.ShouldContain("not found");
     }
 
-    [Fact]
-    [Trait("Category", "WindowsOnly")]
+    [Test]
+    [Category("WindowsOnly")]
     public async Task ExecuteAsync_real_windows_cmd_shim_under_whitespace_path_round_trips_utf8_prompt()
     {
         if (!OperatingSystem.IsWindows())
@@ -2102,9 +2087,9 @@ public sealed partial class ClaudeCodeProviderTests
         messages[0].Content.GetProperty("message").GetProperty("content").GetString().ShouldBe(prompt);
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
-    [Trait("Category", "RealCliInvocationContract")]
+    [Test]
+    [Category("RealCli")]
+    [Category("RealCliInvocationContract")]
     public async Task ExecuteAsync_real_cli_returns_actionable_authentication_failure_when_credentials_are_absent()
     {
         if (!IsRealCliTestsEnabled())
@@ -2129,9 +2114,9 @@ public sealed partial class ClaudeCodeProviderTests
         RealCliInvocationTestHarness.AssertActionableFailure("claude-code", failureMessage);
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
-    [Trait("Category", "RealCliInvocationContract")]
+    [Test]
+    [Category("RealCli")]
+    [Category("RealCliInvocationContract")]
     public async Task ExecuteAsync_real_cli_accepts_effort_flag_without_syntax_error()
     {
         if (!IsRealCliTestsEnabled())
@@ -2157,9 +2142,9 @@ public sealed partial class ClaudeCodeProviderTests
         RealCliInvocationTestHarness.AssertActionableFailure("claude-code/effort-flag", failureMessage);
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
-    [Trait("Category", "RealCliInvocationContract")]
+    [Test]
+    [Category("RealCli")]
+    [Category("RealCliInvocationContract")]
     public async Task ExecuteAsync_real_cli_can_resolve_from_hagicode_agent_cli_path_when_path_does_not_include_cli()
     {
         if (!IsRealCliTestsEnabled())
@@ -2205,10 +2190,10 @@ public sealed partial class ClaudeCodeProviderTests
         RealCliInvocationTestHarness.AssertActionableFailure("claude-code/hagicode-agent-cli-path", failureMessage);
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
-    [Trait("Category", "RealCliInvocationContract")]
-    [Trait("Category", "RealCliWindowsZhCnWhitespaceShim")]
+    [Test]
+    [Category("RealCli")]
+    [Category("RealCliInvocationContract")]
+    [Category("RealCliWindowsZhCnWhitespaceShim")]
     public async Task ExecuteAsync_real_cli_windows_zh_cn_whitespace_cmd_shim_surfaces_actionable_failure_without_mojibake()
     {
         if (!IsRealCliTestsEnabled()
@@ -2244,7 +2229,7 @@ public sealed partial class ClaudeCodeProviderTests
         RealCliInvocationTestHarness.AssertActionableFailure("claude-code/windows-zh-cn-whitespace-shim", failureMessage);
     }
 
-    [Fact]
+    [Test]
     public void RealCliWhitespaceWrapperSandbox_on_windows_prefers_cmd_alias_for_extensionless_npm_shims()
     {
         using var fixture = TemporaryWrapperTargetFixture.Create();
@@ -2262,7 +2247,7 @@ public sealed partial class ClaudeCodeProviderTests
         resolvedPath.ShouldBe(cmdShimPath);
     }
 
-    [Fact]
+    [Test]
     public void RealCliWhitespaceWrapperSandbox_on_windows_preserves_cmd_alias_for_cmd_shims()
     {
         using var fixture = TemporaryWrapperTargetFixture.Create();

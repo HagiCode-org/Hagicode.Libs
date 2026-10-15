@@ -19,9 +19,8 @@ public sealed class ReasonixProviderUserQuestionTests
 {
     private static readonly TimeSpan RunTimeout = TimeSpan.FromSeconds(30);
 
-    [Theory]
-    [InlineData("ask-single", 0)]
-    [InlineData("ask-delayed-answer", 300)]
+    [TestCase("ask-single", 0)]
+    [TestCase("ask-delayed-answer", 300)]
     public async Task A_question_answered_with_a_label_selects_its_option_and_the_turn_completes(string fixture, int answerDelayMilliseconds)
     {
         var requests = new List<ReasonixUserInputRequest>();
@@ -45,7 +44,7 @@ public sealed class ReasonixProviderUserQuestionTests
         terminal.Content.TryGetProperty("question_declined", out _).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task Two_questions_are_asked_one_after_the_other_and_the_second_only_after_the_first_is_answered()
     {
         var provider = new QuestionFixtureProvider("ask-two-questions");
@@ -69,7 +68,7 @@ public sealed class ReasonixProviderUserQuestionTests
         messages[^1].Type.ShouldBe("terminal.completed");
     }
 
-    [Fact]
+    [Test]
     public async Task A_multi_select_question_is_reported_as_multi_select_and_answered_with_one_label()
     {
         var provider = new QuestionFixtureProvider("ask-multi");
@@ -86,7 +85,7 @@ public sealed class ReasonixProviderUserQuestionTests
         messages[^1].Type.ShouldBe("terminal.completed");
     }
 
-    [Fact]
+    [Test]
     public async Task Free_text_declines_with_the_cancel_option_and_the_error_turn_ends_as_a_completion()
     {
         var provider = new QuestionFixtureProvider("ask-reject-option");
@@ -98,7 +97,7 @@ public sealed class ReasonixProviderUserQuestionTests
         AssertCompletedAfterDecline(messages);
     }
 
-    [Fact]
+    [Test]
     public async Task A_decline_without_the_cancel_option_sends_cancelled_and_the_error_turn_ends_as_a_completion()
     {
         var transcript = ReasonixTranscriptFixtures.Load("ask-cancelled-outcome");
@@ -111,7 +110,7 @@ public sealed class ReasonixProviderUserQuestionTests
         AssertCompletedAfterDecline(messages);
     }
 
-    [Fact]
+    [Test]
     public async Task A_question_timeout_declines_and_the_turn_ends_as_a_completion()
     {
         var provider = new QuestionFixtureProvider("ask-reject-option");
@@ -132,7 +131,7 @@ public sealed class ReasonixProviderUserQuestionTests
         AssertCompletedAfterDecline(messages);
     }
 
-    [Fact]
+    [Test]
     public async Task An_error_turn_without_a_declined_question_is_still_a_failure()
     {
         var provider = new QuestionFixtureProvider("ask-reject-option");
@@ -147,7 +146,7 @@ public sealed class ReasonixProviderUserQuestionTests
         terminal.Content.TryGetProperty("question_declined", out _).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task A_turn_that_continues_after_the_cancel_option_ends_as_a_normal_completion()
     {
         var provider = new QuestionFixtureProvider("ask-single");
@@ -160,7 +159,7 @@ public sealed class ReasonixProviderUserQuestionTests
         terminal.Content.TryGetProperty("question_declined", out _).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task A_caller_stop_while_a_question_is_pending_keeps_the_caller_outcome_and_reports_no_decline()
     {
         var provider = new QuestionFixtureProvider("ask-stop-pending");
@@ -177,7 +176,7 @@ public sealed class ReasonixProviderUserQuestionTests
             }
         };
 
-        var exception = await Record.ExceptionAsync(async () =>
+        var exception = Assert.CatchAsync<OperationCanceledException>(async () =>
         {
             await foreach (var message in provider.ExecuteAsync(options, "ask", caller.Token))
             {
@@ -199,7 +198,7 @@ public sealed class ReasonixProviderUserQuestionTests
         provider.Transports.Single().IsTerminated.ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public async Task Without_a_handler_a_question_is_answered_with_its_first_option_and_a_warning_names_it()
     {
         var logger = new CapturingLogger();
@@ -218,7 +217,7 @@ public sealed class ReasonixProviderUserQuestionTests
         messages[^1].Type.ShouldBe("terminal.completed");
     }
 
-    [Fact]
+    [Test]
     public async Task With_a_handler_tool_approvals_never_reach_it_and_are_answered_as_without_one()
     {
         var withoutHandler = new QuestionFixtureProvider("permission-turn");
@@ -240,7 +239,7 @@ public sealed class ReasonixProviderUserQuestionTests
         messages[^1].Type.ShouldBe("terminal.completed");
     }
 
-    [Fact]
+    [Test]
     public async Task The_question_message_follows_the_ask_tool_call_and_precedes_its_update_and_is_not_assistant_text()
     {
         var provider = new QuestionFixtureProvider("ask-single");
@@ -262,9 +261,8 @@ public sealed class ReasonixProviderUserQuestionTests
         AssistantText(messages).ShouldBe("Blue");
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task A_resumed_session_can_ask_and_answer_a_question(bool loadInsteadOfResume)
     {
         var transcript = loadInsteadOfResume
@@ -286,7 +284,7 @@ public sealed class ReasonixProviderUserQuestionTests
         messages[^1].Type.ShouldBe("terminal.completed");
     }
 
-    [Fact]
+    [Test]
     public async Task A_resumed_session_holding_an_unanswered_question_runs_its_next_prompt_normally()
     {
         var provider = new QuestionFixtureProvider("ask-resume-pending");
@@ -306,9 +304,8 @@ public sealed class ReasonixProviderUserQuestionTests
         messages[^1].Type.ShouldBe("terminal.completed");
     }
 
-    [Theory]
-    [InlineData(0)]
-    [InlineData(-1000)]
+    [TestCase(0)]
+    [TestCase(-1000)]
     public async Task An_invalid_question_timeout_with_a_handler_is_rejected_before_any_process_starts(int milliseconds)
     {
         var provider = new QuestionFixtureProvider("ask-single");
@@ -322,7 +319,7 @@ public sealed class ReasonixProviderUserQuestionTests
         provider.Transports.ShouldBeEmpty();
     }
 
-    [Fact]
+    [Test]
     public async Task An_infinite_question_timeout_is_accepted()
     {
         var provider = new QuestionFixtureProvider("ask-single");
@@ -335,7 +332,7 @@ public sealed class ReasonixProviderUserQuestionTests
         messages[^1].Type.ShouldBe("terminal.completed");
     }
 
-    [Fact]
+    [Test]
     public async Task An_invalid_question_timeout_without_a_handler_is_ignored()
     {
         var provider = new QuestionFixtureProvider("text-turn");

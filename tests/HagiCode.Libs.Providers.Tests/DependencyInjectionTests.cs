@@ -24,7 +24,7 @@ namespace HagiCode.Libs.Providers.Tests;
 
 public sealed class DependencyInjectionTests
 {
-    [Fact]
+    [Test]
     public async Task AddHagiCodeLibs_registers_provider_registry_and_all_builtin_providers()
     {
         var services = new ServiceCollection();

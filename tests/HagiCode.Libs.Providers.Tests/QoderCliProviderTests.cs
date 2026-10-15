@@ -15,7 +15,7 @@ public sealed class QoderCliProviderTests
     private const string RealCliTestsEnvironmentVariable = "HAGICODE_REAL_CLI_TESTS";
     private static readonly string[] QoderCliExecutableCandidates = ["qodercli"];
 
-    [Fact]
+    [Test]
     public void BuildCommandArguments_includes_acp_and_appends_extra_arguments_once()
     {
         var provider = CreateProvider();
@@ -28,7 +28,7 @@ public sealed class QoderCliProviderTests
         arguments.ShouldBe(["--acp", "--verbose", "--profile", "ci"]);
     }
 
-    [Fact]
+    [Test]
     public void BuildCommandArguments_trims_tokens_and_omits_empty_or_blocked_entries()
     {
         var provider = CreateProvider();
@@ -41,7 +41,7 @@ public sealed class QoderCliProviderTests
         arguments.ShouldBe(["--acp", "--profile", "ci smoke", "--verbose"]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_always_sets_qodercli_sessions_to_yolo_mode()
     {
         var provider = CreateProvider();
@@ -59,7 +59,7 @@ public sealed class QoderCliProviderTests
         provider.SessionClient!.SetModeCalls.ShouldBe(["yolo"]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_uses_custom_executable_and_streams_normalized_messages()
     {
         var provider = CreateProvider();
@@ -94,7 +94,7 @@ public sealed class QoderCliProviderTests
         messages.Select(static message => message.Type).ShouldBe(["session.started", "assistant", "terminal.completed"]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_uses_supplied_session_identifier_for_session_reuse()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(resumedSessionId: "session-resume"));
@@ -114,7 +114,7 @@ public sealed class QoderCliProviderTests
         messages.First().Type.ShouldBe("session.resumed");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_creates_fresh_session_client_for_each_execution()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient());
@@ -133,7 +133,7 @@ public sealed class QoderCliProviderTests
         provider.SessionClient.SetModeCalls.Count.ShouldBe(2);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_resumed_session_filters_non_streamed_replay_chunks_before_emitting_current_turn()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(
@@ -160,7 +160,7 @@ public sealed class QoderCliProviderTests
         assistantMessages.ShouldBe(["CURRENT-TURN"]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_resumed_session_prefers_latest_turn_chunks_when_replay_uses_different_turn_metadata()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(
@@ -190,7 +190,7 @@ public sealed class QoderCliProviderTests
         assistantMessages.ShouldBe(["CURRENT-", "TURN"]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_resumed_session_prefers_clean_stream_chunks_when_prompt_result_contains_replayed_prefix()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(
@@ -216,7 +216,7 @@ public sealed class QoderCliProviderTests
         assistantMessages.ShouldBe(["CURRENT-", "TURN"]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_resumed_session_discards_completed_replay_prefix_even_when_metadata_matches_current_turn()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(
@@ -246,7 +246,7 @@ public sealed class QoderCliProviderTests
         assistantMessages.ShouldBe(["刚才您问的是", "\"1+1\"，我回答了\"2\"。"]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_falls_back_to_prompt_result_when_notification_loop_ends_via_internal_cancellation()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(emitNotifications: false, promptStopReason: "fallback"));
@@ -261,7 +261,7 @@ public sealed class QoderCliProviderTests
         messages[1].Content.GetProperty("text").GetString().ShouldBe("pong");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_falls_back_to_multiline_prompt_result_without_flattening_line_breaks()
     {
         const string multilineResult = "Paragraph one.\n\n- item one\n- item two\n\n```md\ncode fence\n```";
@@ -281,7 +281,7 @@ public sealed class QoderCliProviderTests
         messages[2].Content.GetProperty("text").GetString().ShouldBe(multilineResult);
     }
 
-    [Fact]
+    [Test]
     public async Task PingAsync_reports_initialize_details_when_bootstrap_succeeds()
     {
         var provider = CreateProvider();
@@ -294,7 +294,7 @@ public sealed class QoderCliProviderTests
         provider.SessionClient!.InitializeCalls.ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public async Task PingAsync_returns_failure_when_executable_is_missing()
     {
         var provider = CreateProvider(executableResolver: new MissingExecutableResolver());
@@ -306,7 +306,7 @@ public sealed class QoderCliProviderTests
         result.ErrorMessage.ShouldContain("not found");
     }
 
-    [Fact]
+    [Test]
     public void NormalizeNotification_maps_prompt_completed_to_terminal_message()
     {
         var notification = new AcpNotification(
@@ -328,7 +328,7 @@ public sealed class QoderCliProviderTests
         messages[0].Content.GetProperty("session_id").GetString().ShouldBe("session-1");
     }
 
-    [Fact]
+    [Test]
     public void NormalizeNotification_preserves_chunk_boundaries_without_inserting_spaces()
     {
         var notification = new AcpNotification(
@@ -354,7 +354,7 @@ public sealed class QoderCliProviderTests
         messages[0].Content.GetProperty("text").GetString().ShouldBe("BLUEPRINT-123");
     }
 
-    [Fact]
+    [Test]
     public void NormalizeNotification_preserves_space_only_and_newline_only_fragments()
     {
         var notification = new AcpNotification(
@@ -383,8 +383,8 @@ public sealed class QoderCliProviderTests
         messages[0].Content.GetProperty("text").GetString().ShouldBe("foo bar\n\nbaz");
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task PingAsync_can_validate_installed_qodercli_cli_when_opted_in()
     {
         if (!IsRealCliTestsEnabled())
@@ -415,8 +415,8 @@ public sealed class QoderCliProviderTests
         result.ErrorMessage.ShouldBeNullOrWhiteSpace();
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task ExecuteAsync_real_cli_resume_should_not_replay_prior_assistant_output_when_opted_in()
     {
         if (!IsRealCliTestsEnabled())

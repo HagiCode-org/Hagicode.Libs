@@ -21,7 +21,7 @@ public sealed partial class PiProviderTests
         NoSession = true
     };
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_pi_1x_text_run_streams_marked_fragments_before_process_exit()
     {
         if (OperatingSystem.IsWindows())
@@ -75,7 +75,7 @@ public sealed partial class PiProviderTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_pi_1x_thinking_run_emits_thought_fragments_in_order()
     {
         var provider = CreateProvider(processManager: new StubCliProcessManager { ExecuteResult = LoadFixture("thinking-turn") });
@@ -96,7 +96,7 @@ public sealed partial class PiProviderTests
         messages.Count(static message => message.Type == "assistant.thought").ShouldBe(4);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_pi_1x_tool_run_forwards_tool_input_once_and_keeps_thinking()
     {
         var provider = CreateProvider(processManager: new StubCliProcessManager { ExecuteResult = LoadFixture("tool-turn") });
@@ -157,7 +157,7 @@ public sealed partial class PiProviderTests
         messages.Single(static message => message.Type == "terminal.completed").Content.TryGetProperty("text", out _).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_pi_1x_error_run_produces_terminal_failed()
     {
         var provider = CreateProvider(processManager: new StubCliProcessManager { ExecuteResult = LoadFixture("error-turn") });
@@ -171,12 +171,11 @@ public sealed partial class PiProviderTests
         messages[^1].Content.GetProperty("stop_reason").GetString().ShouldBe("error");
     }
 
-    [Theory]
-    [InlineData("omniroute", null)]
-    [InlineData("omniroute", "")]
-    [InlineData("omniroute", "   ")]
-    [InlineData("anthropic", null)]
-    [InlineData("anthropic", "  ")]
+    [TestCase("omniroute", null)]
+    [TestCase("omniroute", "")]
+    [TestCase("omniroute", "   ")]
+    [TestCase("anthropic", null)]
+    [TestCase("anthropic", "  ")]
     public async Task ExecuteAsync_fails_before_launch_when_provider_has_no_model(string provider, string? model)
     {
         var processManager = new StubCliProcessManager { ExecuteResult = LoadFixture("text-turn") };
@@ -196,7 +195,7 @@ public sealed partial class PiProviderTests
         text.ShouldContain("model is required when a provider is set");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_keeps_model_without_provider_and_provider_with_model_unchanged()
     {
         var processManager = new StubCliProcessManager { ExecuteResult = LoadFixture("text-turn") };
@@ -212,7 +211,7 @@ public sealed partial class PiProviderTests
         processManager.LastContext.Arguments.SkipWhile(static argument => argument != "--model").Skip(1).First().ShouldBe("claude-sonnet");
     }
 
-    [Fact]
+    [Test]
     public void Mapper_keeps_interleaved_blocks_separate_when_end_events_arrive_late()
     {
         var messages = Map(
@@ -241,7 +240,7 @@ public sealed partial class PiProviderTests
         AssistantTexts(messages).ShouldNotContain(static text => text!.Contains("a.txt"));
     }
 
-    [Fact]
+    [Test]
     public void Mapper_emits_only_the_missing_suffix_when_text_end_extends_the_streamed_text()
     {
         var messages = Map(
@@ -256,7 +255,7 @@ public sealed partial class PiProviderTests
         messages[^1].Content.TryGetProperty("text", out _).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public void Mapper_emits_only_the_missing_suffix_when_message_end_extends_the_streamed_text()
     {
         var messages = Map(
@@ -271,7 +270,7 @@ public sealed partial class PiProviderTests
         messages[^1].Content.TryGetProperty("text", out _).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public void Mapper_emits_nothing_extra_when_the_final_text_diverges_from_the_streamed_text()
     {
         var messages = Map(
@@ -287,7 +286,7 @@ public sealed partial class PiProviderTests
         messages[^1].Content.GetProperty("text").GetString().ShouldBe("Goodbye");
     }
 
-    [Fact]
+    [Test]
     public void Mapper_emits_a_message_that_never_streamed_once_at_its_end_in_the_incremental_format()
     {
         var messages = Map(
@@ -303,7 +302,7 @@ public sealed partial class PiProviderTests
         messages.Where(static message => message.Type == "assistant").ShouldAllBe(static message => IsDelta(message));
     }
 
-    [Fact]
+    [Test]
     public void Mapper_forwards_tool_execution_arguments_only_when_they_were_not_seen_before()
     {
         var withoutEnd = Map(
@@ -329,7 +328,7 @@ public sealed partial class PiProviderTests
         withEnd.Count(static message => message.Type == "tool.update").ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public void Mapper_announces_a_tool_call_whose_start_event_was_not_seen()
     {
         var messages = Map(
@@ -342,7 +341,7 @@ public sealed partial class PiProviderTests
         call.Content.GetProperty("update").GetProperty("rawInput").GetProperty("pattern").GetString().ShouldBe("x");
     }
 
-    public static TheoryData<string> GoldenMarkdownSamples() => new()
+    public static IEnumerable<string> GoldenMarkdownSamples() => new[]
     {
         "## H2\n\n### H3\n\n- [x] 1.1–1.4\n- item\n\n| col | val |\n| --- | --- |\n| a | b |\n\n**bold** 中文Latin\n\nSummary done.\n\nSystem follow-up",
         "## Heading\n\n- [x] 1.1 item tail",
@@ -351,8 +350,7 @@ public sealed partial class PiProviderTests
         "**Owner:** Dana\n**Status:** open — see `README.md`",
     };
 
-    [Theory]
-    [MemberData(nameof(GoldenMarkdownSamples))]
+    [TestCaseSource(nameof(GoldenMarkdownSamples))]
     public void Mapper_reassembles_golden_markdown_samples_from_token_and_whitespace_fragments(string source)
     {
         foreach (var fragments in new[]
@@ -376,27 +374,26 @@ public sealed partial class PiProviderTests
         }
     }
 
-    public static TheoryData<string, string> TableFixtureSplits()
+    public static IEnumerable<TestCaseData> TableFixtureSplits()
     {
-        var data = new TheoryData<string, string>();
+        var data = new List<TestCaseData>();
         foreach (var fixtureId in TableFixtureIds)
         {
             foreach (var strategy in TableSplitStrategies)
             {
-                data.Add(fixtureId, strategy);
+                data.Add(new TestCaseData(fixtureId, strategy));
             }
 
             if (fixtureId == "T6")
             {
-                data.Add(fixtureId, "S4");
+                data.Add(new TestCaseData(fixtureId, "S4"));
             }
         }
 
         return data;
     }
 
-    [Theory]
-    [MemberData(nameof(TableFixtureSplits))]
+    [TestCaseSource(nameof(TableFixtureSplits))]
     public void Mapper_emits_each_table_fragment_as_a_delta_and_reassembles_the_source(string fixtureId, string strategy)
     {
         var source = TableFixtures[fixtureId];
@@ -409,8 +406,7 @@ public sealed partial class PiProviderTests
         string.Concat(AssistantTexts(messages)).ShouldBe(source);
     }
 
-    [Theory]
-    [MemberData(nameof(TableFixtureSplits))]
+    [TestCaseSource(nameof(TableFixtureSplits))]
     public void Mapper_adds_no_text_after_text_end_and_message_end_for_a_streamed_table(string fixtureId, string strategy)
     {
         var source = TableFixtures[fixtureId];
@@ -423,7 +419,7 @@ public sealed partial class PiProviderTests
         messages.Single(static message => message.Type == "terminal.completed").Content.TryGetProperty("text", out _).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public void Mapper_keeps_a_crlf_pair_as_one_fragment_of_a_streamed_table()
     {
         var source = TableFixtures["T6"];
@@ -435,7 +431,7 @@ public sealed partial class PiProviderTests
         string.Concat(AssistantTexts(messages)).ShouldBe(source);
     }
 
-    [Fact]
+    [Test]
     public void Mapper_keeps_cr_and_lf_in_separate_fragments_of_a_streamed_table()
     {
         var source = TableFixtures["T6"];
@@ -451,7 +447,7 @@ public sealed partial class PiProviderTests
         messages.Where(static message => message.Type == "assistant").ShouldAllBe(static message => IsDelta(message));
     }
 
-    [Fact]
+    [Test]
     public void Mapper_streams_a_table_in_a_second_content_block_after_a_tool_call_without_loss()
     {
         var table = TableFixtures["T1"];
@@ -481,7 +477,7 @@ public sealed partial class PiProviderTests
         messages.Single(static message => message.Type == "terminal.completed").Content.TryGetProperty("text", out _).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public void Mapper_streams_a_table_in_a_later_message_after_a_tool_turn_without_mixing_blocks()
     {
         var table = TableFixtures["T1"];
@@ -508,7 +504,7 @@ public sealed partial class PiProviderTests
         messages.Single(static message => message.Type == "terminal.completed").Content.TryGetProperty("text", out _).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public void Mapper_reports_a_session_created_by_this_run_as_started_even_for_a_requested_id()
     {
         var processStartedAt = new DateTimeOffset(2026, 10, 13, 6, 41, 26, TimeSpan.Zero);
@@ -524,7 +520,7 @@ public sealed partial class PiProviderTests
         session.Content.GetProperty("restarted").GetBoolean().ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public void Mapper_tolerates_a_header_slightly_before_the_process_start()
     {
         var processStartedAt = new DateTimeOffset(2026, 10, 13, 6, 41, 26, TimeSpan.Zero);
@@ -535,7 +531,7 @@ public sealed partial class PiProviderTests
         messages[0].Content.GetProperty("resumeMode").GetString().ShouldBe("started");
     }
 
-    [Fact]
+    [Test]
     public void Mapper_reports_a_session_with_an_older_header_as_resumed()
     {
         var processStartedAt = new DateTimeOffset(2026, 10, 13, 6, 41, 26, TimeSpan.Zero);
@@ -549,7 +545,7 @@ public sealed partial class PiProviderTests
         session.Content.GetProperty("restarted").GetBoolean().ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public void Mapper_reports_a_different_returned_id_as_restarted_regardless_of_the_header_time()
     {
         var processStartedAt = new DateTimeOffset(2026, 10, 13, 6, 41, 26, TimeSpan.Zero);
@@ -561,9 +557,8 @@ public sealed partial class PiProviderTests
         messages[0].Content.GetProperty("restarted").GetBoolean().ShouldBeTrue();
     }
 
-    [Theory]
-    [InlineData(null)]
-    [InlineData("not a timestamp")]
+    [TestCase(null)]
+    [TestCase("not a timestamp")]
     public void Mapper_falls_back_to_id_equality_when_the_header_time_is_missing_or_unreadable(string? timestamp)
     {
         var processStartedAt = new DateTimeOffset(2026, 10, 13, 6, 41, 26, TimeSpan.Zero);
@@ -577,7 +572,7 @@ public sealed partial class PiProviderTests
         messages[0].Content.GetProperty("resumeMode").GetString().ShouldBe("resumed");
     }
 
-    [Fact]
+    [Test]
     public void Mapper_falls_back_to_id_equality_when_no_process_start_time_is_known()
     {
         var messages = MapAs("pi-session-1", null, SessionLine("pi-session-1", DateTimeOffset.UtcNow));
@@ -585,7 +580,7 @@ public sealed partial class PiProviderTests
         messages[0].Type.ShouldBe("session.resumed");
     }
 
-    [Fact]
+    [Test]
     public void Mapper_reports_a_session_without_a_requested_id_as_started()
     {
         var messages = MapAs(null, DateTimeOffset.UtcNow, SessionLine("fresh-id", DateTimeOffset.UtcNow));
@@ -595,7 +590,7 @@ public sealed partial class PiProviderTests
         messages[0].Content.TryGetProperty("resumed", out _).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_reports_a_session_created_by_the_run_as_started_and_an_old_one_as_resumed()
     {
         var created = new StubCliProcessManager { ExecuteResult = SessionOnlyResult("pi-session-1", DateTimeOffset.UtcNow) };

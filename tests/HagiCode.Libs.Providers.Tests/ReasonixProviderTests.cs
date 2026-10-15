@@ -17,7 +17,7 @@ public sealed class ReasonixProviderTests
     private const string RealCliModelEnvironmentVariable = "HAGICODE_REAL_CLI_REASONIX_MODEL";
     private static readonly string[] ReasonixExecutableCandidates = ["reasonix"];
 
-    [Fact]
+    [Test]
     public void BuildCommandArguments_filters_legacy_bootstrap_flags_for_reasonix_2x()
     {
         var provider = CreateProvider();
@@ -57,7 +57,7 @@ public sealed class ReasonixProviderTests
         ]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_uses_custom_executable_and_streams_normalized_messages()
     {
         var provider = CreateProvider();
@@ -101,7 +101,7 @@ public sealed class ReasonixProviderTests
         messages[1].Content.GetProperty("text").GetString().ShouldBe("pong");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_forwards_session_id_and_emits_resumed_lifecycle_message()
     {
         var provider = CreateProvider();
@@ -123,7 +123,7 @@ public sealed class ReasonixProviderTests
         messages[0].Content.GetProperty("session_id").GetString().ShouldBe("session-123");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_resumed_session_skips_replayed_history_and_keeps_the_current_turn_output()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(
@@ -155,7 +155,7 @@ public sealed class ReasonixProviderTests
         visibleAssistantText.ShouldNotContain("old-response");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_resumed_session_uses_latest_assistant_generation_when_replay_has_no_metadata()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(
@@ -188,7 +188,7 @@ public sealed class ReasonixProviderTests
         visibleAssistantText.ShouldNotContain("old-response");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_streams_reasoning_chunks_as_assistant_thought_messages()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(includeThoughtChunks: true));
@@ -203,7 +203,7 @@ public sealed class ReasonixProviderTests
         messages[1].Content.GetProperty("text").GetString().ShouldBe("thinking...");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_falls_back_to_prompt_result_when_notification_loop_ends_early()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(
@@ -222,7 +222,7 @@ public sealed class ReasonixProviderTests
         messages[2].Content.GetProperty("text").GetString().ShouldBe("pong");
     }
 
-    [Fact]
+    [Test]
     public async Task PingAsync_reports_initialize_details_when_bootstrap_succeeds()
     {
         var provider = CreateProvider();
@@ -236,7 +236,7 @@ public sealed class ReasonixProviderTests
         provider.SessionClient!.InitializeCalls.ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public async Task PingAsync_returns_failure_when_executable_is_missing()
     {
         var provider = CreateProvider(executableResolver: new MissingExecutableResolver());
@@ -248,7 +248,7 @@ public sealed class ReasonixProviderTests
         result.ErrorMessage.ShouldContain("not found");
     }
 
-    [Fact]
+    [Test]
     public void NormalizeNotification_maps_agent_message_chunks_to_shared_assistant_message()
     {
         var notification = new AcpNotification(
@@ -270,8 +270,8 @@ public sealed class ReasonixProviderTests
         messages[0].Content.GetProperty("text").GetString().ShouldBe("pong");
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task PingAsync_can_validate_installed_reasonix_cli_when_opted_in()
     {
         if (!IsRealCliTestsEnabled())
@@ -298,8 +298,8 @@ public sealed class ReasonixProviderTests
         result.ErrorMessage.ShouldBeNullOrWhiteSpace();
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task ExecuteAsync_can_stream_real_reasonix_cli_when_opted_in()
     {
         if (!IsRealCliTestsEnabled())
@@ -351,8 +351,8 @@ public sealed class ReasonixProviderTests
         visibleAssistantText.Trim().ShouldBe("PONG");
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task ExecuteAsync_real_resumed_session_does_not_replay_previous_turn_output_when_opted_in()
     {
         if (!IsRealCliTestsEnabled())
@@ -422,7 +422,7 @@ public sealed class ReasonixProviderTests
         secondTurnAssistantText.ShouldNotContain(firstToken);
     }
 
-    [Fact]
+    [Test]
     public async Task Scripted_transport_replays_the_initialize_fixture_and_reports_v2_41_0()
     {
         var provider = CreateFixtureProvider("initialize");
@@ -434,7 +434,7 @@ public sealed class ReasonixProviderTests
         provider.Transports.Single().SentMethods.ShouldBe(["initialize"]);
     }
 
-    [Fact]
+    [Test]
     public async Task Scripted_transport_never_sends_session_set_model_for_reasonix()
     {
         var provider = CreateFixtureProvider("text-turn");
@@ -448,7 +448,7 @@ public sealed class ReasonixProviderTests
         methods.ShouldNotContain("session/set_model");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_resumes_with_session_resume_when_advertised_and_replays_nothing()
     {
         var provider = CreateFixtureProvider("resume-replay");
@@ -465,7 +465,7 @@ public sealed class ReasonixProviderTests
         messages[^1].Type.ShouldBe("terminal.completed");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_load_replay_without_meta_yields_no_replayed_user_text_or_tool_calls()
     {
         var provider = CreateFixtureProvider("load-replay", removeResumeCapability: true);
@@ -483,7 +483,7 @@ public sealed class ReasonixProviderTests
         messages[^1].Type.ShouldBe("terminal.completed");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_live_pending_to_completed_tool_call_is_still_emitted_for_a_new_session()
     {
         var provider = CreateFixtureProvider("tool-turn");
@@ -497,7 +497,7 @@ public sealed class ReasonixProviderTests
         messages[^1].Type.ShouldBe("terminal.completed");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_unknown_model_yields_terminal_failure_with_failure_kind_and_releases_the_process()
     {
         var provider = CreateFixtureProvider("unknown-model");
@@ -513,9 +513,8 @@ public sealed class ReasonixProviderTests
         provider.Transports.Single().IsTerminated.ShouldBeTrue();
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task ExecuteAsync_unknown_session_yields_failure_kind_unknown_session(bool loadOnly)
     {
         var provider = CreateFixtureProvider("unknown-session", removeResumeCapability: loadOnly);
@@ -531,7 +530,7 @@ public sealed class ReasonixProviderTests
         provider.Transports.Single().IsTerminated.ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_enable_yolo_sends_tool_approval_yolo_when_the_option_is_advertised()
     {
         var provider = CreateFixtureProvider("set-config-option-yolo");
@@ -548,7 +547,7 @@ public sealed class ReasonixProviderTests
         messages[^1].Type.ShouldBe("terminal.completed");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_enable_yolo_without_the_advertised_option_skips_the_call_and_runs_the_turn()
     {
         var provider = CreateFixtureProvider("set-config-option-yolo", removeToolApprovalOption: true);
@@ -563,7 +562,7 @@ public sealed class ReasonixProviderTests
         messages[^1].Type.ShouldBe("terminal.completed");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_enable_yolo_failed_call_is_ignored_and_the_turn_runs()
     {
         var provider = CreateFixtureProvider("set-config-option-yolo", failingMethods: ["session/set_config_option"]);
@@ -578,7 +577,7 @@ public sealed class ReasonixProviderTests
         messages[^1].Type.ShouldBe("terminal.completed");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_cancelled_stop_reason_ends_the_turn_as_a_terminal_failure()
     {
         var provider = CreateFixtureProvider("cancel-mid-turn");
@@ -592,7 +591,7 @@ public sealed class ReasonixProviderTests
         terminal.Content.GetProperty("stop_reason").GetString().ShouldBe("cancelled");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_new_session_reports_started_then_streams_text_and_completes()
     {
         var provider = CreateFixtureProvider("text-turn");
@@ -607,7 +606,7 @@ public sealed class ReasonixProviderTests
         messages[^1].Type.ShouldBe("terminal.completed");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_allowed_permission_is_answered_and_the_gated_tools_complete()
     {
         var provider = CreateFixtureProvider("permission-turn");
@@ -626,7 +625,7 @@ public sealed class ReasonixProviderTests
         messages[^1].Type.ShouldBe("terminal.completed");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_rejected_permission_fails_the_tool_and_the_turn_still_completes()
     {
         var provider = CreateFixtureProvider("permission-reject-once");
@@ -640,10 +639,9 @@ public sealed class ReasonixProviderTests
         messages[^1].Type.ShouldBe("terminal.completed");
     }
 
-    [Theory]
-    [InlineData("usage_update")]
-    [InlineData("available_commands_update")]
-    [InlineData("config_option_update")]
+    [TestCase("usage_update")]
+    [TestCase("available_commands_update")]
+    [TestCase("config_option_update")]
     public void NormalizeNotification_housekeeping_updates_produce_no_assistant_text_or_tool_call(string updateKind)
     {
         var notification = new AcpNotification(
@@ -659,9 +657,8 @@ public sealed class ReasonixProviderTests
         messages.Where(static message => message.Type is "assistant" or "tool.call" or "tool.update").ShouldBeEmpty();
     }
 
-    [Theory]
-    [InlineData("_reasonix.io/session/status_update")]
-    [InlineData("_reasonix.io/session/mcpStatus_update")]
+    [TestCase("_reasonix.io/session/status_update")]
+    [TestCase("_reasonix.io/session/mcpStatus_update")]
     public void NormalizeNotification_reasonix_session_extension_produces_no_assistant_text_or_tool_call(string method)
     {
         var notification = new AcpNotification(
@@ -673,7 +670,7 @@ public sealed class ReasonixProviderTests
         messages.Where(static message => message.Type is "assistant" or "tool.call" or "tool.update").ShouldBeEmpty();
     }
 
-    [Fact]
+    [Test]
     public void NormalizeNotification_user_message_chunk_is_replay_only_and_produces_no_message()
     {
         var notification = new AcpNotification(
@@ -769,8 +766,8 @@ public sealed class ReasonixProviderTests
             sessionClient ?? new FakeAcpSessionClient());
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task ExecuteAsync_real_resume_skips_replay_and_keeps_the_resumed_model_when_opted_in()
     {
         if (!IsRealCliTestsEnabled())
@@ -833,8 +830,8 @@ public sealed class ReasonixProviderTests
         secondTurnText.ShouldNotContain(firstToken);
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task ExecuteAsync_real_unknown_model_yields_a_readable_terminal_failure_when_opted_in()
     {
         if (!IsRealCliTestsEnabled())
@@ -862,8 +859,8 @@ public sealed class ReasonixProviderTests
         failure.Content.GetProperty("message").GetString().ShouldNotBeNull().ShouldContain(unknownModelRef);
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task ExecuteAsync_real_enable_yolo_sets_tool_approval_and_runs_without_permission_prompts_when_opted_in()
     {
         if (!IsRealCliTestsEnabled())

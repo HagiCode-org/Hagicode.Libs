@@ -15,7 +15,7 @@ public sealed class HermesProviderTests
     private const string RealCliTestsEnvironmentVariable = "HAGICODE_REAL_CLI_TESTS";
     private static readonly string[] HermesExecutableCandidates = ["hermes", "hermes-cli"];
 
-    [Fact]
+    [Test]
     public void BuildCommandArguments_uses_acp_by_default_and_honors_explicit_overrides()
     {
         var provider = CreateProvider();
@@ -27,7 +27,7 @@ public sealed class HermesProviderTests
         }).ShouldBe(["acp", "--profile", "smoke"]);
     }
 
-    [Fact]
+    [Test]
     public void BuildCommandArguments_trims_tokens_without_collapsing_internal_spaces()
     {
         var provider = CreateProvider();
@@ -40,7 +40,7 @@ public sealed class HermesProviderTests
         arguments.ShouldBe(["acp", "--profile", "ci smoke"]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_uses_custom_executable_and_streams_normalized_messages()
     {
         var provider = CreateProvider();
@@ -77,7 +77,7 @@ public sealed class HermesProviderTests
         messages.Select(static message => message.Type).ShouldBe(["session.started", "assistant", "terminal.completed"]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_applies_full_permission_mode_by_default()
     {
         var provider = CreateProvider(sessionClientFactory: _ => new FakeAcpSessionClient());
@@ -90,7 +90,7 @@ public sealed class HermesProviderTests
         provider.CreatedSessionClients[0].LastModeId.ShouldBe("bypassPermissions");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_preserves_explicit_mode_override()
     {
         var provider = CreateProvider(sessionClientFactory: _ => new FakeAcpSessionClient());
@@ -108,7 +108,7 @@ public sealed class HermesProviderTests
         provider.CreatedSessionClients[0].LastModeId.ShouldBe("analysis");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_reuses_in_memory_session_collection_without_restarting_transport()
     {
         var provider = CreateProvider(sessionClientFactory: _ => new FakeAcpSessionClient(emitNotifications: false));
@@ -139,7 +139,7 @@ public sealed class HermesProviderTests
         reusedText.ShouldContain("BLUEPRINT-123");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_keeps_reusing_same_session_when_hermes_model_changes()
     {
         var provider = CreateProvider(sessionClientFactory: _ => new FakeAcpSessionClient(emitNotifications: false));
@@ -163,7 +163,7 @@ public sealed class HermesProviderTests
         secondMessages.First().Type.ShouldBe("session.reused");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_falls_back_to_prompt_result_when_notification_loop_ends_via_internal_cancellation()
     {
         var provider = CreateProvider(sessionClientFactory: _ => new FakeAcpSessionClient(emitNotifications: false, promptStopReason: "fallback"));
@@ -178,7 +178,7 @@ public sealed class HermesProviderTests
         messages[1].Content.GetProperty("text").GetString().ShouldBe("pong");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_falls_back_to_multiline_prompt_result_without_flattening_line_breaks()
     {
         const string multilineResult = "Paragraph one.\n\n- item one\n- item two\n\n```md\ncode fence\n```";
@@ -198,7 +198,7 @@ public sealed class HermesProviderTests
         messages[2].Content.GetProperty("text").GetString().ShouldBe(multilineResult);
     }
 
-    [Fact]
+    [Test]
     public async Task PingAsync_reports_initialize_details_when_bootstrap_succeeds()
     {
         var provider = CreateProvider();
@@ -212,7 +212,7 @@ public sealed class HermesProviderTests
         provider.CreatedSessionClients[0].InitializeCalls.ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public async Task PingAsync_returns_failure_when_executable_is_missing()
     {
         var provider = CreateProvider(executableResolver: new MissingExecutableResolver());
@@ -224,7 +224,7 @@ public sealed class HermesProviderTests
         result.ErrorMessage.ShouldContain("not found");
     }
 
-    [Fact]
+    [Test]
     public void NormalizeNotification_maps_prompt_completed_to_terminal_message()
     {
         var notification = new AcpNotification(
@@ -246,7 +246,7 @@ public sealed class HermesProviderTests
         messages[0].Content.GetProperty("session_id").GetString().ShouldBe("session-1");
     }
 
-    [Fact]
+    [Test]
     public void NormalizeNotification_maps_error_like_update_to_terminal_failed_with_actionable_message()
     {
         var notification = new AcpNotification(
@@ -276,7 +276,7 @@ public sealed class HermesProviderTests
         failureText.ShouldContain("Permission denied");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_emits_terminal_failed_for_forbidden_prompt_result_without_success_fallback()
     {
         var provider = CreateProvider(sessionClientFactory: _ => new FakeAcpSessionClient(
@@ -309,7 +309,7 @@ public sealed class HermesProviderTests
         failureText.ShouldContain("Permission denied");
     }
 
-    [Fact]
+    [Test]
     public void NormalizeNotification_preserves_chunk_boundaries_without_inserting_spaces()
     {
         var notification = new AcpNotification(
@@ -335,7 +335,7 @@ public sealed class HermesProviderTests
         messages[0].Content.GetProperty("text").GetString().ShouldBe("BLUEPRINT-123");
     }
 
-    [Fact]
+    [Test]
     public void NormalizeNotification_filters_thought_chunks_without_affecting_visible_text_chunks()
     {
         var thoughtNotification = new AcpNotification(
@@ -375,7 +375,7 @@ public sealed class HermesProviderTests
         visibleMessages[0].Content.GetProperty("text").GetString().ShouldBe("hello world");
     }
 
-    [Fact]
+    [Test]
     public void NormalizeNotification_preserves_space_only_and_newline_only_fragments()
     {
         var notification = new AcpNotification(
@@ -404,8 +404,8 @@ public sealed class HermesProviderTests
         messages[0].Content.GetProperty("text").GetString().ShouldBe("foo bar\n\nbaz");
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task PingAsync_can_validate_installed_hermes_cli_when_opted_in()
     {
         if (!IsRealCliTestsEnabled())

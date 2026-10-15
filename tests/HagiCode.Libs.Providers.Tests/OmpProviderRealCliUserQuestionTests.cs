@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Shouldly;
-using Xunit.Abstractions;
 using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Process;
 using HagiCode.Libs.Core.Transport;
@@ -20,15 +19,15 @@ namespace HagiCode.Libs.Providers.Tests;
 /// (<c>PI_CODING_AGENT_DIR</c>, or <c>~/.omp/agent</c>), so the runs never touch the user's extensions, sessions or logs: no
 /// session is persisted and the working directory is a scratch directory. Verified against omp 18.10.4.
 /// </summary>
-public sealed class OmpProviderRealCliUserQuestionTests(ITestOutputHelper output)
+public sealed class OmpProviderRealCliUserQuestionTests
 {
     private const string SwitchVariable = "HAGICODE_LIBS_REAL_CLI_OMP_USER_QUESTION";
     private const string ExecutableVariable = "HAGICODE_LIBS_REAL_CLI_OMP_USER_QUESTION_EXECUTABLE";
     private const string ModelVariable = "HAGICODE_LIBS_REAL_CLI_OMP_USER_QUESTION_MODEL";
     private static readonly TimeSpan RunTimeout = TimeSpan.FromSeconds(180);
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task Two_questions_one_of_them_multi_select_are_asked_answered_and_the_agent_receives_the_answers()
     {
         if (!IsEnabled())
@@ -76,8 +75,8 @@ public sealed class OmpProviderRealCliUserQuestionTests(ITestOutputHelper output
         run.AssertNoOmpProcessLeft();
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task A_question_answered_after_more_than_sixty_seconds_continues_the_run()
     {
         if (!IsEnabled())
@@ -111,8 +110,8 @@ public sealed class OmpProviderRealCliUserQuestionTests(ITestOutputHelper output
         run.AssertNoOmpProcessLeft();
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task Single_multi_and_free_text_answers_and_a_label_with_a_comma_reach_the_model_without_a_tool_error()
     {
         if (!IsEnabled())
@@ -151,8 +150,8 @@ public sealed class OmpProviderRealCliUserQuestionTests(ITestOutputHelper output
         run.AssertNoOmpProcessLeft();
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task A_declined_question_ends_the_run_as_aborted_without_an_error()
     {
         if (!IsEnabled())
@@ -183,8 +182,8 @@ public sealed class OmpProviderRealCliUserQuestionTests(ITestOutputHelper output
         run.AssertNoOmpProcessLeft();
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task Cancelling_while_a_question_is_pending_ends_the_run_and_leaves_no_omp_process()
     {
         if (!IsEnabled())
@@ -228,8 +227,8 @@ public sealed class OmpProviderRealCliUserQuestionTests(ITestOutputHelper output
             }
         };
 
-        var exception = await Record.ExceptionAsync(act);
-        output.WriteLine($"cancel took {cancelled.Elapsed.TotalMilliseconds:F0} ms; omp process stops requested: {manager.StopCalls}; pids: {string.Join(",", manager.Pids)}");
+        var exception = Assert.CatchAsync<OperationCanceledException>(act);
+        TestContext.Out.WriteLine($"cancel took {cancelled.Elapsed.TotalMilliseconds:F0} ms; omp process stops requested: {manager.StopCalls}; pids: {string.Join(",", manager.Pids)}");
 
         exception.ShouldBeAssignableTo<OperationCanceledException>();
         handlerToken.IsCancellationRequested.ShouldBeTrue();
@@ -239,8 +238,8 @@ public sealed class OmpProviderRealCliUserQuestionTests(ITestOutputHelper output
         cancelled.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(15));
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task A_user_extension_in_the_omp_home_still_works_its_dialogs_are_cancelled_and_questions_are_still_asked()
     {
         if (!IsEnabled())
@@ -282,9 +281,9 @@ public sealed class OmpProviderRealCliUserQuestionTests(ITestOutputHelper output
     private async Task<RunResult> RunAsync(OmpOptions options, string prompt, TimeSpan? timeout = null)
     {
         var executable = options.ExecutablePath!;
-        output.WriteLine($"omp executable: {executable}");
-        output.WriteLine($"omp version: {await ReadVersionAsync(executable)}");
-        output.WriteLine($"model: {options.Model ?? "(omp default)"}");
+        TestContext.Out.WriteLine($"omp executable: {executable}");
+        TestContext.Out.WriteLine($"omp version: {await ReadVersionAsync(executable)}");
+        TestContext.Out.WriteLine($"model: {options.Model ?? "(omp default)"}");
 
         var manager = new RecordingProcessManager();
         var provider = new OmpProvider(new CliExecutableResolver(), manager);
@@ -296,7 +295,7 @@ public sealed class OmpProviderRealCliUserQuestionTests(ITestOutputHelper output
         }
 
         var result = new RunResult(messages, manager);
-        output.WriteLine(result.Describe());
+        TestContext.Out.WriteLine(result.Describe());
         return result;
     }
 

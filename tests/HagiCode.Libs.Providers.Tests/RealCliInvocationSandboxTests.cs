@@ -4,7 +4,7 @@ namespace HagiCode.Libs.Providers.Tests;
 
 public sealed class RealCliInvocationSandboxTests
 {
-    [Fact]
+    [Test]
     public void CreateEnvironmentWithAgentCliPath_sets_override_and_removes_matching_path_entries()
     {
         var baseEnvironment = new Dictionary<string, string?>(StringComparer.Ordinal)
@@ -22,7 +22,7 @@ public sealed class RealCliInvocationSandboxTests
         environment["HOME"].ShouldBe("/tmp/home");
     }
 
-    [Fact]
+    [Test]
     public void CreateEnvironmentWithAgentCliPath_clears_override_when_directories_are_empty()
     {
         var baseEnvironment = new Dictionary<string, string?>(StringComparer.Ordinal)
@@ -37,7 +37,7 @@ public sealed class RealCliInvocationSandboxTests
         environment["PATH"].ShouldBe("/usr/local/bin");
     }
 
-    [Fact]
+    [Test]
     public void DeleteDirectoryWithRetries_retries_io_failures_until_delete_succeeds()
     {
         using var tempDirectory = new TemporaryDirectory();
@@ -65,7 +65,7 @@ public sealed class RealCliInvocationSandboxTests
         Directory.Exists(tempDirectory.Path).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public void DeleteDirectoryWithRetries_retries_unauthorized_access_until_delete_succeeds()
     {
         using var tempDirectory = new TemporaryDirectory();
@@ -93,7 +93,7 @@ public sealed class RealCliInvocationSandboxTests
         Directory.Exists(tempDirectory.Path).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public void DeleteDirectoryWithRetries_throws_after_exhausting_retry_budget()
     {
         using var tempDirectory = new TemporaryDirectory();
@@ -119,7 +119,7 @@ public sealed class RealCliInvocationSandboxTests
         Directory.Exists(tempDirectory.Path).ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public void DeleteDirectoryWithRetries_treats_directory_not_found_during_delete_as_success()
     {
         using var tempDirectory = new TemporaryDirectory();

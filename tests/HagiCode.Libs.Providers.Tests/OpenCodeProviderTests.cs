@@ -12,12 +12,12 @@ namespace HagiCode.Libs.Providers.Tests;
 
 // Copilot requests rewrite process-wide environment variables (including PATH), so classes that
 // spawn child processes must not run alongside them.
-[Collection("ProcessEnvironment")]
+[NonParallelizable]
 public sealed class OpenCodeProviderTests
 {
     private const string RealCliTestsEnvironmentVariable = "HAGICODE_REAL_CLI_TESTS";
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_uses_attach_runtime_and_normalizes_messages()
     {
         await using var server = await OpenCodeTestServer.StartAsync(
@@ -36,7 +36,7 @@ public sealed class OpenCodeProviderTests
         messages[1].Content.GetProperty("text").GetString().ShouldBe("pong");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_resumes_existing_attach_session()
     {
         var rememberedSecrets = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -87,7 +87,7 @@ public sealed class OpenCodeProviderTests
         resumedText.ShouldContain("BLUEPRINT-");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_falls_back_to_new_session_when_requested_session_cannot_be_resumed()
     {
         await using var server = await OpenCodeTestServer.StartAsync(
@@ -110,7 +110,7 @@ public sealed class OpenCodeProviderTests
         messages[0].Content.GetProperty("restarted").GetBoolean().ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_uses_attach_runtime_when_base_url_is_supplied()
     {
         await using var server = await OpenCodeTestServer.StartAsync(
@@ -130,7 +130,7 @@ public sealed class OpenCodeProviderTests
         server.CreateSessionCount.ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_uses_live_runtime_when_no_base_url_is_supplied()
     {
         await using var server = await OpenCodeTestServer.StartAsync(
@@ -157,7 +157,7 @@ public sealed class OpenCodeProviderTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_preserves_multiline_assistant_content()
     {
         const string multiline = "Paragraph one.\n\n- item one\n- item two\n\n```txt\nblock\n```";
@@ -175,7 +175,7 @@ public sealed class OpenCodeProviderTests
         messages[2].Content.GetProperty("text").GetString().ShouldBe(multiline);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_surfaces_diagnostic_when_response_has_no_text_content()
     {
         await using var server = await OpenCodeTestServer.StartAsync(
@@ -194,7 +194,7 @@ public sealed class OpenCodeProviderTests
         exception.Message.ShouldContain("response missing text");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_surfaces_prompt_failure_without_hidden_runtime_replay()
     {
         await using var server = await OpenCodeTestServer.StartAsync(
@@ -216,7 +216,7 @@ public sealed class OpenCodeProviderTests
         server.CreateSessionCount.ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_surfaces_session_creation_failure_without_hidden_runtime_replay()
     {
         await using var server = await OpenCodeTestServer.StartAsync(
@@ -238,7 +238,7 @@ public sealed class OpenCodeProviderTests
         server.PromptCount.ShouldBe(0);
     }
 
-    [Fact]
+    [Test]
     public async Task PingAsync_reports_success_and_version_when_runtime_is_healthy()
     {
         await using var server = await OpenCodeTestServer.StartAsync(
@@ -261,7 +261,7 @@ public sealed class OpenCodeProviderTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task PingAsync_returns_actionable_failure_when_executable_is_missing()
     {
         await using var provider = CreateProvider(new MissingExecutableResolver());
@@ -273,8 +273,8 @@ public sealed class OpenCodeProviderTests
         result.ErrorMessage.ShouldContain("not found");
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task PingAsync_can_probe_the_real_opencode_cli_when_opted_in()
     {
         if (!IsRealCliTestsEnabled())

@@ -8,7 +8,7 @@ namespace HagiCode.Libs.Providers.Tests;
 
 public sealed class CodexExecTests
 {
-    [Fact]
+    [Test]
     public void CreateStartInfo_redirects_streams_and_forces_utf8_without_bom()
     {
         var invocation = new CodexProcessInvocation(
@@ -39,7 +39,7 @@ public sealed class CodexExecTests
         startInfo.Environment["PATH"].ShouldBe("/tmp/runtime");
     }
 
-    [Fact]
+    [Test]
     public async Task ResumeThread_allows_same_thread_id_with_different_model_and_local_provider()
     {
         var runner = new RecordingCodexProcessRunner();

@@ -5,7 +5,7 @@ namespace HagiCode.Libs.Providers.Tests;
 
 public sealed class OpenCodeFixtureServerTests
 {
-    [Fact]
+    [Test]
     public async Task FixtureServer_supports_health_create_and_prompt_round_trip()
     {
         await using var fixture = await OpenCodeFixtureServer.StartAsync();
@@ -25,7 +25,7 @@ public sealed class OpenCodeFixtureServerTests
         response.GetTextContent().ShouldBe("READY");
     }
 
-    [Fact]
+    [Test]
     public async Task FixtureServer_can_emit_structured_empty_text_diagnostics()
     {
         await using var fixture = await OpenCodeFixtureServer.StartAsync(new OpenCodeFixtureServerOptions

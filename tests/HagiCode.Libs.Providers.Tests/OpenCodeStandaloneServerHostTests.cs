@@ -8,10 +8,10 @@ namespace HagiCode.Libs.Providers.Tests;
 
 // Copilot requests rewrite process-wide environment variables (including PATH), so classes that
 // spawn child processes must not run alongside them.
-[Collection("ProcessEnvironment")]
+[NonParallelizable]
 public sealed class OpenCodeStandaloneServerHostTests
 {
-    [Fact]
+    [Test]
     public async Task WarmupAsync_with_live_runtime_returns_ready_diagnostics()
     {
         await using var server = await HealthServer.StartAsync();
@@ -39,7 +39,7 @@ public sealed class OpenCodeStandaloneServerHostTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task AcquireAsync_concurrent_live_requests_collapse_to_one_runtime()
     {
         await using var server = await HealthServer.StartAsync();
@@ -68,7 +68,7 @@ public sealed class OpenCodeStandaloneServerHostTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task WarmupAsync_when_attach_health_probe_fails_returns_health_probe_stage()
     {
         var port = OpenCodeProcessLauncher.GetFreeTcpPort();
@@ -85,7 +85,7 @@ public sealed class OpenCodeStandaloneServerHostTests
         result.ErrorMessage.ShouldContain("health_probe");
     }
 
-    [Fact]
+    [Test]
     public async Task WarmupAsync_when_owned_runtime_executable_is_missing_returns_owned_runtime_failure()
     {
         await using var host = new OpenCodeStandaloneServerHost(new CliExecutableResolver());
@@ -108,7 +108,7 @@ public sealed class OpenCodeStandaloneServerHostTests
         result.DiagnosticOutput.ShouldContain(missingExecutablePath);
     }
 
-    [Fact]
+    [Test]
     public async Task AcquireAsync_when_owned_runtime_executable_is_missing_throws_lifecycle_exception()
     {
         await using var host = new OpenCodeStandaloneServerHost(new CliExecutableResolver());

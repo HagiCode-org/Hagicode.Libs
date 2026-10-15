@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Shouldly;
-using Xunit.Abstractions;
 using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Process;
 using HagiCode.Libs.Core.Transport;
@@ -22,15 +21,15 @@ namespace HagiCode.Libs.Providers.Tests;
 /// settings files, so the runs never touch the user's extensions or sessions: no session is persisted and the working
 /// directory is a scratch directory.
 /// </summary>
-public sealed class PiProviderRealCliUserQuestionTests(ITestOutputHelper output)
+public sealed class PiProviderRealCliUserQuestionTests
 {
     private const string SwitchVariable = "HAGICODE_LIBS_REAL_CLI_PI_USER_QUESTION";
     private const string ExecutableVariable = "HAGICODE_LIBS_REAL_CLI_PI_USER_QUESTION_EXECUTABLE";
     private const string ModelVariable = "HAGICODE_LIBS_REAL_CLI_PI_USER_QUESTION_MODEL";
     private static readonly TimeSpan RunTimeout = TimeSpan.FromSeconds(180);
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task A_multi_select_question_is_asked_answered_and_the_agent_receives_the_comma_joined_answer()
     {
         if (!IsEnabled())
@@ -77,8 +76,8 @@ public sealed class PiProviderRealCliUserQuestionTests(ITestOutputHelper output)
         run.AssertNoPiProcessLeft();
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task A_question_answered_after_more_than_sixty_seconds_continues_the_run()
     {
         if (!IsEnabled())
@@ -112,8 +111,8 @@ public sealed class PiProviderRealCliUserQuestionTests(ITestOutputHelper output)
         run.AssertNoPiProcessLeft();
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task Cancelling_while_a_question_is_pending_ends_the_run_and_leaves_no_pi_process()
     {
         if (!IsEnabled())
@@ -157,8 +156,8 @@ public sealed class PiProviderRealCliUserQuestionTests(ITestOutputHelper output)
             }
         };
 
-        var exception = await Record.ExceptionAsync(act);
-        output.WriteLine($"cancel took {cancelled.Elapsed.TotalMilliseconds:F0} ms; pi process stops requested: {manager.StopCalls}; pids: {string.Join(",", manager.Pids)}");
+        var exception = Assert.CatchAsync<OperationCanceledException>(act);
+        TestContext.Out.WriteLine($"cancel took {cancelled.Elapsed.TotalMilliseconds:F0} ms; pi process stops requested: {manager.StopCalls}; pids: {string.Join(",", manager.Pids)}");
 
         exception.ShouldBeAssignableTo<OperationCanceledException>();
         handlerToken.IsCancellationRequested.ShouldBeTrue();
@@ -168,8 +167,8 @@ public sealed class PiProviderRealCliUserQuestionTests(ITestOutputHelper output)
         cancelled.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(15));
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task A_user_extension_in_the_pi_home_still_works_its_dialogs_are_cancelled_and_questions_are_still_asked()
     {
         if (!IsEnabled())
@@ -206,8 +205,8 @@ public sealed class PiProviderRealCliUserQuestionTests(ITestOutputHelper output)
         run.AssertNoPiProcessLeft();
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task A_user_extension_that_registers_the_question_tool_makes_the_run_fall_back_to_print_mode()
     {
         if (!IsEnabled())
@@ -239,8 +238,8 @@ public sealed class PiProviderRealCliUserQuestionTests(ITestOutputHelper output)
         run.AssertNoPiProcessLeft();
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task A_large_question_payload_and_a_large_answer_travel_through_the_dialog()
     {
         if (!IsEnabled())
@@ -287,9 +286,9 @@ public sealed class PiProviderRealCliUserQuestionTests(ITestOutputHelper output)
         ILogger<PiProvider>? logger = null)
     {
         var executable = options.ExecutablePath!;
-        output.WriteLine($"pi executable: {executable}");
-        output.WriteLine($"pi version: {await ReadVersionAsync(executable)}");
-        output.WriteLine($"model: {options.Model ?? "(pi default)"}");
+        TestContext.Out.WriteLine($"pi executable: {executable}");
+        TestContext.Out.WriteLine($"pi version: {await ReadVersionAsync(executable)}");
+        TestContext.Out.WriteLine($"model: {options.Model ?? "(pi default)"}");
 
         var manager = new RecordingProcessManager();
         var provider = new PiProvider(new CliExecutableResolver(), manager, null, logger);
@@ -301,7 +300,7 @@ public sealed class PiProviderRealCliUserQuestionTests(ITestOutputHelper output)
         }
 
         var result = new RunResult(messages, manager);
-        output.WriteLine(result.Describe());
+        TestContext.Out.WriteLine(result.Describe());
         return result;
     }
 

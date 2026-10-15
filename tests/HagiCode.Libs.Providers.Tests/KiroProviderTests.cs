@@ -15,7 +15,7 @@ public sealed class KiroProviderTests
     private const string RealCliTestsEnvironmentVariable = "HAGICODE_REAL_CLI_TESTS";
     private static readonly string[] KiroExecutableCandidates = ["kiro-cli"];
 
-    [Fact]
+    [Test]
     public void BuildCommandArguments_includes_acp_and_appends_extra_arguments_once()
     {
         var provider = CreateProvider();
@@ -28,7 +28,7 @@ public sealed class KiroProviderTests
         arguments.ShouldBe(["acp", "--verbose", "--profile", "ci"]);
     }
 
-    [Fact]
+    [Test]
     public void BuildCommandArguments_trims_tokens_and_ignores_whitespace_only_entries()
     {
         var provider = CreateProvider();
@@ -41,7 +41,7 @@ public sealed class KiroProviderTests
         arguments.ShouldBe(["acp", "--profile", "ci smoke", "--verbose"]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_uses_custom_executable_and_streams_normalized_messages()
     {
         var provider = CreateProvider();
@@ -75,7 +75,7 @@ public sealed class KiroProviderTests
         messages.Select(static message => message.Type).ShouldBe(["session.started", "assistant", "terminal.completed"]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_performs_authentication_before_creating_a_session()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(
@@ -109,7 +109,7 @@ public sealed class KiroProviderTests
         provider.SessionClient.StartSessionCalls.ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_skips_bootstrap_for_informational_kiro_login_auth_method()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(
@@ -130,7 +130,7 @@ public sealed class KiroProviderTests
         provider.SessionClient.StartSessionCalls.ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_honors_explicit_bootstrap_method_and_payload_overrides()
     {
         var provider = CreateProvider();
@@ -157,7 +157,7 @@ public sealed class KiroProviderTests
         provider.SessionClient.BootstrapCalls[0].Parameters.GetProperty("methodInfo").GetProperty("token").GetString().ShouldBe("secret");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_uses_supplied_session_identifier_for_session_reuse()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(resumedSessionId: "session-resume"));
@@ -177,7 +177,7 @@ public sealed class KiroProviderTests
         messages.First().Type.ShouldBe("session.resumed");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_creates_fresh_session_client_for_each_execution()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient());
@@ -195,7 +195,7 @@ public sealed class KiroProviderTests
         provider.SessionClient.PromptCalls.ShouldBe(2);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_resumed_session_filters_non_streamed_replay_chunks_before_emitting_current_turn()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(
@@ -221,7 +221,7 @@ public sealed class KiroProviderTests
         assistantMessages.ShouldBe(["CURRENT-TURN"]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_falls_back_to_prompt_result_when_notification_loop_ends_via_internal_cancellation()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(emitNotifications: false, promptStopReason: "fallback"));
@@ -236,7 +236,7 @@ public sealed class KiroProviderTests
         messages[1].Content.GetProperty("text").GetString().ShouldBe("pong");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_falls_back_to_multiline_prompt_result_without_flattening_line_breaks()
     {
         const string multilineResult = "Paragraph one.\n\n- item one\n- item two\n\n```md\ncode fence\n```";
@@ -256,7 +256,7 @@ public sealed class KiroProviderTests
         messages[2].Content.GetProperty("text").GetString().ShouldBe(multilineResult);
     }
 
-    [Fact]
+    [Test]
     public async Task PingAsync_reports_initialize_details_when_bootstrap_succeeds()
     {
         var provider = CreateProvider();
@@ -271,7 +271,7 @@ public sealed class KiroProviderTests
         provider.SessionClient.BootstrapCalls.ShouldBeEmpty();
     }
 
-    [Fact]
+    [Test]
     public async Task PingAsync_skips_bootstrap_for_informational_kiro_login_auth_method()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(
@@ -290,7 +290,7 @@ public sealed class KiroProviderTests
         provider.SessionClient!.BootstrapCalls.ShouldBeEmpty();
     }
 
-    [Fact]
+    [Test]
     public async Task PingAsync_returns_failure_when_executable_is_missing()
     {
         var provider = CreateProvider(executableResolver: new MissingExecutableResolver());
@@ -302,7 +302,7 @@ public sealed class KiroProviderTests
         result.ErrorMessage.ShouldContain("not found");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_prefers_kiro_cli_when_both_candidates_are_resolvable()
     {
         var executableResolver = new SelectiveExecutableResolver(new Dictionary<string, string?>(StringComparer.Ordinal)
@@ -322,7 +322,7 @@ public sealed class KiroProviderTests
         executableResolver.ResolutionAttempts.ShouldNotContain("kiro");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_fails_with_guarded_fallback_diagnostic_when_only_generic_kiro_is_resolvable()
     {
         var executableResolver = new SelectiveExecutableResolver(new Dictionary<string, string?>(StringComparer.Ordinal)
@@ -344,7 +344,7 @@ public sealed class KiroProviderTests
         executableResolver.ResolutionAttempts.ShouldBe(["kiro-cli", "kiro"]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_rejects_explicit_generic_kiro_path()
     {
         var executableResolver = new SelectiveExecutableResolver(new Dictionary<string, string?>(StringComparer.Ordinal)
@@ -369,7 +369,7 @@ public sealed class KiroProviderTests
         exception.Message.ShouldContain("/resolved/kiro");
     }
 
-    [Fact]
+    [Test]
     public async Task PingAsync_returns_guarded_fallback_diagnostic_when_only_generic_kiro_is_resolvable()
     {
         var executableResolver = new SelectiveExecutableResolver(new Dictionary<string, string?>(StringComparer.Ordinal)
@@ -388,7 +388,7 @@ public sealed class KiroProviderTests
         provider.SessionClient.ShouldBeNull();
     }
 
-    [Fact]
+    [Test]
     public void IsAvailable_returns_false_when_only_generic_kiro_is_resolvable()
     {
         var executableResolver = new SelectiveExecutableResolver(new Dictionary<string, string?>(StringComparer.Ordinal)
@@ -401,7 +401,7 @@ public sealed class KiroProviderTests
         executableResolver.ResolutionAttempts.ShouldBe(["kiro-cli"]);
     }
 
-    [Fact]
+    [Test]
     public async Task PingAsync_returns_actionable_failure_when_authentication_is_required()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(
@@ -424,7 +424,7 @@ public sealed class KiroProviderTests
         provider.SessionClient!.BootstrapCalls.ShouldBeEmpty();
     }
 
-    [Fact]
+    [Test]
     public void NormalizeNotification_maps_prompt_completed_to_terminal_message()
     {
         var notification = new AcpNotification(
@@ -446,7 +446,7 @@ public sealed class KiroProviderTests
         messages[0].Content.GetProperty("session_id").GetString().ShouldBe("session-1");
     }
 
-    [Fact]
+    [Test]
     public void NormalizeNotification_maps_error_update_to_terminal_failure_message()
     {
         var notification = new AcpNotification(
@@ -468,7 +468,7 @@ public sealed class KiroProviderTests
         messages[0].Content.GetProperty("message").GetString().ShouldBe("bootstrap failed");
     }
 
-    [Fact]
+    [Test]
     public void NormalizeNotification_preserves_chunk_boundaries_without_inserting_spaces()
     {
         var notification = new AcpNotification(
@@ -494,7 +494,7 @@ public sealed class KiroProviderTests
         messages[0].Content.GetProperty("text").GetString().ShouldBe("BLUEPRINT-123");
     }
 
-    [Fact]
+    [Test]
     public void NormalizeNotification_preserves_space_only_and_newline_only_fragments()
     {
         var notification = new AcpNotification(
@@ -523,8 +523,8 @@ public sealed class KiroProviderTests
         messages[0].Content.GetProperty("text").GetString().ShouldBe("foo bar\n\nbaz");
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task PingAsync_can_validate_installed_kiro_cli_when_opted_in()
     {
         if (!IsRealCliTestsEnabled())

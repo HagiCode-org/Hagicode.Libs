@@ -25,7 +25,7 @@ public sealed class PiProviderUserQuestionTests
 
     // ---------------------------------------------------------------- default path regression guard (3.1)
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_without_a_handler_keeps_the_print_command_closes_stdin_and_completes_on_exit()
     {
         if (OperatingSystem.IsWindows())
@@ -56,7 +56,7 @@ public sealed class PiProviderUserQuestionTests
         messages.Select(static message => message.Type).ShouldBe(["session.started", "terminal.completed"]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_with_every_tool_disabled_ignores_the_handler_and_loads_no_extension()
     {
         var provider = new ScriptedProvider(new ScriptedPiProcess());
@@ -79,7 +79,7 @@ public sealed class PiProviderUserQuestionTests
 
     // ---------------------------------------------------------------- RPC command line (3.2)
 
-    [Fact]
+    [Test]
     public void BuildRpcCommandArguments_selects_rpc_mode_loads_the_extension_and_sends_no_prompt()
     {
         var provider = new ScriptedProvider(new ScriptedPiProcess());
@@ -131,9 +131,8 @@ public sealed class PiProviderUserQuestionTests
         arguments.ShouldNotContain("json");
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public void BuildRpcCommandArguments_differs_from_the_print_command_only_in_mode_extension_allowlist_and_prompt(bool restrictTools)
     {
         var provider = new ScriptedProvider(new ScriptedPiProcess());
@@ -175,7 +174,7 @@ public sealed class PiProviderUserQuestionTests
         rpc.ShouldBe(print);
     }
 
-    [Fact]
+    [Test]
     public void BuildRpcCommandArguments_adds_the_question_tool_to_an_allowlist_only_once_and_never_to_an_empty_one()
     {
         var provider = new ScriptedProvider(new ScriptedPiProcess());
@@ -189,7 +188,7 @@ public sealed class PiProviderUserQuestionTests
         blank.ShouldNotContain("--tools");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_starts_pi_in_rpc_mode_with_the_extracted_extension_and_sends_the_prompt_as_a_command()
     {
         var process = new ScriptedPiProcess();
@@ -216,9 +215,8 @@ public sealed class PiProviderUserQuestionTests
         process.Written.Select(ScriptedPiProcess.Parse).Select(static command => command.Type).Take(2).ShouldBe(["get_state", "prompt"]);
     }
 
-    [Theory]
-    [InlineData(0)]
-    [InlineData(-5)]
+    [TestCase(0)]
+    [TestCase(-5)]
     public async Task ExecuteAsync_rejects_a_non_positive_question_timeout_before_starting_a_process(int seconds)
     {
         var provider = new ScriptedProvider(new ScriptedPiProcess());
@@ -231,7 +229,7 @@ public sealed class PiProviderUserQuestionTests
         provider.PrintContext.ShouldBeNull();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_accepts_an_infinite_question_timeout()
     {
         var process = new ScriptedPiProcess();
@@ -246,7 +244,7 @@ public sealed class PiProviderUserQuestionTests
         messages.Last().Type.ShouldBe("terminal.completed");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_ignores_the_question_timeout_when_there_is_no_handler()
     {
         var provider = new ScriptedProvider(new ScriptedPiProcess());
@@ -259,7 +257,7 @@ public sealed class PiProviderUserQuestionTests
 
     // ---------------------------------------------------------------- session id and completion (3.3)
 
-    [Fact]
+    [Test]
     public async Task The_session_id_comes_from_get_state_and_is_reported_as_started()
     {
         var process = new ScriptedPiProcess();
@@ -275,7 +273,7 @@ public sealed class PiProviderUserQuestionTests
         messages.Count(static message => message.Type.StartsWith("session.", StringComparison.Ordinal)).ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public async Task A_requested_session_that_pi_reports_back_is_reported_as_resumed()
     {
         var process = new ScriptedPiProcess();
@@ -291,7 +289,7 @@ public sealed class PiProviderUserQuestionTests
         messages[0].Content.GetProperty("resumeMode").GetString().ShouldBe("resumed");
     }
 
-    [Fact]
+    [Test]
     public async Task A_requested_session_that_pi_does_not_report_back_is_reported_as_restarted()
     {
         var process = new ScriptedPiProcess();
@@ -306,7 +304,7 @@ public sealed class PiProviderUserQuestionTests
         messages[0].Content.GetProperty("resumeMode").GetString().ShouldBe("restarted");
     }
 
-    [Fact]
+    [Test]
     public async Task The_run_completes_on_agent_settled_then_closes_standard_input_and_waits_for_the_exit()
     {
         var process = new ScriptedPiProcess();
@@ -324,7 +322,7 @@ public sealed class PiProviderUserQuestionTests
         process.Disposed.ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public async Task A_process_that_does_not_exit_after_the_run_settled_is_stopped_and_the_run_still_completes()
     {
         var process = new ScriptedPiProcess { ExitOnInputClose = false };
@@ -337,7 +335,7 @@ public sealed class PiProviderUserQuestionTests
         process.Stopped.ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public async Task A_process_that_ends_before_the_run_settled_fails_with_its_exit_code_and_standard_error()
     {
         var process = new ScriptedPiProcess();
@@ -363,7 +361,7 @@ public sealed class PiProviderUserQuestionTests
         terminalText.ShouldContain("pi: out of memory");
     }
 
-    [Fact]
+    [Test]
     public async Task A_process_that_exits_with_code_zero_before_settling_is_not_reported_as_completed()
     {
         var process = new ScriptedPiProcess();
@@ -390,7 +388,7 @@ public sealed class PiProviderUserQuestionTests
         terminal.Content.GetProperty("session_id").GetString().ShouldBe("pi-session-fixture");
     }
 
-    [Fact]
+    [Test]
     public async Task A_rejected_prompt_becomes_a_terminal_failure_that_keeps_the_error_text_and_shuts_pi_down()
     {
         var process = new ScriptedPiProcess();
@@ -417,7 +415,7 @@ public sealed class PiProviderUserQuestionTests
         process.Stopped.ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task A_rejected_get_state_becomes_a_terminal_failure_without_sending_the_prompt()
     {
         var process = new ScriptedPiProcess();
@@ -439,7 +437,7 @@ public sealed class PiProviderUserQuestionTests
         process.Written.Select(ScriptedPiProcess.Parse).Select(static command => command.Type).ShouldNotContain("prompt");
     }
 
-    [Fact]
+    [Test]
     public async Task A_get_state_reply_without_a_session_id_becomes_a_terminal_failure()
     {
         var process = new ScriptedPiProcess();
@@ -456,7 +454,7 @@ public sealed class PiProviderUserQuestionTests
         messages.ShouldHaveSingleItem().Type.ShouldBe("terminal.failed");
     }
 
-    [Fact]
+    [Test]
     public async Task A_prompt_that_an_extension_consumed_ends_the_run_without_waiting_for_agent_settled()
     {
         var process = new ScriptedPiProcess();
@@ -478,7 +476,7 @@ public sealed class PiProviderUserQuestionTests
         process.InputClosed.ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public async Task A_model_failure_after_the_prompt_was_accepted_is_a_terminal_failure_with_the_error_text()
     {
         var process = new ScriptedPiProcess();
@@ -504,9 +502,8 @@ public sealed class PiProviderUserQuestionTests
         terminal.Content.GetProperty("stop_reason").GetString().ShouldBe("error");
     }
 
-    [Theory]
-    [InlineData(nameof(PiRpcCapture.SingleQuestion))]
-    [InlineData(nameof(PiRpcCapture.MultiSelectQuestion))]
+    [TestCase(nameof(PiRpcCapture.SingleQuestion))]
+    [TestCase(nameof(PiRpcCapture.MultiSelectQuestion))]
     public async Task Events_are_normalized_exactly_as_the_json_path_normalizes_them(string captureName)
     {
         var capture = captureName == nameof(PiRpcCapture.SingleQuestion) ? PiRpcCapture.SingleQuestion : PiRpcCapture.MultiSelectQuestion;
@@ -537,7 +534,7 @@ public sealed class PiProviderUserQuestionTests
         actual.Select(static message => message.Content.GetRawText()).ShouldBe(expected.Select(static message => message.Content.GetRawText()));
     }
 
-    [Fact]
+    [Test]
     public async Task The_question_tool_is_reported_as_an_ordinary_tool_lifecycle_next_to_the_question_message()
     {
         var process = new ScriptedPiProcess();
@@ -563,7 +560,7 @@ public sealed class PiProviderUserQuestionTests
 
     // ---------------------------------------------------------------- dialog routing and outcomes (3.4)
 
-    [Fact]
+    [Test]
     public async Task A_marked_dialog_reaches_the_handler_with_every_field_and_the_caller_gets_the_question_message()
     {
         var process = new ScriptedPiProcess();
@@ -593,7 +590,7 @@ public sealed class PiProviderUserQuestionTests
         parsed.ShouldBe(request, new PiUserInputRequestComparer());
     }
 
-    [Fact]
+    [Test]
     public async Task Output_keeps_streaming_while_a_question_is_open()
     {
         var process = new ScriptedPiProcess();
@@ -635,7 +632,7 @@ public sealed class PiProviderUserQuestionTests
         process.Written.Select(ScriptedPiProcess.Parse).Count(static command => command.Type == "extension_ui_response").ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public async Task Foreign_dialogs_are_cancelled_and_fire_and_forget_requests_get_no_response()
     {
         var process = new ScriptedPiProcess();
@@ -679,7 +676,7 @@ public sealed class PiProviderUserQuestionTests
         written.ShouldBe(["get_state", "prompt", .. Enumerable.Repeat("extension_ui_response", 5)]);
     }
 
-    [Fact]
+    [Test]
     public async Task A_dialog_with_a_marker_of_another_wire_version_is_not_a_question()
     {
         var process = new ScriptedPiProcess();
@@ -712,10 +709,9 @@ public sealed class PiProviderUserQuestionTests
         Timeout
     }
 
-    [Theory]
-    [InlineData(Outcome.HandlerThrows)]
-    [InlineData(Outcome.NullAnswer)]
-    [InlineData(Outcome.Timeout)]
+    [TestCase(Outcome.HandlerThrows)]
+    [TestCase(Outcome.NullAnswer)]
+    [TestCase(Outcome.Timeout)]
     public async Task A_question_without_an_answer_is_cancelled_exactly_once_and_the_run_continues_to_its_result(Outcome outcome)
     {
         var process = new ScriptedPiProcess();
@@ -747,7 +743,7 @@ public sealed class PiProviderUserQuestionTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task An_answered_question_is_answered_exactly_once_with_the_answers_as_the_dialog_value()
     {
         var process = new ScriptedPiProcess();
@@ -762,7 +758,7 @@ public sealed class PiProviderUserQuestionTests
         value.GetProperty("answers").GetProperty(SingleQuestionText).GetString().ShouldBe("Blue");
     }
 
-    [Fact]
+    [Test]
     public async Task A_multi_select_answer_is_one_string_with_the_values_joined_by_a_comma_and_a_space()
     {
         var process = new ScriptedPiProcess();
@@ -779,7 +775,7 @@ public sealed class PiProviderUserQuestionTests
         response.Root.GetProperty("value").GetString().ShouldBe("""{"answers":{"Which features do you want?":"Dark theme, Mobile layout"}}""");
     }
 
-    [Fact]
+    [Test]
     public async Task A_free_text_answer_that_matches_no_option_is_passed_through_unchanged_on_one_line()
     {
         const string FreeText = "Green, \"with quotes\"\nsecond line \u2028 and 界 \\ backslash";
@@ -797,7 +793,7 @@ public sealed class PiProviderUserQuestionTests
         value.GetProperty("answers").GetProperty(SingleQuestionText).GetString().ShouldBe(FreeText);
     }
 
-    [Fact]
+    [Test]
     public async Task A_dialog_request_that_repeats_an_open_dialog_id_is_ignored()
     {
         var process = new ScriptedPiProcess();
@@ -827,7 +823,7 @@ public sealed class PiProviderUserQuestionTests
 
     // ---------------------------------------------------------------- cancellation (3.5)
 
-    [Fact]
+    [Test]
     public async Task Cancelling_while_a_question_is_open_dismisses_the_dialog_aborts_the_run_and_ends_the_process()
     {
         var process = new ScriptedPiProcess();
@@ -872,7 +868,7 @@ public sealed class PiProviderUserQuestionTests
         process.Disposed.ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public async Task Cancelling_a_run_that_has_no_open_dialog_aborts_it_and_ends_the_process()
     {
         var process = new ScriptedPiProcess();
@@ -908,7 +904,7 @@ public sealed class PiProviderUserQuestionTests
         process.HasExited.ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public async Task Cancelling_stops_a_process_that_does_not_exit_after_the_abort_and_still_surfaces_the_cancellation()
     {
         var process = new ScriptedPiProcess { ExitOnInputClose = false };
@@ -938,7 +934,7 @@ public sealed class PiProviderUserQuestionTests
         process.HasExited.ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public async Task A_consumer_that_stops_enumerating_aborts_the_run_and_ends_the_process()
     {
         var process = new ScriptedPiProcess();
@@ -959,7 +955,7 @@ public sealed class PiProviderUserQuestionTests
 
     // ---------------------------------------------------------------- duplicate tool name (1.2, 2.8)
 
-    [Fact]
+    [Test]
     public async Task A_user_extension_that_registers_the_question_tool_makes_the_run_fall_back_to_the_print_path()
     {
         var process = new ScriptedPiProcess();
@@ -978,7 +974,7 @@ public sealed class PiProviderUserQuestionTests
         logger.Entries[0].Message.ShouldContain("conflicts with");
     }
 
-    [Fact]
+    [Test]
     public async Task A_startup_failure_that_is_not_the_tool_conflict_is_reported_not_retried()
     {
         var process = new ScriptedPiProcess();
@@ -996,7 +992,7 @@ public sealed class PiProviderUserQuestionTests
         terminal.Content.GetProperty("exit_code").GetInt32().ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public async Task The_tool_conflict_text_after_pi_started_talking_is_a_failure_not_a_fallback()
     {
         var process = new ScriptedPiProcess();
@@ -1018,7 +1014,7 @@ public sealed class PiProviderUserQuestionTests
 
     // ---------------------------------------------------------------- extension extraction (2.5, 3.5)
 
-    [Fact]
+    [Test]
     public void The_extension_is_embedded_and_names_the_tool_and_the_wire_marker_the_provider_expects()
     {
         using var directory = new ScratchDirectory();
@@ -1032,7 +1028,7 @@ public sealed class PiProviderUserQuestionTests
         source.ShouldContain("answers");
     }
 
-    [Fact]
+    [Test]
     public void Extraction_writes_to_a_directory_named_after_the_content_hash()
     {
         using var directory = new ScratchDirectory();
@@ -1045,7 +1041,7 @@ public sealed class PiProviderUserQuestionTests
         Directory.GetFiles(Path.GetDirectoryName(path)!).ShouldBe([path]);
     }
 
-    [Fact]
+    [Test]
     public void Extraction_is_idempotent_and_leaves_an_intact_file_alone()
     {
         using var directory = new ScratchDirectory();
@@ -1058,7 +1054,7 @@ public sealed class PiProviderUserQuestionTests
         File.GetLastWriteTimeUtc(path).ShouldBe(new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc));
     }
 
-    [Fact]
+    [Test]
     public void Extraction_restores_a_missing_or_damaged_file()
     {
         using var directory = new ScratchDirectory();
@@ -1074,7 +1070,7 @@ public sealed class PiProviderUserQuestionTests
         File.ReadAllBytes(path).ShouldBe(original);
     }
 
-    [Fact]
+    [Test]
     public async Task Concurrent_extraction_agrees_on_one_complete_file_and_leaves_nothing_behind()
     {
         using var directory = new ScratchDirectory();
@@ -1090,7 +1086,7 @@ public sealed class PiProviderUserQuestionTests
 
     // ---------------------------------------------------------------- a real process (the default IPiRpcProcess)
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_runs_the_rpc_conversation_over_a_real_process()
     {
         if (OperatingSystem.IsWindows())
@@ -1181,10 +1177,11 @@ public sealed class PiProviderUserQuestionTests
         return messages;
     }
 
-    private static async Task AssertCanceledAsync(Task run)
+    private static Task AssertCanceledAsync(Task run)
     {
-        var exception = await Record.ExceptionAsync(() => run.WaitAsync(TestTimeout));
+        var exception = Assert.CatchAsync<OperationCanceledException>(() => run.WaitAsync(TestTimeout));
         exception.ShouldBeAssignableTo<OperationCanceledException>();
+        return Task.CompletedTask;
     }
 
     private static async Task<CliMessage> ReadUntilAsync(ChannelReader<CliMessage> reader, Func<CliMessage, bool> predicate)

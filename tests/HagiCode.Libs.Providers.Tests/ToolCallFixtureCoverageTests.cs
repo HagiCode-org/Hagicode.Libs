@@ -5,7 +5,7 @@ namespace HagiCode.Libs.Providers.Tests;
 
 public sealed class ToolCallFixtureCoverageTests
 {
-    [Fact]
+    [Test]
     public async Task Every_registry_provider_that_emits_tool_calls_has_a_toolcalls_fixture()
     {
         var services = new ServiceCollection();

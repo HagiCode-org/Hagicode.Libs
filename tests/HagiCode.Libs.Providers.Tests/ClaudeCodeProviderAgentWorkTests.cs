@@ -10,7 +10,7 @@ namespace HagiCode.Libs.Providers.Tests;
 // in ClaudeAgentWorkCapture are real CLI output; the synthetic ones cover shapes that are hard to provoke on demand.
 public sealed partial class ClaudeCodeProviderTests
 {
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_snapshots_a_subagent_from_running_to_completed_with_its_summary()
     {
         var messages = await CollectAsync(CreateProvider(messageBatches: [ClaudeAgentWorkCapture.ForegroundRequestedSubagent]));
@@ -41,7 +41,7 @@ public sealed partial class ClaudeCodeProviderTests
         snapshots[1].Sequence.ShouldBeGreaterThan(snapshots[0].Sequence);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_snapshots_a_monitor_with_its_description_command_and_deadline()
     {
         var messages = await CollectAsync(CreateProvider(messageBatches: [ClaudeAgentWorkCapture.MonitorToolCall]));
@@ -61,7 +61,7 @@ public sealed partial class ClaudeCodeProviderTests
         last.BlocksCompletion.ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_truncates_a_long_monitor_command_and_applies_the_cli_default_timeout()
     {
         var longCommand = new string('x', 500);
@@ -87,7 +87,7 @@ public sealed partial class ClaudeCodeProviderTests
         monitor.DeadlineAt.ShouldBe(monitor.StartedAt + TimeSpan.FromMinutes(5));
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_lists_a_timed_background_bash_as_a_monitor_and_keeps_the_provider_stop_reason()
     {
         var messages = await CollectAsync(CreateProvider(messageBatches: [ClaudeAgentWorkCapture.TimedBackgroundBashStopped]));
@@ -106,7 +106,7 @@ public sealed partial class ClaudeCodeProviderTests
         stopped.BlocksCompletion.ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_lists_a_background_bash_without_a_timeout_that_the_host_waits_for()
     {
         var messages = await CollectAsync(CreateProvider(messageBatches: [ClaudeAgentWorkCapture.UnboundedBackgroundBash]));
@@ -121,7 +121,7 @@ public sealed partial class ClaudeCodeProviderTests
         command.BlocksCompletion.ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_does_not_list_a_background_bash_without_a_timeout_when_the_cap_is_zero()
     {
         var messages = await CollectAsync(
@@ -136,7 +136,7 @@ public sealed partial class ClaudeCodeProviderTests
         Snapshots(messages).ShouldBeEmpty();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_reports_a_failed_background_command_as_failed()
     {
         var messages = await CollectAsync(CreateProvider(messageBatches: [ClaudeAgentWorkCapture.FailedBackgroundBash]));
@@ -144,7 +144,7 @@ public sealed partial class ClaudeCodeProviderTests
         Snapshots(messages)[^1].Items.ShouldHaveSingleItem().Status.ShouldBe(AgentWorkStatuses.Failed);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_nests_work_owned_by_a_subagent_under_it_and_reopens_a_resumed_subagent()
     {
         var messages = await CollectAsync(CreateProvider(messageBatches: [ClaudeAgentWorkCapture.BackgroundSubagentWithOwnedBash]));
@@ -186,7 +186,7 @@ public sealed partial class ClaudeCodeProviderTests
         final.Items[0].Usage!.TotalTokens.ShouldBe(16031);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_titles_a_subagent_from_the_launching_tool_call_when_the_start_event_has_no_description()
     {
         var provider = CreateProvider(messageBatches:
@@ -209,7 +209,7 @@ public sealed partial class ClaudeCodeProviderTests
         item.Title.ShouldBe("Review the migration plan");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_prefers_the_start_event_description_for_a_subagent_title()
     {
         var provider = CreateProvider(messageBatches:
@@ -237,7 +237,7 @@ public sealed partial class ClaudeCodeProviderTests
         Snapshots(await CollectAsync(provider))[0].Items.ShouldHaveSingleItem().Title.ShouldBe("from the start event");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_yields_a_snapshot_directly_after_the_message_that_caused_it()
     {
         var messages = await CollectAsync(CreateProvider(messageBatches: [ClaudeAgentWorkCapture.ForegroundRequestedSubagent]));
@@ -256,7 +256,7 @@ public sealed partial class ClaudeCodeProviderTests
         types.IndexOf(AgentWorkSnapshot.MessageType).ShouldBe(types.IndexOf("system:task_started") + 1);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_yields_no_snapshot_for_messages_that_change_nothing()
     {
         var provider = CreateProvider(messageBatches:
@@ -275,7 +275,7 @@ public sealed partial class ClaudeCodeProviderTests
         DescribeTypes(messages).ShouldBe(["system:init", "assistant", "system:task_progress", "result"]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_yields_at_most_one_snapshot_for_one_message()
     {
         // One task list drops two items at once: that is a single observed message and a single snapshot.
@@ -320,7 +320,7 @@ public sealed partial class ClaudeCodeProviderTests
         final.Items.ShouldAllBe(static item => item.Status == AgentWorkStatuses.Stopped && !item.BlocksCompletion);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_stops_an_item_that_vanishes_from_the_task_list_only_when_it_was_listed_before()
     {
         var provider = CreateProvider(messageBatches:
@@ -354,7 +354,7 @@ public sealed partial class ClaudeCodeProviderTests
         final.Items[0].BlocksCompletion.ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_creates_no_item_for_the_notifications_a_resumed_session_replays()
     {
         // Real resume order: a stopped notification for a task of the old session, an injected empty turn, then the
@@ -373,7 +373,7 @@ public sealed partial class ClaudeCodeProviderTests
         DescribeTypes(messages)[0].ShouldBe("system:task_notification");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_creates_no_item_for_a_notification_of_a_task_that_never_started()
     {
         var provider = CreateProvider(messageBatches:
@@ -392,7 +392,7 @@ public sealed partial class ClaudeCodeProviderTests
         Snapshots(await CollectAsync(provider)).ShouldBeEmpty();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_reports_an_unrecognized_terminal_status_as_stopped_with_the_provider_text()
     {
         var provider = CreateProvider(messageBatches:
@@ -413,7 +413,7 @@ public sealed partial class ClaudeCodeProviderTests
         item.Summary.ShouldBe("exploded");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_caps_a_very_long_summary()
     {
         var provider = CreateProvider(messageBatches:
@@ -436,7 +436,7 @@ public sealed partial class ClaudeCodeProviderTests
         item.Summary.ShouldEndWith("…");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_snapshot_messages_carry_only_the_contract_members_and_no_raw_cli_json()
     {
         var messages = await CollectAsync(CreateProvider(messageBatches: [ClaudeAgentWorkCapture.BackgroundSubagentWithOwnedBash]));
@@ -456,7 +456,7 @@ public sealed partial class ClaudeCodeProviderTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_ends_after_the_same_message_and_yields_the_same_other_messages_as_without_snapshots()
     {
         var capture = ClaudeAgentWorkCapture.BackgroundSubagentWithOwnedBash.ToList();

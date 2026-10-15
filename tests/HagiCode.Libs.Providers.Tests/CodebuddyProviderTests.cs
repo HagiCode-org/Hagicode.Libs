@@ -15,7 +15,7 @@ public sealed class CodebuddyProviderTests
     private const string RealCliTestsEnvironmentVariable = "HAGICODE_REAL_CLI_TESTS";
     private static readonly string[] CodebuddyExecutableCandidates = ["codebuddy", "codebuddy-cli"];
 
-    [Fact]
+    [Test]
     public void BuildCommandArguments_includes_acp_and_appends_extra_arguments_once()
     {
         var provider = CreateProvider();
@@ -28,7 +28,7 @@ public sealed class CodebuddyProviderTests
         arguments.ShouldBe(["--acp", "--verbose", "--profile", "ci"]);
     }
 
-    [Fact]
+    [Test]
     public void BuildCommandArguments_trims_tokens_and_ignores_whitespace_only_entries()
     {
         var provider = CreateProvider();
@@ -41,7 +41,7 @@ public sealed class CodebuddyProviderTests
         arguments.ShouldBe(["--acp", "--profile", "ci smoke", "--verbose"]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_uses_custom_executable_and_streams_normalized_messages()
     {
         var provider = CreateProvider();
@@ -75,7 +75,7 @@ public sealed class CodebuddyProviderTests
         messages.Select(static message => message.Type).ShouldBe(["session.started", "assistant", "terminal.completed"]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_applies_mode_when_requested()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient());
@@ -93,7 +93,7 @@ public sealed class CodebuddyProviderTests
         provider.SessionClient.LastModeId.ShouldBe("plan");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_uses_supplied_session_identifier_for_session_reuse()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(resumedSessionId: "session-resume"));
@@ -113,7 +113,7 @@ public sealed class CodebuddyProviderTests
         messages.First().Type.ShouldBe("session.resumed");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_suppresses_replayed_assistant_chunks_until_replay_ends()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(
@@ -135,7 +135,7 @@ public sealed class CodebuddyProviderTests
             .ShouldBe(["new answer"]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_creates_fresh_session_client_for_each_execution()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient());
@@ -162,7 +162,7 @@ public sealed class CodebuddyProviderTests
         secondMessages.First().Type.ShouldBe("session.resumed");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_falls_back_to_prompt_result_when_notification_loop_ends_via_internal_cancellation()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(emitNotifications: false, promptStopReason: "fallback"));
@@ -177,7 +177,7 @@ public sealed class CodebuddyProviderTests
         messages[1].Content.GetProperty("text").GetString().ShouldBe("pong");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_prefers_prompt_result_error_over_success_notification()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(promptIsError: true));
@@ -192,7 +192,7 @@ public sealed class CodebuddyProviderTests
         messages.Last().Content.GetProperty("text").GetString().ShouldBe("429 hy3 quota exceeded");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_emits_terminal_failed_with_diagnostic_when_completion_produces_no_text()
     {
         const string diagnostic = "429 您的使用量已超出频率限制，请稍后再试";
@@ -212,7 +212,7 @@ public sealed class CodebuddyProviderTests
         messages.Last().Content.GetProperty("message").GetString().ShouldBe(diagnostic);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_falls_back_to_multiline_prompt_result_without_flattening_line_breaks()
     {
         const string multilineResult = "Paragraph one.\n\n- item one\n- item two\n\n```md\ncode fence\n```";
@@ -232,7 +232,7 @@ public sealed class CodebuddyProviderTests
         messages[2].Content.GetProperty("text").GetString().ShouldBe(multilineResult);
     }
 
-    [Fact]
+    [Test]
     public async Task PingAsync_reports_initialize_details_when_bootstrap_succeeds()
     {
         var provider = CreateProvider();
@@ -245,7 +245,7 @@ public sealed class CodebuddyProviderTests
         provider.SessionClient!.InitializeCalls.ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public async Task PingAsync_returns_failure_when_executable_is_missing()
     {
         var provider = CreateProvider(executableResolver: new MissingExecutableResolver());
@@ -257,7 +257,7 @@ public sealed class CodebuddyProviderTests
         result.ErrorMessage.ShouldContain("not found");
     }
 
-    [Fact]
+    [Test]
     public void NormalizeNotification_maps_prompt_completed_to_terminal_message()
     {
         var notification = new AcpNotification(
@@ -279,7 +279,7 @@ public sealed class CodebuddyProviderTests
         messages[0].Content.GetProperty("session_id").GetString().ShouldBe("session-1");
     }
 
-    [Fact]
+    [Test]
     public void CreateTerminalMessage_maps_error_result_to_failed_message_with_error_text()
     {
         var promptResult = JsonSerializer.SerializeToElement(new
@@ -295,7 +295,7 @@ public sealed class CodebuddyProviderTests
         message.Content.GetProperty("text").GetString().ShouldBe("429 hy3 quota exceeded");
     }
 
-    [Fact]
+    [Test]
     public void CreateTerminalMessage_maps_nested_error_result_to_failed_message()
     {
         var promptResult = JsonSerializer.SerializeToElement(new
@@ -315,7 +315,7 @@ public sealed class CodebuddyProviderTests
         message.Content.GetProperty("text").GetString().ShouldBe("429 hy3 quota exceeded");
     }
 
-    [Fact]
+    [Test]
     public void NormalizeNotification_maps_prompt_completed_result_error_to_failed_message()
     {
         var notification = new AcpNotification(
@@ -342,7 +342,7 @@ public sealed class CodebuddyProviderTests
         message.Content.GetProperty("text").GetString().ShouldBe("429 hy3 quota exceeded");
     }
 
-    [Fact]
+    [Test]
     public void NormalizeNotification_decodes_json_encoded_content_string()
     {
         var notification = new AcpNotification(
@@ -364,7 +364,7 @@ public sealed class CodebuddyProviderTests
         messages[0].Content.GetProperty("text").GetString().ShouldBe("Hello");
     }
 
-    [Fact]
+    [Test]
     public void NormalizeNotification_decodes_json_encoded_content_string_with_multiple_blocks()
     {
         var notification = new AcpNotification(
@@ -386,7 +386,7 @@ public sealed class CodebuddyProviderTests
         messages[0].Content.GetProperty("text").GetString().ShouldBe("BLUEPRINT-123");
     }
 
-    [Fact]
+    [Test]
     public void NormalizeNotification_preserves_plain_text_content_string()
     {
         var notification = new AcpNotification(
@@ -408,7 +408,7 @@ public sealed class CodebuddyProviderTests
         messages[0].Content.GetProperty("text").GetString().ShouldBe("Hello");
     }
 
-    [Fact]
+    [Test]
     public void NormalizeNotification_preserves_chunk_boundaries_without_inserting_spaces()
     {
         var notification = new AcpNotification(
@@ -434,7 +434,7 @@ public sealed class CodebuddyProviderTests
         messages[0].Content.GetProperty("text").GetString().ShouldBe("BLUEPRINT-123");
     }
 
-    [Fact]
+    [Test]
     public void NormalizeNotification_preserves_space_only_and_newline_only_fragments()
     {
         var notification = new AcpNotification(
@@ -463,8 +463,8 @@ public sealed class CodebuddyProviderTests
         messages[0].Content.GetProperty("text").GetString().ShouldBe("foo bar\n\nbaz");
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task PingAsync_can_validate_installed_codebuddy_cli_when_opted_in()
     {
         if (!IsRealCliTestsEnabled())

@@ -12,7 +12,7 @@ public sealed class ReasonixFixtureHygieneTests
 {
     private const string PlaceholderCommandDescription = "placeholder";
 
-    [Fact]
+    [Test]
     public void Committed_reasonix_fixtures_pass_hygiene_checks()
     {
         var violations = ReasonixFixtureHygiene.Scan(ReasonixFixtureHygiene.CommittedFixtureDirectory);
@@ -20,7 +20,7 @@ public sealed class ReasonixFixtureHygieneTests
         violations.ShouldBeEmpty();
     }
 
-    [Fact]
+    [Test]
     public void Committed_reasonix_fixtures_include_every_required_transcript()
     {
         var expected = new[]
@@ -38,10 +38,9 @@ public sealed class ReasonixFixtureHygieneTests
         }
     }
 
-    [Theory]
-    [InlineData("home-directory path", "{\"dir\":\"in\",\"msg\":{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{\"sessionId\":\"fixture-session-01\",\"update\":{\"sessionUpdate\":\"agent_message_chunk\",\"content\":{\"type\":\"text\",\"text\":\"/home/alice/project\"}}}}}")]
-    [InlineData("non-placeholder command description", "{\"dir\":\"in\",\"msg\":{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{\"sessionId\":\"fixture-session-01\",\"update\":{\"sessionUpdate\":\"available_commands_update\",\"availableCommands\":[{\"name\":\"fixture-command-01\",\"description\":\"Use this skill whenever the user asks about spreadsheets.\"}]}}}}")]
-    [InlineData("unredacted session id", "{\"dir\":\"in\",\"msg\":{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{\"sessionId\":\"3f9c1a2e-7b4d-4c8e-9a1f-2d6e8b0c4a57\",\"update\":{\"sessionUpdate\":\"agent_message_chunk\",\"content\":{\"type\":\"text\",\"text\":\"ok\"}}}}}")]
+    [TestCase("home-directory path", "{\"dir\":\"in\",\"msg\":{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{\"sessionId\":\"fixture-session-01\",\"update\":{\"sessionUpdate\":\"agent_message_chunk\",\"content\":{\"type\":\"text\",\"text\":\"/home/alice/project\"}}}}}")]
+    [TestCase("non-placeholder command description", "{\"dir\":\"in\",\"msg\":{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{\"sessionId\":\"fixture-session-01\",\"update\":{\"sessionUpdate\":\"available_commands_update\",\"availableCommands\":[{\"name\":\"fixture-command-01\",\"description\":\"Use this skill whenever the user asks about spreadsheets.\"}]}}}}")]
+    [TestCase("unredacted session id", "{\"dir\":\"in\",\"msg\":{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{\"sessionId\":\"3f9c1a2e-7b4d-4c8e-9a1f-2d6e8b0c4a57\",\"update\":{\"sessionUpdate\":\"agent_message_chunk\",\"content\":{\"type\":\"text\",\"text\":\"ok\"}}}}}")]
     public void Hygiene_check_reports_an_injected_violation_in_a_temporary_copy(string rule, string injectedLine)
     {
         using var copy = new TemporaryFixtureCopy();

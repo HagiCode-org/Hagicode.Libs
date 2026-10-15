@@ -16,7 +16,7 @@ public sealed class DshProviderTests
     private const string ConfiguredProvider = "deepseek-official";
     private const string ConfiguredModel = "deepseek-v4-flash";
 
-    [Fact]
+    [Test]
     public void Name_is_dsh_and_availability_follows_executable_resolution()
     {
         CreateProvider().Name.ShouldBe("dsh");
@@ -24,7 +24,7 @@ public sealed class DshProviderTests
         CreateProvider(executableResolver: new MissingExecutableResolver()).IsAvailable.ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public void BuildCommandArguments_starts_with_managed_acp_profile_and_trims_extra_arguments()
     {
         var provider = CreateProvider();
@@ -36,7 +36,7 @@ public sealed class DshProviderTests
         }).ShouldBe(["--profile", "acp", "--verbose", "--workspace", "/tmp/ws"]);
     }
 
-    [Fact]
+    [Test]
     public void BuildCommandArguments_rejects_caller_supplied_profile_overrides()
     {
         var provider = CreateProvider();
@@ -51,7 +51,7 @@ public sealed class DshProviderTests
         });
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_rejects_blank_prompt_before_launch()
     {
         var provider = CreateProvider();
@@ -65,7 +65,7 @@ public sealed class DshProviderTests
         provider.SessionClient.ShouldBeNull();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_throws_when_executable_is_missing()
     {
         var provider = CreateProvider(executableResolver: new MissingExecutableResolver());
@@ -76,7 +76,7 @@ public sealed class DshProviderTests
         });
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_launches_managed_profile_and_streams_session_and_prompt_messages()
     {
         var provider = CreateProvider();
@@ -111,7 +111,7 @@ public sealed class DshProviderTests
         messages.Select(static message => message.Type).ShouldBe(["session.started", "assistant", "terminal.completed"]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_forwards_model_only_when_supplied()
     {
         var provider = CreateProvider();
@@ -123,7 +123,7 @@ public sealed class DshProviderTests
         provider.SessionClient!.LastModel.ShouldBe(ConfiguredModel);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_resumes_supplied_session_identifier()
     {
         var provider = CreateProvider();
@@ -134,7 +134,7 @@ public sealed class DshProviderTests
         messages.First().Type.ShouldBe("session.resumed");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_forwards_environment_only_when_supplied()
     {
         var provider = CreateProvider();
@@ -159,7 +159,7 @@ public sealed class DshProviderTests
         environment["PATH"].ShouldBeNull();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_reports_startup_failure_as_terminal_failure_with_diagnostics()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(
@@ -174,7 +174,7 @@ public sealed class DshProviderTests
         message.ShouldContain("stderr: DSH_HOME is not set");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_redacts_caller_environment_values_from_failure_diagnostics()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(
@@ -193,7 +193,7 @@ public sealed class DshProviderTests
         message.ShouldNotContain("dsh-secret-value");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_reports_startup_timeout_as_terminal_failure()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(hangOnInitialize: true));
@@ -206,7 +206,7 @@ public sealed class DshProviderTests
         messages[0].Content.GetProperty("message").GetString()!.ShouldContain("timed out");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_reports_stream_failure_as_terminal_failure()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(receiveException: new IOException("socket closed")));
@@ -217,7 +217,7 @@ public sealed class DshProviderTests
         messages[1].Content.GetProperty("message").GetString()!.ShouldContain("dsh stream ended unexpectedly: socket closed");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_maps_failed_prompt_stop_reason_to_terminal_failure()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(promptStopReason: "error", emitNotifications: false));
@@ -227,7 +227,7 @@ public sealed class DshProviderTests
         messages.Select(static message => message.Type).ShouldBe(["session.started", "terminal.failed"]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_yields_terminal_failure_for_binary_that_does_not_identify_as_dsh_without_starting_acp()
     {
         var sessionClient = new FakeAcpSessionClient();
@@ -250,7 +250,7 @@ public sealed class DshProviderTests
         provider.LastStartContext.ShouldBeNull();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_reaches_acp_when_help_banner_identifies_dsh()
     {
         var sessionClient = new FakeAcpSessionClient();
@@ -268,7 +268,7 @@ public sealed class DshProviderTests
         sessionClient.StartSessionCalls.ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public async Task PingAsync_reports_version_after_identity_and_acp_handshake()
     {
         var provider = CreateProvider(processManager: new StubProbeProcessManager(
@@ -286,7 +286,7 @@ public sealed class DshProviderTests
         provider.SessionClient.StartSessionCalls.ShouldBe(0);
     }
 
-    [Fact]
+    [Test]
     public async Task PingAsync_rejects_binary_that_does_not_identify_as_dsh_without_starting_acp()
     {
         var provider = CreateProvider(processManager: new StubProbeProcessManager(
@@ -300,7 +300,7 @@ public sealed class DshProviderTests
         provider.SessionClient.ShouldBeNull();
     }
 
-    [Fact]
+    [Test]
     public async Task PingAsync_reports_help_timeout_without_starting_acp()
     {
         var provider = CreateProvider(processManager: new StubProbeProcessManager(
@@ -314,7 +314,7 @@ public sealed class DshProviderTests
         provider.SessionClient.ShouldBeNull();
     }
 
-    [Fact]
+    [Test]
     public async Task PingAsync_reports_missing_executable()
     {
         var provider = CreateProvider(executableResolver: new MissingExecutableResolver());
@@ -325,7 +325,7 @@ public sealed class DshProviderTests
         result.ErrorMessage!.ShouldContain("was not found");
     }
 
-    [Fact]
+    [Test]
     public async Task PingAsync_reports_version_failure()
     {
         var provider = CreateProvider(processManager: new StubProbeProcessManager(
@@ -338,7 +338,7 @@ public sealed class DshProviderTests
         result.ErrorMessage!.ShouldContain("did not report a version");
     }
 
-    [Fact]
+    [Test]
     public async Task PingAsync_reports_acp_handshake_failure()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(

@@ -7,7 +7,7 @@ namespace HagiCode.Libs.Providers.Tests;
 
 public sealed class ClaudeTurnDeliveryTests
 {
-    [Fact]
+    [Test]
     public void Accept_passes_messages_straight_through_when_no_prompt_is_awaited()
     {
         var delivery = new ClaudeTurnDelivery();
@@ -16,7 +16,7 @@ public sealed class ClaudeTurnDeliveryTests
         Describe(delivery.Accept(Message("result", new { result = "" }), false)).ShouldBe(["result"]);
     }
 
-    [Fact]
+    [Test]
     public void Accept_does_not_hide_a_turn_that_has_conversation_even_when_its_result_is_empty()
     {
         var delivery = new ClaudeTurnDelivery();
@@ -27,7 +27,7 @@ public sealed class ClaudeTurnDeliveryTests
         Describe(delivery.Accept(Message("result", new { result = "" }), true)).ShouldBe(["system", "assistant", "result"]);
     }
 
-    [Fact]
+    [Test]
     public void Accept_releases_an_injected_turn_that_ends_in_an_error_result()
     {
         var delivery = new ClaudeTurnDelivery();
@@ -38,7 +38,7 @@ public sealed class ClaudeTurnDeliveryTests
             .ShouldBe(["system", "result"]);
     }
 
-    [Fact]
+    [Test]
     public void Accept_delivers_a_non_turn_message_while_a_prompt_is_awaited()
     {
         var delivery = new ClaudeTurnDelivery();
@@ -47,7 +47,7 @@ public sealed class ClaudeTurnDeliveryTests
             .ShouldBe(["system"]);
     }
 
-    [Fact]
+    [Test]
     public void Accept_drops_the_injected_turn_and_releases_the_prompt_turn_once_it_is_replayed()
     {
         var delivery = new ClaudeTurnDelivery();
@@ -61,7 +61,7 @@ public sealed class ClaudeTurnDeliveryTests
         Describe(delivery.Accept(Message("result", new { result = "answer" }), false)).ShouldBe(["result"]);
     }
 
-    [Fact]
+    [Test]
     public void Drain_returns_a_turn_that_was_still_open_when_the_run_ended()
     {
         var delivery = new ClaudeTurnDelivery();

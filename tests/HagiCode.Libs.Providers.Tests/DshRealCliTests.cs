@@ -17,8 +17,8 @@ public sealed class DshRealCliTests
     private const string ToolCallTestProvider = "omniroute";
     private const string ToolCallTestModel = "claude/claude-haiku-5-5";
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task PingAsync_real_cli_validates_dsh_identity_when_opted_in()
     {
         if (!IsRealCliTestsEnabled())
@@ -34,8 +34,8 @@ public sealed class DshRealCliTests
         result.Version.ShouldNotBeNullOrWhiteSpace();
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task ExecuteAsync_real_cli_prompt_returns_assistant_output_or_actionable_failure_when_opted_in()
     {
         if (!IsRealCliTestsEnabled())
@@ -92,8 +92,8 @@ public sealed class DshRealCliTests
         }
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task ExecuteAsync_real_cli_resumed_session_recalls_prior_secret_when_opted_in()
     {
         if (!IsRealCliTestsEnabled())
@@ -136,8 +136,8 @@ public sealed class DshRealCliTests
         }
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task ExecuteAsync_real_cli_fresh_session_does_not_recall_prior_secret_when_opted_in()
     {
         if (!IsRealCliTestsEnabled())
@@ -179,8 +179,8 @@ public sealed class DshRealCliTests
         }
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task ExecuteAsync_real_cli_tool_call_streams_started_and_completed_updates_when_opted_in()
     {
         if (!IsRealCliTestsEnabled())

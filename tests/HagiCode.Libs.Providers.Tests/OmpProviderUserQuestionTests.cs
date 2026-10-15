@@ -28,7 +28,7 @@ public sealed class OmpProviderUserQuestionTests
 
     // ---------------------------------------------------------------- default path regression guard (3.1)
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_without_a_handler_keeps_the_print_command_sends_no_rpc_command_closes_stdin_and_completes_on_exit()
     {
         if (OperatingSystem.IsWindows())
@@ -63,7 +63,7 @@ public sealed class OmpProviderUserQuestionTests
         messages.ShouldNotContain(static message => message.Type == OmpUserInputRequest.MessageType);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_with_every_tool_disabled_ignores_the_handler()
     {
         var provider = new ScriptedProvider(new ScriptedOmpProcess());
@@ -86,7 +86,7 @@ public sealed class OmpProviderUserQuestionTests
 
     // ---------------------------------------------------------------- RPC command line and handshake (3.2)
 
-    [Fact]
+    [Test]
     public void BuildRpcCommandArguments_selects_rpc_ui_mode_keeps_every_option_and_sends_no_prompt()
     {
         var provider = new ScriptedProvider(new ScriptedOmpProcess());
@@ -131,10 +131,9 @@ public sealed class OmpProviderUserQuestionTests
         arguments.ShouldNotContain("json");
     }
 
-    [Theory]
-    [InlineData(false, false)]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
+    [TestCase(false, false)]
+    [TestCase(true, false)]
+    [TestCase(false, true)]
     public void BuildRpcCommandArguments_differs_from_the_print_command_only_in_mode_allowlist_and_prompt(bool restrictTools, bool noSession)
     {
         var provider = new ScriptedProvider(new ScriptedOmpProcess());
@@ -173,7 +172,7 @@ public sealed class OmpProviderUserQuestionTests
         rpc.ShouldBe(print);
     }
 
-    [Fact]
+    [Test]
     public void BuildRpcCommandArguments_adds_the_question_tool_to_an_allowlist_only_once_and_never_to_an_empty_one()
     {
         var provider = new ScriptedProvider(new ScriptedOmpProcess());
@@ -185,7 +184,7 @@ public sealed class OmpProviderUserQuestionTests
         blank.ShouldNotContain("--tools");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_starts_omp_in_rpc_ui_mode_and_sends_the_prompt_as_a_command_after_the_handshake()
     {
         var process = new ScriptedOmpProcess();
@@ -219,7 +218,7 @@ public sealed class OmpProviderUserQuestionTests
         process.Log.IndexOf("write:prompt").ShouldBeGreaterThan(process.Log.IndexOf("emit:response:get_state"));
     }
 
-    [Fact]
+    [Test]
     public async Task Nothing_but_set_ask_dialog_is_written_until_omp_answers_it()
     {
         var process = new ScriptedOmpProcess();
@@ -239,9 +238,8 @@ public sealed class OmpProviderUserQuestionTests
         messages.Last().Type.ShouldBe("terminal.completed");
     }
 
-    [Theory]
-    [InlineData(0)]
-    [InlineData(-5)]
+    [TestCase(0)]
+    [TestCase(-5)]
     public async Task ExecuteAsync_rejects_a_non_positive_question_timeout_before_starting_a_process(int seconds)
     {
         var provider = new ScriptedProvider(new ScriptedOmpProcess());
@@ -254,7 +252,7 @@ public sealed class OmpProviderUserQuestionTests
         provider.PrintContext.ShouldBeNull();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_accepts_an_infinite_question_timeout()
     {
         var process = new ScriptedOmpProcess();
@@ -268,7 +266,7 @@ public sealed class OmpProviderUserQuestionTests
         messages.Last().Type.ShouldBe("terminal.completed");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_ignores_the_question_timeout_when_there_is_no_handler()
     {
         var provider = new ScriptedProvider(new ScriptedOmpProcess());
@@ -279,7 +277,7 @@ public sealed class OmpProviderUserQuestionTests
         messages.ShouldHaveSingleItem().Type.ShouldBe("terminal.completed");
     }
 
-    [Fact]
+    [Test]
     public async Task A_build_that_rejects_set_ask_dialog_falls_back_to_the_print_path_without_a_prompt_and_logs_a_warning()
     {
         var process = new ScriptedOmpProcess();
@@ -316,9 +314,8 @@ public sealed class OmpProviderUserQuestionTests
 
     // What omp 18.10.4 writes to standard error before its ready frame for an unknown model and for a --resume id that does
     // not exist (it does not start a new session under that id).
-    [Theory]
-    [InlineData("Model \"omniroute/claude/claude-nonexistent-9\" not found\n\nRun `omp models find <pattern>` to search, or `omp models` to list all.\n")]
-    [InlineData("Error: Session \"01a1ffff-0000-7000-8000-000000000000\" not found.\nRun `omp --resume` without an argument to pick from recent sessions, or `omp` to start a new one.\n")]
+    [TestCase("Model \"omniroute/claude/claude-nonexistent-9\" not found\n\nRun `omp models find <pattern>` to search, or `omp models` to list all.\n")]
+    [TestCase("Error: Session \"01a1ffff-0000-7000-8000-000000000000\" not found.\nRun `omp --resume` without an argument to pick from recent sessions, or `omp` to start a new one.\n")]
     public async Task A_startup_failure_before_the_handshake_is_reported_not_retried(string standardError)
     {
         var process = new ScriptedOmpProcess();
@@ -339,7 +336,7 @@ public sealed class OmpProviderUserQuestionTests
 
     // ---------------------------------------------------------------- session id and completion (3.3)
 
-    [Fact]
+    [Test]
     public async Task The_session_id_comes_from_get_state_and_is_reported_as_started()
     {
         var process = new ScriptedOmpProcess();
@@ -359,7 +356,7 @@ public sealed class OmpProviderUserQuestionTests
         messages.Count(static message => message.Type.StartsWith("session.", StringComparison.Ordinal)).ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public async Task A_requested_session_that_omp_reports_back_is_reported_as_resumed()
     {
         const string ResumedSessionId = "01a138a8-ac6c-728d-8bb2-9d2994728322";
@@ -380,7 +377,7 @@ public sealed class OmpProviderUserQuestionTests
         messages.Last().Type.ShouldBe("terminal.completed");
     }
 
-    [Fact]
+    [Test]
     public async Task A_requested_session_that_omp_does_not_report_back_is_reported_as_restarted()
     {
         var process = new ScriptedOmpProcess();
@@ -395,7 +392,7 @@ public sealed class OmpProviderUserQuestionTests
         messages[0].Content.GetProperty("resumeMode").GetString().ShouldBe("restarted");
     }
 
-    [Fact]
+    [Test]
     public async Task The_run_completes_on_session_settled_then_closes_standard_input_and_waits_for_the_exit()
     {
         var process = new ScriptedOmpProcess();
@@ -413,7 +410,7 @@ public sealed class OmpProviderUserQuestionTests
         process.Disposed.ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public async Task A_process_that_does_not_exit_after_the_run_settled_is_stopped_and_the_run_still_completes()
     {
         var process = new ScriptedOmpProcess { ExitOnInputClose = false };
@@ -426,7 +423,7 @@ public sealed class OmpProviderUserQuestionTests
         process.Stopped.ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public async Task A_prompt_result_before_the_session_settled_keeps_the_run_open_for_the_follow_up_events()
     {
         var process = new ScriptedOmpProcess();
@@ -445,7 +442,7 @@ public sealed class OmpProviderUserQuestionTests
         process.Log.IndexOf("close-input").ShouldBeGreaterThan(process.Log.IndexOf("emit:session_settled"));
     }
 
-    [Fact]
+    [Test]
     public async Task An_error_prompt_result_is_a_terminal_failure_with_omps_error_text()
     {
         var process = new ScriptedOmpProcess();
@@ -468,7 +465,7 @@ public sealed class OmpProviderUserQuestionTests
         messages.Count(static message => message.Type.StartsWith("terminal.", StringComparison.Ordinal)).ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public async Task A_rejected_prompt_becomes_a_terminal_failure_that_keeps_the_error_text_and_shuts_omp_down()
     {
         var process = new ScriptedOmpProcess();
@@ -484,7 +481,7 @@ public sealed class OmpProviderUserQuestionTests
         process.Stopped.ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task A_rejected_get_state_becomes_a_terminal_failure_without_sending_the_prompt()
     {
         var process = new ScriptedOmpProcess();
@@ -510,7 +507,7 @@ public sealed class OmpProviderUserQuestionTests
         process.Written.Select(ScriptedOmpProcess.Parse).Select(static command => command.Type).ShouldNotContain("prompt");
     }
 
-    [Fact]
+    [Test]
     public async Task A_process_that_ends_before_the_run_settled_fails_with_its_exit_code_and_standard_error()
     {
         var process = new ScriptedOmpProcess();
@@ -541,7 +538,7 @@ public sealed class OmpProviderUserQuestionTests
         terminalText.ShouldContain("omp: out of memory");
     }
 
-    [Fact]
+    [Test]
     public async Task A_process_that_exits_with_code_zero_before_settling_is_not_reported_as_completed()
     {
         var process = new ScriptedOmpProcess();
@@ -573,7 +570,7 @@ public sealed class OmpProviderUserQuestionTests
         terminal.Content.GetProperty("session_id").GetString().ShouldBe(TwoQuestionsSessionId);
     }
 
-    [Fact]
+    [Test]
     public async Task A_line_that_is_not_json_after_which_omp_ends_is_a_terminal_failure_that_keeps_the_line()
     {
         var process = new ScriptedOmpProcess();
@@ -606,10 +603,9 @@ public sealed class OmpProviderUserQuestionTests
         terminal.Content.GetProperty("invalid_output_lines")[0].GetString().ShouldBe("Segmentation fault (core dumped)");
     }
 
-    [Theory]
-    [InlineData("ask-two-questions")]
-    [InlineData("tool-turn")]
-    [InlineData("background-follow-up")]
+    [TestCase("ask-two-questions")]
+    [TestCase("tool-turn")]
+    [TestCase("background-follow-up")]
     public async Task Events_are_normalized_exactly_as_the_json_path_normalizes_them(string fixtureName)
     {
         var capture = Fixture(fixtureName);
@@ -642,7 +638,7 @@ public sealed class OmpProviderUserQuestionTests
         actual.Select(static message => message.Content.GetRawText()).ShouldBe(expected.Select(static message => message.Content.GetRawText()));
     }
 
-    [Fact]
+    [Test]
     public async Task Text_thinking_and_tool_events_become_the_same_shared_messages_on_both_paths()
     {
         // Thinking does not reach this omniroute model's stream, so these are delta-only frames in the shape --mode json sends.
@@ -690,7 +686,7 @@ public sealed class OmpProviderUserQuestionTests
         rpc.Select(static message => message.Content.GetRawText()).ShouldBe(json.Select(static message => message.Content.GetRawText()));
     }
 
-    [Fact]
+    [Test]
     public async Task An_rpc_ui_run_streams_the_text_once_and_names_the_tool_call_from_its_first_message()
     {
         var process = new ScriptedOmpProcess();
@@ -728,7 +724,7 @@ public sealed class OmpProviderUserQuestionTests
 
     // ---------------------------------------------------------------- ask routing and outcomes (3.4)
 
-    [Fact]
+    [Test]
     public async Task An_ask_request_reaches_the_handler_with_every_field_and_the_caller_gets_the_question_message_in_order()
     {
         var process = new ScriptedOmpProcess();
@@ -778,7 +774,7 @@ public sealed class OmpProviderUserQuestionTests
         toolCall.GetProperty("tool_call_id").GetString().ShouldBe("toolu_012f7RsvnJqCa5iaodytAExt");
     }
 
-    [Fact]
+    [Test]
     public async Task The_answers_are_written_once_per_question_in_request_order_as_omp_validates_them()
     {
         var process = new ScriptedOmpProcess();
@@ -798,7 +794,7 @@ public sealed class OmpProviderUserQuestionTests
         AssistantText(messages).ShouldBe("ANSWER=Blue|Dark theme, Offline mode");
     }
 
-    [Fact]
+    [Test]
     public async Task Free_text_answers_are_sent_as_custom_input_with_no_selected_option()
     {
         var process = new ScriptedOmpProcess();
@@ -816,7 +812,7 @@ public sealed class OmpProviderUserQuestionTests
         messages.Last().Type.ShouldBe("terminal.completed");
     }
 
-    [Fact]
+    [Test]
     public async Task Output_keeps_streaming_while_a_question_is_open()
     {
         var process = new ScriptedOmpProcess();
@@ -857,7 +853,7 @@ public sealed class OmpProviderUserQuestionTests
         process.Written.Select(ScriptedOmpProcess.Parse).Count(static command => command.Type == "extension_ui_response").ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public async Task Foreign_dialogs_are_cancelled_fire_and_forget_requests_get_no_response_and_the_question_is_still_asked()
     {
         var process = new ScriptedOmpProcess();
@@ -889,7 +885,7 @@ public sealed class OmpProviderUserQuestionTests
         messages.Last().Type.ShouldBe("terminal.completed");
     }
 
-    [Fact]
+    [Test]
     public async Task Omps_cancel_frame_closes_the_open_question_without_a_response()
     {
         var process = new ScriptedOmpProcess();
@@ -948,12 +944,11 @@ public sealed class OmpProviderUserQuestionTests
         Timeout
     }
 
-    [Theory]
-    [InlineData(Outcome.HandlerThrows)]
-    [InlineData(Outcome.NullAnswer)]
-    [InlineData(Outcome.MissingAnswer)]
-    [InlineData(Outcome.EmptyAnswer)]
-    [InlineData(Outcome.Timeout)]
+    [TestCase(Outcome.HandlerThrows)]
+    [TestCase(Outcome.NullAnswer)]
+    [TestCase(Outcome.MissingAnswer)]
+    [TestCase(Outcome.EmptyAnswer)]
+    [TestCase(Outcome.Timeout)]
     public async Task A_request_without_a_full_answer_is_cancelled_exactly_once_and_the_aborted_run_ends_normally(Outcome outcome)
     {
         var process = new ScriptedOmpProcess();
@@ -994,7 +989,7 @@ public sealed class OmpProviderUserQuestionTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task An_ask_request_that_repeats_an_open_request_id_is_ignored()
     {
         var process = new ScriptedOmpProcess();
@@ -1021,7 +1016,7 @@ public sealed class OmpProviderUserQuestionTests
         process.Written.Select(ScriptedOmpProcess.Parse).Count(static command => command.Type == "extension_ui_response").ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public async Task A_large_question_payload_reaches_the_handler_whole()
     {
         var description = string.Concat(Enumerable.Repeat("界x\u2028é", 47_500));
@@ -1056,7 +1051,7 @@ public sealed class OmpProviderUserQuestionTests
             .ShouldBe("""{"type":"extension_ui_response","id":"big-1","answers":[{"id":"big","selectedOptions":["A"]}]}""");
     }
 
-    [Fact]
+    [Test]
     public void TryFromCliMessage_reads_only_ask_requests()
     {
         var ask = Fixture("ask-two-questions").Single(static line => line.Contains("\"method\":\"ask\"", StringComparison.Ordinal));
@@ -1072,7 +1067,7 @@ public sealed class OmpProviderUserQuestionTests
         OmpUserInputRequest.TryFromCliMessage(Message(OmpUserInputRequest.MessageType, noQuestions), out _).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task An_ask_request_that_cannot_be_read_is_declined_so_omp_ends_the_run_normally()
     {
         var process = new ScriptedOmpProcess();
@@ -1109,12 +1104,11 @@ public sealed class OmpProviderUserQuestionTests
         true,
         [new OmpUserQuestionOption("Dark theme", ""), new OmpUserQuestionOption("Mobile layout", ""), new OmpUserQuestionOption("Offline mode", "")]);
 
-    [Theory]
-    [InlineData("Blue", new[] { "Blue" }, null)]
-    [InlineData("blue", new string[0], "blue")]
-    [InlineData("Teal", new string[0], "Teal")]
-    [InlineData("Red, Blue", new string[0], "Red, Blue")]
-    [InlineData(" Blue", new string[0], " Blue")]
+    [TestCase("Blue", new[] { "Blue" }, null)]
+    [TestCase("blue", new string[0], "blue")]
+    [TestCase("Teal", new string[0], "Teal")]
+    [TestCase("Red, Blue", new string[0], "Red, Blue")]
+    [TestCase(" Blue", new string[0], " Blue")]
     public void A_single_select_answer_selects_exactly_one_offered_label_or_is_free_text(string text, string[] selected, string? customInput)
     {
         var answer = OmpAskAnswer.From(SingleSelect, text);
@@ -1124,15 +1118,14 @@ public sealed class OmpProviderUserQuestionTests
         answer.CustomInput.ShouldBe(customInput);
     }
 
-    [Theory]
-    [InlineData("Dark theme", new[] { "Dark theme" }, null)]
-    [InlineData("Offline mode, Dark theme", new[] { "Offline mode", "Dark theme" }, null)]
-    [InlineData("Dark theme, Mobile layout, Offline mode", new[] { "Dark theme", "Mobile layout", "Offline mode" }, null)]
-    [InlineData("Dark theme, Dark theme", new string[0], "Dark theme, Dark theme")]
-    [InlineData("Dark theme, Purple", new string[0], "Dark theme, Purple")]
-    [InlineData("Dark theme,Mobile layout", new string[0], "Dark theme,Mobile layout")]
-    [InlineData("Dark theme, ", new string[0], "Dark theme, ")]
-    [InlineData("Something else", new string[0], "Something else")]
+    [TestCase("Dark theme", new[] { "Dark theme" }, null)]
+    [TestCase("Offline mode, Dark theme", new[] { "Offline mode", "Dark theme" }, null)]
+    [TestCase("Dark theme, Mobile layout, Offline mode", new[] { "Dark theme", "Mobile layout", "Offline mode" }, null)]
+    [TestCase("Dark theme, Dark theme", new string[0], "Dark theme, Dark theme")]
+    [TestCase("Dark theme, Purple", new string[0], "Dark theme, Purple")]
+    [TestCase("Dark theme,Mobile layout", new string[0], "Dark theme,Mobile layout")]
+    [TestCase("Dark theme, ", new string[0], "Dark theme, ")]
+    [TestCase("Something else", new string[0], "Something else")]
     public void A_multi_select_answer_selects_distinct_offered_labels_or_is_free_text(string text, string[] selected, string? customInput)
     {
         var answer = OmpAskAnswer.From(MultiSelect, text);
@@ -1142,11 +1135,10 @@ public sealed class OmpProviderUserQuestionTests
         answer.CustomInput.ShouldBe(customInput);
     }
 
-    [Theory]
-    [InlineData("Red, dark", new[] { "Red, dark" })]
-    [InlineData("Red, dark, Blue", new[] { "Red, dark", "Blue" })]
-    [InlineData("Blue, Red, dark", new[] { "Blue", "Red, dark" })]
-    [InlineData("Red", new[] { "Red" })]
+    [TestCase("Red, dark", new[] { "Red, dark" })]
+    [TestCase("Red, dark, Blue", new[] { "Red, dark", "Blue" })]
+    [TestCase("Blue, Red, dark", new[] { "Blue", "Red, dark" })]
+    [TestCase("Red", new[] { "Red" })]
     public void A_label_that_contains_a_comma_is_matched_longest_first(string text, string[] selected)
     {
         var question = new OmpUserQuestion(
@@ -1156,7 +1148,7 @@ public sealed class OmpProviderUserQuestionTests
         OmpAskAnswer.From(question, text).CustomInput.ShouldBeNull();
     }
 
-    [Fact]
+    [Test]
     public void The_longest_label_first_split_backtracks_when_the_longest_match_leads_nowhere()
     {
         var question = new OmpUserQuestion(
@@ -1166,7 +1158,7 @@ public sealed class OmpProviderUserQuestionTests
         OmpAskAnswer.From(question, "A, B").SelectedOptions.ShouldBe(["A, B"]);
     }
 
-    [Fact]
+    [Test]
     public void A_single_select_label_that_contains_a_comma_is_one_option()
     {
         var question = new OmpUserQuestion("q", "Which?", "", false, [new OmpUserQuestionOption("Yes, please", ""), new OmpUserQuestionOption("No", "")]);
@@ -1174,7 +1166,7 @@ public sealed class OmpProviderUserQuestionTests
         OmpAskAnswer.From(question, "Yes, please").SelectedOptions.ShouldBe(["Yes, please"]);
     }
 
-    [Fact]
+    [Test]
     public void The_answer_list_follows_the_request_order_and_joins_the_values_of_a_question()
     {
         var request = new OmpUserInputRequest("r-1", [SingleSelect, MultiSelect]);
@@ -1190,7 +1182,7 @@ public sealed class OmpProviderUserQuestionTests
             """{"type":"extension_ui_response","id":"r-1","answers":[{"id":"colour","selectedOptions":["Red"]},{"id":"features","selectedOptions":["Dark theme","Offline mode"]}]}""");
     }
 
-    [Fact]
+    [Test]
     public void A_response_that_misses_a_question_or_answers_it_with_nothing_is_not_converted()
     {
         var request = new OmpUserInputRequest("r-1", [SingleSelect, MultiSelect]);
@@ -1200,7 +1192,7 @@ public sealed class OmpProviderUserQuestionTests
         Answers((ColourQuestion, ["  "]), (FeaturesQuestion, ["Dark theme"])).ToAskAnswers(request).ShouldBeNull();
     }
 
-    [Fact]
+    [Test]
     public void The_answers_omp_rejected_in_the_capture_are_never_produced_for_the_same_input()
     {
         // Each capture line holds the ask request, the answer frame the probe sent and the tool error OMP returned for it.
@@ -1245,7 +1237,7 @@ public sealed class OmpProviderUserQuestionTests
 
     // ---------------------------------------------------------------- aborted outcomes and cancellation (3.5)
 
-    [Fact]
+    [Test]
     public async Task An_aborted_run_the_host_did_not_ask_for_is_a_failure()
     {
         var process = new ScriptedOmpProcess();
@@ -1260,7 +1252,7 @@ public sealed class OmpProviderUserQuestionTests
         process.Written.Select(ScriptedOmpProcess.Parse).Select(static command => command.Type).ShouldBe(["set_ask_dialog", "get_state", "prompt"]);
     }
 
-    [Fact]
+    [Test]
     public async Task Cancelling_while_a_question_is_open_sends_only_abort_and_ends_the_process()
     {
         var process = new ScriptedOmpProcess();
@@ -1303,7 +1295,7 @@ public sealed class OmpProviderUserQuestionTests
         process.Disposed.ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public async Task Cancelling_a_run_that_has_no_open_question_aborts_it_and_ends_the_process()
     {
         var process = new ScriptedOmpProcess();
@@ -1332,7 +1324,7 @@ public sealed class OmpProviderUserQuestionTests
         process.Stopped.ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task Cancelling_stops_a_process_that_neither_settles_nor_exits_and_still_surfaces_the_cancellation()
     {
         var process = new ScriptedOmpProcess { ExitOnInputClose = false };
@@ -1369,7 +1361,7 @@ public sealed class OmpProviderUserQuestionTests
         process.HasExited.ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public async Task A_consumer_that_stops_enumerating_aborts_the_run_and_ends_the_process()
     {
         var process = new ScriptedOmpProcess();
@@ -1393,7 +1385,7 @@ public sealed class OmpProviderUserQuestionTests
 
     // ---------------------------------------------------------------- a real process (the default IOmpRpcProcess)
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_runs_the_rpc_conversation_over_a_real_process()
     {
         if (OperatingSystem.IsWindows())
@@ -1531,10 +1523,11 @@ public sealed class OmpProviderUserQuestionTests
         return messages;
     }
 
-    private static async Task AssertCanceledAsync(Task run)
+    private static Task AssertCanceledAsync(Task run)
     {
-        var exception = await Record.ExceptionAsync(() => run.WaitAsync(TestTimeout));
+        var exception = Assert.CatchAsync<OperationCanceledException>(() => run.WaitAsync(TestTimeout));
         exception.ShouldBeAssignableTo<OperationCanceledException>();
+        return Task.CompletedTask;
     }
 
     private static async Task<CliMessage> ReadUntilAsync(ChannelReader<CliMessage> reader, Func<CliMessage, bool> predicate)

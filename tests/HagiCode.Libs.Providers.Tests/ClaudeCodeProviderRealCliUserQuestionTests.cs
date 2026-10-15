@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Shouldly;
-using Xunit.Abstractions;
 using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Process;
 using HagiCode.Libs.Core.Transport;
@@ -16,14 +15,14 @@ namespace HagiCode.Libs.Providers.Tests;
 /// is checked; otherwise <c>claude</c> is resolved from <c>PATH</c>. The CLI version is written to the test output.
 /// Every run uses a scratch working directory and the <c>haiku</c> model.
 /// </summary>
-public sealed class ClaudeCodeProviderRealCliUserQuestionTests(ITestOutputHelper output)
+public sealed class ClaudeCodeProviderRealCliUserQuestionTests
 {
     private const string SwitchVariable = "HAGICODE_LIBS_REAL_CLI_USER_QUESTION";
     private const string ExecutableVariable = "HAGICODE_LIBS_REAL_CLI_USER_QUESTION_EXECUTABLE";
     private static readonly TimeSpan RunTimeout = TimeSpan.FromSeconds(120);
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task A_question_is_asked_answered_and_the_turn_continues_with_the_answer()
     {
         if (!IsEnabled())
@@ -64,8 +63,8 @@ public sealed class ClaudeCodeProviderRealCliUserQuestionTests(ITestOutputHelper
         result.GetProperty("permission_denials").GetArrayLength().ShouldBe(0);
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task A_tool_permission_request_gets_the_fixed_deny_without_asking_the_handler()
     {
         if (!IsEnabled())
@@ -115,8 +114,8 @@ public sealed class ClaudeCodeProviderRealCliUserQuestionTests(ITestOutputHelper
 
     private async Task<List<CliMessage>> RunAsync(ClaudeCodeOptions options, string prompt)
     {
-        output.WriteLine($"claude executable: {options.ExecutablePath}");
-        output.WriteLine($"claude version: {await ReadVersionAsync(options.ExecutablePath!)}");
+        TestContext.Out.WriteLine($"claude executable: {options.ExecutablePath}");
+        TestContext.Out.WriteLine($"claude version: {await ReadVersionAsync(options.ExecutablePath!)}");
 
         await using var provider = new ClaudeCodeProvider(new CliExecutableResolver(), new CliProcessManager());
         using var cancellation = new CancellationTokenSource(RunTimeout);

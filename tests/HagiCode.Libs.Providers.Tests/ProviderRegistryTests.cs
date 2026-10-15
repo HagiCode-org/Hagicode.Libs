@@ -14,7 +14,7 @@ namespace HagiCode.Libs.Providers.Tests;
 
 public sealed class ProviderRegistryTests
 {
-    [Fact]
+    [Test]
     public void Register_adds_provider_and_GetProvider_returns_it()
     {
         var registry = new ProviderRegistry();
@@ -26,7 +26,7 @@ public sealed class ProviderRegistryTests
         registry.GetAllProviders().ShouldHaveSingleItem();
     }
 
-    [Fact]
+    [Test]
     public void Register_rejects_duplicate_names()
     {
         var registry = new ProviderRegistry();
@@ -35,7 +35,7 @@ public sealed class ProviderRegistryTests
         Should.Throw<InvalidOperationException>(() => registry.Register("stub", new StubProvider("stub", false)));
     }
 
-    [Fact]
+    [Test]
     public void Register_maps_aliases_to_the_same_provider()
     {
         var registry = new ProviderRegistry();
@@ -47,7 +47,7 @@ public sealed class ProviderRegistryTests
         registry.GetAllProviders().ShouldHaveSingleItem();
     }
 
-    [Fact]
+    [Test]
     public async Task AddHagiCodeLibs_registers_gemini_aliases_in_provider_registry()
     {
         var services = new ServiceCollection();
@@ -61,7 +61,7 @@ public sealed class ProviderRegistryTests
         registry.GetProvider<GeminiOptions>("gemini-cli").ShouldBeOfType<GeminiProvider>();
     }
 
-    [Fact]
+    [Test]
     public async Task AddHagiCodeLibs_registers_claude_and_codebuddy_aliases_in_provider_registry()
     {
         var services = new ServiceCollection();
@@ -78,7 +78,7 @@ public sealed class ProviderRegistryTests
         registry.GetProvider<CodebuddyOptions>("codebuddy-cli").ShouldBeOfType<CodebuddyProvider>();
     }
 
-    [Fact]
+    [Test]
     public async Task AddHagiCodeLibs_registers_deepagents_without_legacy_aliases()
     {
         var services = new ServiceCollection();
@@ -92,7 +92,7 @@ public sealed class ProviderRegistryTests
         registry.GetProvider<DeepAgentsOptions>("deepagents-acp").ShouldBeNull();
     }
 
-    [Fact]
+    [Test]
     public async Task AddHagiCodeLibs_registers_opencode_aliases_in_provider_registry()
     {
         var services = new ServiceCollection();
@@ -107,7 +107,7 @@ public sealed class ProviderRegistryTests
         registry.GetProvider<OpenCodeOptions>("open-code").ShouldBeOfType<OpenCodeProvider>();
     }
 
-    [Fact]
+    [Test]
     public async Task AddHagiCodeLibs_registers_pi_alias_in_provider_registry()
     {
         var services = new ServiceCollection();
@@ -122,7 +122,7 @@ public sealed class ProviderRegistryTests
         registry.GetProvider<PiOptions>("pi-cli").ShouldBeOfType<PiProvider>();
     }
 
-    [Fact]
+    [Test]
     public async Task AddHagiCodeLibs_registers_dsh_alias_in_provider_registry()
     {
         var services = new ServiceCollection();
@@ -137,7 +137,7 @@ public sealed class ProviderRegistryTests
         registry.GetProvider<DshOptions>("dsh-cli").ShouldBeOfType<DshProvider>();
     }
 
-    [Fact]
+    [Test]
     public async Task AddHagiCodeLibs_registers_omp_alias_in_provider_registry()
     {
         var services = new ServiceCollection();

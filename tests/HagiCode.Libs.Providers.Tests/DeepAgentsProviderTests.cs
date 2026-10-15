@@ -14,7 +14,7 @@ public sealed class DeepAgentsProviderTests
 {
     private const string RealCliTestsEnvironmentVariable = "HAGICODE_REAL_CLI_TESTS";
 
-    [Fact]
+    [Test]
     public void BuildCommandArguments_omits_workspace_switch_and_skips_managed_duplicates()
     {
         var provider = CreateProvider();
@@ -44,7 +44,7 @@ public sealed class DeepAgentsProviderTests
         ]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_uses_explicit_executable_and_streams_normalized_messages()
     {
         var provider = CreateProvider();
@@ -92,7 +92,7 @@ public sealed class DeepAgentsProviderTests
         messages.Select(static message => message.Type).ShouldBe(["session.started", "assistant", "terminal.completed"]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_uses_uvx_fallback_when_direct_binary_is_unavailable()
     {
         var provider = CreateProvider(executableResolver: new UvxOnlyExecutableResolver());
@@ -105,7 +105,7 @@ public sealed class DeepAgentsProviderTests
         provider.LastStartContext.Arguments.ShouldBe(["--from", "deepagents-cli", "deepagents", "--acp"]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_does_not_fallback_when_explicit_executable_is_missing()
     {
         var provider = CreateProvider(executableResolver: new ExplicitMissingButUvxExecutableResolver());
@@ -125,7 +125,7 @@ public sealed class DeepAgentsProviderTests
         exception.Message.ShouldContain("DeepAgents launcher");
     }
 
-    [Fact]
+    [Test]
     public void IsAvailable_returns_true_when_uvx_fallback_is_available()
     {
         var provider = CreateProvider(executableResolver: new UvxOnlyExecutableResolver());
@@ -133,7 +133,7 @@ public sealed class DeepAgentsProviderTests
         provider.IsAvailable.ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public async Task PingAsync_uses_uvx_fallback_and_reports_initialize_details()
     {
         var provider = CreateProvider(executableResolver: new UvxOnlyExecutableResolver());
@@ -147,7 +147,7 @@ public sealed class DeepAgentsProviderTests
         provider.LastStartContext.Arguments.ShouldBe(["--from", "deepagents-cli", "deepagents", "--acp"]);
     }
 
-    [Fact]
+    [Test]
     public async Task PingAsync_returns_actionable_failure_when_launcher_is_missing()
     {
         var provider = CreateProvider(executableResolver: new MissingExecutableResolver());
@@ -159,7 +159,7 @@ public sealed class DeepAgentsProviderTests
         result.ErrorMessage.ShouldContain("Install 'deepagents-cli'");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_creates_fresh_session_client_when_workspace_and_arguments_match()
     {
         var provider = CreateProvider();
@@ -195,7 +195,7 @@ public sealed class DeepAgentsProviderTests
         provider.CreatedSessionClients[1].PromptCalls.ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_applies_bypass_mode_before_prompt_for_one_shot_execution()
     {
         var provider = CreateProvider();
@@ -213,7 +213,7 @@ public sealed class DeepAgentsProviderTests
         provider.CreatedSessionClients[0].SetModeCalls.ShouldBe(["bypassPermissions"]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_reapplies_bypass_mode_for_each_fresh_execution()
     {
         var provider = CreateProvider();
@@ -245,7 +245,7 @@ public sealed class DeepAgentsProviderTests
         provider.CreatedSessionClients[1].PromptCalls.ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_bypass_mode_streams_prompt_result_without_notifications()
     {
         var provider = new TestDeepAgentsProvider(
@@ -270,7 +270,7 @@ public sealed class DeepAgentsProviderTests
         provider.CreatedSessionClients[0].SetModeCalls.ShouldBe(["bypassPermissions"]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_returns_actionable_error_for_cold_resume_when_load_session_is_unsupported()
     {
         var provider = new TestDeepAgentsProvider(
@@ -294,7 +294,7 @@ public sealed class DeepAgentsProviderTests
         exception.Message.ShouldContain("does not advertise session/load support");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_creates_a_new_pooled_session_when_workspace_changes_for_same_session_id()
     {
         var provider = CreateProvider();
@@ -324,7 +324,7 @@ public sealed class DeepAgentsProviderTests
         provider.CreatedSessionClients[1].LastWorkingDirectory.ShouldBe("/tmp/workspace-b");
     }
 
-    [Fact]
+    [Test]
     public void NormalizeNotification_maps_prompt_completed_to_terminal_message()
     {
         var notification = new AcpNotification(
@@ -346,7 +346,7 @@ public sealed class DeepAgentsProviderTests
         messages[0].Content.GetProperty("session_id").GetString().ShouldBe("session-1");
     }
 
-    [Fact]
+    [Test]
     public void NormalizeNotification_maps_completed_tool_call_updates_to_tool_completed_message()
     {
         var notification = new AcpNotification(
@@ -372,7 +372,7 @@ public sealed class DeepAgentsProviderTests
         messages[0].Content.GetProperty("tool_call_id").GetString().ShouldBe("tool-1");
     }
 
-    [Fact]
+    [Test]
     public void NormalizeNotification_maps_real_deepagents_tool_call_notifications_using_session_update_before_kind()
     {
         var notification = new AcpNotification(
@@ -397,7 +397,7 @@ public sealed class DeepAgentsProviderTests
         messages[0].Content.GetProperty("tool_call_id").GetString().ShouldBe("tool-real-1");
     }
 
-    [Fact]
+    [Test]
     public void NormalizeNotification_maps_failed_tool_call_updates_to_tool_failed_message()
     {
         var notification = new AcpNotification(
@@ -423,7 +423,7 @@ public sealed class DeepAgentsProviderTests
         messages[0].Content.GetProperty("tool_call_id").GetString().ShouldBe("tool-2");
     }
 
-    [Fact]
+    [Test]
     public void NormalizeNotification_maps_permission_requests_to_tool_permission_message()
     {
         var notification = new AcpNotification(
@@ -451,7 +451,7 @@ public sealed class DeepAgentsProviderTests
         messages[0].Content.GetProperty("title").GetString().ShouldBe("Approve bash command");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_streams_toolcall_lifecycle_in_order()
     {
         var provider = CreateProvider(
@@ -518,7 +518,7 @@ public sealed class DeepAgentsProviderTests
         ]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_streams_real_deepagents_toolcall_shape_in_order()
     {
         var provider = CreateProvider(
@@ -579,7 +579,7 @@ public sealed class DeepAgentsProviderTests
         messages[3].Content.GetProperty("tool_name").GetString().ShouldBe("execute");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_surfaces_failed_toolcall_and_terminal_failure()
     {
         var provider = CreateProvider(
@@ -634,8 +634,8 @@ public sealed class DeepAgentsProviderTests
         terminalMessage.ShouldContain("permission denied");
     }
 
-    [Fact(Skip = "DeepAgents real CLI validation is excluded by default because CI does not guarantee a deepagents binary on PATH.")]
-    [Trait("Category", "RealCli")]
+    [Test, Ignore("DeepAgents real CLI validation is excluded by default because CI does not guarantee a deepagents binary on PATH.")]
+    [Category("RealCli")]
     public async Task PingAsync_can_validate_installed_deepagents_cli_when_opted_in()
     {
         if (!IsRealCliTestsEnabled())

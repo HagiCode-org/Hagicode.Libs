@@ -6,7 +6,7 @@ namespace HagiCode.Libs.Providers.Tests;
 
 public sealed class CliRuntimePoolTests
 {
-    [Fact]
+    [Test]
     public async Task AcquireAsync_marks_warm_reuse_when_key_and_fingerprint_match()
     {
         await using var pool = new CliRuntimePool<StubResource>();
@@ -27,7 +27,7 @@ public sealed class CliRuntimePoolTests
         secondLease.IsWarmLease.ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public async Task AcquireAsync_marks_compatibility_replacement_when_same_key_changes_fingerprint()
     {
         await using var pool = new CliRuntimePool<StubResource>();
@@ -49,7 +49,7 @@ public sealed class CliRuntimePoolTests
         firstResource.DisposeCallCount.ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public async Task AcquireAsync_reclaims_expired_idle_entry_before_capacity_failure()
     {
         var timeProvider = new ManualTimeProvider();
@@ -73,7 +73,7 @@ public sealed class CliRuntimePoolTests
         freshLease.Kind.ShouldBe(CliRuntimePoolLeaseKind.ColdStart);
     }
 
-    [Fact]
+    [Test]
     public async Task AcquireAsync_replaces_oldest_idle_entry_when_provider_is_still_full()
     {
         var timeProvider = new ManualTimeProvider();
@@ -105,7 +105,7 @@ public sealed class CliRuntimePoolTests
         replacementLease.Kind.ShouldBe(CliRuntimePoolLeaseKind.ColdStart);
     }
 
-    [Fact]
+    [Test]
     public async Task AcquireAsync_throws_when_provider_capacity_is_fully_leased()
     {
         await using var pool = new CliRuntimePool<StubResource>();

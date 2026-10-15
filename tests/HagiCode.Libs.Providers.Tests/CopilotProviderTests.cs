@@ -14,7 +14,7 @@ namespace HagiCode.Libs.Providers.Tests;
 
 // Copilot requests rewrite process-wide environment variables (including PATH), so classes that
 // spawn child processes must not run alongside them.
-[Collection("ProcessEnvironment")]
+[NonParallelizable]
 public sealed class CopilotProviderTests
 {
     private const string RealCliTestsEnvironmentVariable = "HAGICODE_REAL_CLI_TESTS";
@@ -23,7 +23,7 @@ public sealed class CopilotProviderTests
     private static readonly TimeSpan RealCopilotRequestTimeout = TimeSpan.FromSeconds(45);
     private static readonly TimeSpan RealCopilotStartupTimeout = TimeSpan.FromSeconds(20);
 
-    [Fact]
+    [Test]
     public void BuildSdkRequest_includes_typed_runtime_fields_and_filtered_args()
     {
         var provider = CreateProvider();
@@ -88,7 +88,7 @@ public sealed class CopilotProviderTests
         request.EnvironmentVariables["COPILOT_INTERNAL_ORIGINATOR_OVERRIDE"].ShouldBe("hagicode_libs_csharp");
     }
 
-    [Fact]
+    [Test]
     public void BuildCliArgs_filters_unsupported_flags_and_records_diagnostics()
     {
         var result = CopilotCliCompatibility.BuildCliArgs(new CopilotOptions
@@ -110,7 +110,7 @@ public sealed class CopilotProviderTests
         result.Diagnostics.ShouldContain(diagnostic => diagnostic.Contains("hello", StringComparison.Ordinal));
     }
 
-    [Fact]
+    [Test]
     public void BuildCliArgs_suppresses_scoped_restrictions_for_maximum_access_profile()
     {
         var result = CopilotCliCompatibility.BuildCliArgs(new CopilotOptions
@@ -155,7 +155,7 @@ public sealed class CopilotProviderTests
         ]);
     }
 
-    [Fact]
+    [Test]
     public void BuildCliArgs_includes_allow_all_aggregate_flag_for_maximum_access_profile()
     {
         var result = CopilotCliCompatibility.BuildCliArgs(new CopilotOptions
@@ -174,7 +174,7 @@ public sealed class CopilotProviderTests
         result.CliArgs.ShouldContain("--allow-all");
     }
 
-    [Fact]
+    [Test]
     public void BuildCliArgs_does_not_include_allow_all_for_non_maximum_access_profile()
     {
         var result = CopilotCliCompatibility.BuildCliArgs(new CopilotOptions
@@ -192,7 +192,7 @@ public sealed class CopilotProviderTests
         result.CliArgs.ShouldNotContain("--allow-all");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_normalizes_sdk_stream_events_into_cli_messages()
     {
         var provider = CreateProvider(gateway: new StubCopilotSdkGateway(
@@ -243,7 +243,7 @@ public sealed class CopilotProviderTests
         messages[7].Content.GetProperty("session_id").GetString().ShouldBe("copilot-session-1");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_uses_authoritative_tool_success_over_result_text_heuristics()
     {
         var provider = CreateProvider(gateway: new StubCopilotSdkGateway(
@@ -275,7 +275,7 @@ public sealed class CopilotProviderTests
         completedTools[1].Content.GetProperty("failed").GetBoolean().ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public void DispatchSessionEvent_normalizes_reasoning_delta_before_raw_fallback()
     {
         var result = GitHubCopilotSdkGateway.DispatchSessionEvent(
@@ -297,7 +297,7 @@ public sealed class CopilotProviderTests
         result.Events[0].Type.ShouldNotBe(CopilotSdkStreamEventType.RawEvent);
     }
 
-    [Fact]
+    [Test]
     public void DispatchSessionEvent_normalizes_authoritative_reasoning_replay_before_raw_fallback()
     {
         var result = GitHubCopilotSdkGateway.DispatchSessionEvent(
@@ -319,7 +319,7 @@ public sealed class CopilotProviderTests
         result.Events[0].Type.ShouldNotBe(CopilotSdkStreamEventType.RawEvent);
     }
 
-    [Fact]
+    [Test]
     public void DispatchSessionEvent_normalizes_streaming_delta_before_raw_fallback()
     {
         var result = GitHubCopilotSdkGateway.DispatchSessionEvent(
@@ -338,7 +338,7 @@ public sealed class CopilotProviderTests
         result.Events[0].Type.ShouldNotBe(CopilotSdkStreamEventType.RawEvent);
     }
 
-    [Fact]
+    [Test]
     public void DispatchSessionEvent_keeps_unknown_sdk_events_on_raw_fallback()
     {
         var result = GitHubCopilotSdkGateway.DispatchSessionEvent(
@@ -356,7 +356,7 @@ public sealed class CopilotProviderTests
         result.Events[0].RawEventType.ShouldBe(nameof(AbortEvent));
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_preserves_whitespace_only_sdk_deltas()
     {
         var provider = CreateProvider(gateway: new StubCopilotSdkGateway(
@@ -381,7 +381,7 @@ public sealed class CopilotProviderTests
         messages[3].Content.GetProperty("text").GetString().ShouldBe("tail");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_preserves_reasoning_replay_metadata_across_incremental_and_authoritative_sequences()
     {
         var provider = CreateProvider(gateway: new StubCopilotSdkGateway(
@@ -420,7 +420,7 @@ public sealed class CopilotProviderTests
             .ShouldBe([false, true, true]);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_preserves_full_authoritative_reasoning_replays_for_downstream_suppression()
     {
         var provider = CreateProvider(gateway: new StubCopilotSdkGateway(
@@ -453,7 +453,7 @@ public sealed class CopilotProviderTests
         reasoningMessages[1].Content.GetProperty("reasoning_id").GetString().ShouldBe("reasoning-1");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_preserves_authoritative_snapshots_after_deltas()
     {
         var provider = CreateProvider(gateway: new StubCopilotSdkGateway(
@@ -476,7 +476,7 @@ public sealed class CopilotProviderTests
         messages[2].Content.GetProperty("is_authoritative_snapshot").GetBoolean().ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_preserves_replayed_paragraph_snapshots_with_authoritative_contract_metadata()
     {
         const string paragraph = "## Impacted Repos\n\n- repos/hagicode-core";
@@ -506,7 +506,7 @@ public sealed class CopilotProviderTests
         assistantMessages.All(static message => message.Content.GetProperty("session_id").GetString() == "copilot-session-1").ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_preserves_blank_lines_and_markdown_leading_snapshots()
     {
         var provider = CreateProvider(gateway: new StubCopilotSdkGateway(
@@ -528,7 +528,7 @@ public sealed class CopilotProviderTests
         messages[2].Content.GetProperty("is_authoritative_snapshot").GetBoolean().ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_preserves_leading_and_trailing_spaces_in_snapshots_and_reasoning_payloads()
     {
         var provider = CreateProvider(gateway: new StubCopilotSdkGateway(
@@ -559,7 +559,7 @@ public sealed class CopilotProviderTests
         messages[3].Content.GetProperty("is_authoritative_replay").GetBoolean().ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public void NormalizeFailureMessage_formats_startup_timeout_with_actionable_marker()
     {
         var message = GitHubCopilotSdkGateway.NormalizeFailureMessage(
@@ -571,7 +571,7 @@ public sealed class CopilotProviderTests
         message.ShouldContain("timed out after 20 seconds");
     }
 
-    [Fact]
+    [Test]
     public void NormalizeFailureMessage_formats_idle_timeout_with_actionable_marker()
     {
         var message = GitHubCopilotSdkGateway.NormalizeFailureMessage(
@@ -583,7 +583,7 @@ public sealed class CopilotProviderTests
         message.ShouldContain("timed out after 300 seconds");
     }
 
-    [Fact]
+    [Test]
     public void NormalizeFailureMessage_marks_github_cli_login_auth_failure()
     {
         var rawMessage =
@@ -597,7 +597,7 @@ public sealed class CopilotProviderTests
         message.ShouldContain("AuthSource = GitHubToken");
     }
 
-    [Fact]
+    [Test]
     public async Task CreateRuntime_falls_back_to_fresh_session_on_non_auth_resume_failure_without_token()
     {
         var gateway = new GitHubCopilotSdkGateway(
@@ -617,7 +617,7 @@ public sealed class CopilotProviderTests
         messages.Select(static m => m.Type).ShouldNotContain("error");
     }
 
-    [Fact]
+    [Test]
     public async Task CreateRuntime_falls_back_to_fresh_session_on_auth_resume_failure_when_token_is_set()
     {
         var gateway = new GitHubCopilotSdkGateway(
@@ -643,7 +643,7 @@ public sealed class CopilotProviderTests
         messages.Select(static m => m.Type).ShouldNotContain("error");
     }
 
-    [Fact]
+    [Test]
     public async Task CreateRuntime_fails_fast_with_auth_marker_on_auth_resume_failure_without_token()
     {
         var gateway = new GitHubCopilotSdkGateway(
@@ -664,7 +664,7 @@ public sealed class CopilotProviderTests
         exception.Message.ShouldStartWith("[copilot_auth_failed]");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_uses_explicit_session_id_for_provider_native_resume_contract()
     {
         var gateway = new StubCopilotSdkGateway(
@@ -694,7 +694,7 @@ public sealed class CopilotProviderTests
         messages.First().Content.GetProperty("requested_session_id").GetString().ShouldBe("resume-session");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_creates_fresh_runtime_for_each_explicit_session_attempt()
     {
         var gateway = new StubCopilotSdkGateway(
@@ -727,7 +727,7 @@ public sealed class CopilotProviderTests
         secondMessages.First().Content.GetProperty("requested_session_id").GetString().ShouldBe("session-key");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_uses_fresh_runtime_when_resuming_an_observed_session_id()
     {
         var gateway = new StubCopilotSdkGateway(
@@ -756,7 +756,7 @@ public sealed class CopilotProviderTests
         secondMessages.First().Content.GetProperty("requested_session_id").GetString().ShouldBe("session-key");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_creates_fresh_runtime_when_same_session_id_changes_permissions()
     {
         var gateway = new StubCopilotSdkGateway(
@@ -797,7 +797,7 @@ public sealed class CopilotProviderTests
         secondMessages.First().Content.GetProperty("session_id").GetString().ShouldBe("session-key");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_does_not_reuse_warm_copilot_runtime_for_anonymous_requests_in_same_working_directory()
     {
         var gateway = new StubCopilotSdkGateway(
@@ -823,7 +823,7 @@ public sealed class CopilotProviderTests
         secondMessages.First().Content.GetProperty("session_id").GetString().ShouldBe("copilot-session-1");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_stays_on_the_one_shot_path_for_repeated_requests()
     {
         var gateway = new StubCopilotSdkGateway(
@@ -854,7 +854,7 @@ public sealed class CopilotProviderTests
         gateway.CreatedRuntimeCount.ShouldBe(2);
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_allows_concurrent_requests_with_same_effective_environment_and_keeps_session_metadata_isolated()
     {
         var sync = new ConcurrentSendSynchronizer(expectedParticipants: 2);
@@ -912,7 +912,7 @@ public sealed class CopilotProviderTests
         secondMessages[2].Content.GetProperty("session_id").GetString().ShouldBe(secondSessionId);
     }
 
-    [Fact]
+    [Test]
     public async Task CreateRuntimeAsync_serializes_incompatible_environment_overrides_and_restores_baseline_after_disposal()
     {
         const string variableName = "HAGICODE_COPILOT_GATEWAY_TEST_ENV";
@@ -966,7 +966,7 @@ public sealed class CopilotProviderTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task CreateRuntimeAsync_fails_fast_with_auth_marker_when_resume_lacks_authentication_info_and_no_token()
     {
         var factory = new ResumeFailureCopilotSdkClientFactory(
@@ -999,7 +999,7 @@ public sealed class CopilotProviderTests
         exception.Message.ShouldStartWith("[copilot_auth_failed]");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_emits_error_terminal_message_when_gateway_fails()
     {
         var provider = CreateProvider(gateway: new StubCopilotSdkGateway(
@@ -1018,7 +1018,7 @@ public sealed class CopilotProviderTests
         messages[0].Content.GetProperty("message").GetString().ShouldBe("startup failed");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_preserves_terminal_error_after_tool_lifecycle_events()
     {
         var provider = CreateProvider(gateway: new StubCopilotSdkGateway(
@@ -1038,7 +1038,7 @@ public sealed class CopilotProviderTests
         messages[2].Content.GetProperty("message").GetString().ShouldBe("[permission_denied] auto-approval mismatch");
     }
 
-    [Fact]
+    [Test]
     public async Task PingAsync_reports_version_when_process_succeeds()
     {
         var processManager = new StubCliProcessManager
@@ -1057,7 +1057,7 @@ public sealed class CopilotProviderTests
         result.Version.ShouldBe("copilot 1.0.10");
     }
 
-    [Fact]
+    [Test]
     public async Task PingAsync_returns_failure_when_executable_is_missing()
     {
         var provider = CreateProvider(executableResolver: new MissingExecutableResolver());
@@ -1068,7 +1068,7 @@ public sealed class CopilotProviderTests
         result.ErrorMessage!.ShouldContain("copilot executable", Case.Insensitive);
     }
 
-    [Fact]
+    [Test]
     public void ResolveExecutablePath_prefers_real_cli_over_vscode_server_shim()
     {
         var provider = CreateProvider(executableResolver: new CopilotPathResolver(
@@ -1082,7 +1082,7 @@ public sealed class CopilotProviderTests
         resolved.ShouldBe("/home/test/.nvm/versions/node/v24.14.0/bin/copilot");
     }
 
-    [Fact]
+    [Test]
     public async Task PingAsync_uses_vscode_server_shim_when_no_real_cli_is_found()
     {
         var provider = CreateProvider(executableResolver: new CopilotPathResolver(
@@ -1096,9 +1096,9 @@ public sealed class CopilotProviderTests
         result.Version.ShouldBe("copilot 1.0.10");
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
-    [Trait("Category", "RealCliInvocationContract")]
+    [Test]
+    [Category("RealCli")]
+    [Category("RealCliInvocationContract")]
     public async Task ExecuteAsync_real_cli_returns_actionable_authentication_failure_when_credentials_are_absent()
     {
         if (!IsRealCliTestsEnabled())
@@ -1124,8 +1124,8 @@ public sealed class CopilotProviderTests
         RealCliInvocationTestHarness.AssertActionableFailure("copilot", failureMessage);
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task ExecuteAsync_real_cli_can_resume_provider_native_session_when_opted_in()
     {
         if (!IsRealCliTestsEnabled() || !IsRealCopilotSessionTestsEnabled())
@@ -1173,8 +1173,8 @@ public sealed class CopilotProviderTests
         secondResult.AssistantText.ShouldContain(rememberedToken);
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task ExecuteAsync_real_cli_can_complete_a_read_tool_turn_when_opted_in()
     {
         if (!IsRealCliTestsEnabled() || !IsRealCopilotSessionTestsEnabled())
