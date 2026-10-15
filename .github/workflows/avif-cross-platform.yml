@@ -1,0 +1,111 @@
+name: AVIF Imaging Cross-Platform
+
+# Runs the full HagiCode.Libs.Imaging suite on the four supported runtime identifiers, checks the per-RID publish output,
+# and checks the packed nupkg. The in-process guard tests run in every job as part of the suite.
+# Native-dependent tests fail on a supported platform when the runtime cannot load. CI never sets
+# HAGICODE_IMAGING_SKIP_NATIVE.
+
+on:
+  push:
+    paths:
+      - '.github/workflows/avif-cross-platform.yml'
+      - 'src/**'
+      - 'tests/**'
+      - 'scripts/imaging/**'
+      - 'Directory.Build.props'
+      - 'Directory.Packages.props'
+      - 'global.json'
+      - '*.slnx'
+  pull_request:
+    paths:
+      - '.github/workflows/avif-cross-platform.yml'
+      - 'src/**'
+      - 'tests/**'
+      - 'scripts/imaging/**'
+      - 'Directory.Build.props'
+      - 'Directory.Packages.props'
+      - 'global.json'
+      - '*.slnx'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  imaging-suite:
+    name: 'Imaging suite (${{ matrix.rid }})'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rid: linux-x64
+          - os: windows-latest
+            rid: win-x64
+          # Intel macOS (x64). Label confirmed against actions/runner-images: macos-15-intel.
+          - os: macos-15-intel
+            rid: osx-x64
+          # Apple Silicon (arm64). macos-latest is the arm64 image.
+          - os: macos-latest
+            rid: osx-arm64
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK from global.json
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Setup Python for the native layout check
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run Imaging test suite
+        run: dotnet test tests/HagiCode.Libs.Imaging.Tests/HagiCode.Libs.Imaging.Tests.csproj -c Release
+
+      - name: Publish test project for this runtime identifier
+        run: dotnet publish tests/HagiCode.Libs.Imaging.Tests/HagiCode.Libs.Imaging.Tests.csproj -c Release -r ${{ matrix.rid }} --self-contained false -o publish/${{ matrix.rid }}
+
+      - name: Check that only this runtime identifier's native library is published
+        run: python scripts/imaging/verify_native_layout.py publish publish/${{ matrix.rid }} ${{ matrix.rid }}
+
+      - name: Log code-signing status of bundled libraries (informational)
+        if: startsWith(matrix.os, 'macos')
+        continue-on-error: true
+        run: |
+          for library in publish/${{ matrix.rid }}/libvips*.dylib; do
+            echo "== $library"
+            codesign -dv "$library" 2>&1 || true
+          done
+
+  imaging-package:
+    name: 'Imaging package contents'
+    runs-on: ubuntu-latest
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK from global.json
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Setup Python for the native layout check
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Pack HagiCode.Libs.Imaging
+        run: dotnet pack src/HagiCode.Libs.Imaging/HagiCode.Libs.Imaging.csproj -c Release -o artifacts/packages /p:Version=0.0.0-ci.${{ github.run_number }}
+
+      - name: Check nupkg native layout, notices and absence of executables
+        run: python scripts/imaging/verify_native_layout.py nupkg artifacts/packages/HagiCode.Libs.Imaging.*.nupkg
