@@ -1,0 +1,4 @@
+{"fixtureHeader":{"provenance":"synthetic","source":"synthetic; shaped after the ACP tool_call schema handled by KimiAcpMessageMapper","format":"acp-jsonrpc"},"expectedToolKinds":{"kimi-call-1":"write","kimi-call-2":"edit"}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"kimi-session-1","update":{"sessionUpdate":"tool_call","toolCallId":"kimi-call-1","title":"WriteFile","kind":"edit","status":"pending","rawInput":{"path":"notes.txt","content":"hello\n"}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"kimi-session-1","update":{"sessionUpdate":"tool_call_update","toolCallId":"kimi-call-1","status":"completed"}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"kimi-session-1","update":{"sessionUpdate":"tool_call","toolCallId":"kimi-call-2","title":"StrReplaceFile","kind":"edit","status":"pending","rawInput":{"path":"notes.txt","old_string":"hello","new_string":"bye"}}}}

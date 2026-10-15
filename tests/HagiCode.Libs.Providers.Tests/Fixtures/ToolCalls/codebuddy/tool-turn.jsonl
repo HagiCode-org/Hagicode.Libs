@@ -1,0 +1,4 @@
+{"fixtureHeader":{"provenance":"synthetic","source":"synthetic; shaped after the ACP tool_call schema handled by CodebuddyAcpMessageMapper","format":"acp-jsonrpc"},"expectedToolKinds":{"codebuddy-call-1":"shell","codebuddy-call-2":"fetch"}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"codebuddy-session-1","update":{"sessionUpdate":"tool_call","toolCallId":"codebuddy-call-1","title":"Bash","kind":"execute","status":"pending","rawInput":{"command":"npm test"}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"codebuddy-session-1","update":{"sessionUpdate":"tool_call_update","toolCallId":"codebuddy-call-1","status":"completed"}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"codebuddy-session-1","update":{"sessionUpdate":"tool_call","toolCallId":"codebuddy-call-2","title":"WebFetch","kind":"fetch","status":"pending","rawInput":{"url":"https://example.com/docs"}}}}

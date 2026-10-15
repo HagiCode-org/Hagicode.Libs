@@ -1,0 +1,3 @@
+{"fixtureHeader":{"provenance":"synthetic","source":"synthetic; shaped after the ACP tool_call schema handled by DeepAgentsAcpMessageMapper","format":"acp-jsonrpc"},"expectedToolKinds":{"deepagents-call-1":"shell"}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"deepagents-session-1","update":{"sessionUpdate":"tool_call","toolCallId":"deepagents-call-1","title":"execute","kind":"execute","status":"pending","rawInput":{"command":"ls"}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"deepagents-session-1","update":{"sessionUpdate":"tool_call_update","toolCallId":"deepagents-call-1","status":"completed"}}}

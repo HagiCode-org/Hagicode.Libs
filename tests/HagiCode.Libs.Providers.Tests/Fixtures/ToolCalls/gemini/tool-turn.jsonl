@@ -1,0 +1,4 @@
+{"fixtureHeader":{"provenance":"synthetic","source":"synthetic; shaped after the ACP tool_call schema handled by GeminiAcpMessageMapper","format":"acp-jsonrpc"},"expectedToolKinds":{"gemini-call-1":"shell","gemini-call-2":"read"}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"gemini-session-1","update":{"sessionUpdate":"tool_call","toolCallId":"gemini-call-1","title":"run_shell_command","kind":"execute","status":"pending","rawInput":{"command":"ls -la"}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"gemini-session-1","update":{"sessionUpdate":"tool_call_update","toolCallId":"gemini-call-1","status":"completed","content":[{"type":"content","content":{"type":"text","text":"total 0"}}]}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"gemini-session-1","update":{"sessionUpdate":"tool_call","toolCallId":"gemini-call-2","title":"read_file","kind":"read","status":"pending","rawInput":{"path":"README.md"}}}}

@@ -1,0 +1,4 @@
+{"fixtureHeader":{"provenance":"synthetic","source":"synthetic; shaped after the ACP tool_call schema handled by KiroAcpMessageMapper","format":"acp-jsonrpc"},"expectedToolKinds":{"kiro-call-1":"shell","kiro-call-2":"other"}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"kiro-session-1","update":{"sessionUpdate":"tool_call","toolCallId":"kiro-call-1","title":"shell","kind":"execute","status":"pending","rawInput":{"command":"pwd"}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"kiro-session-1","update":{"sessionUpdate":"tool_call_update","toolCallId":"kiro-call-1","status":"completed"}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"kiro-session-1","update":{"sessionUpdate":"tool_call","toolCallId":"kiro-call-2","title":"delete_file","kind":"delete","status":"pending","rawInput":{"path":"tmp.txt"}}}}

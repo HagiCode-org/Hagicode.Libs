@@ -1,0 +1,4 @@
+{"fixtureHeader":{"provenance":"synthetic","source":"synthetic; shaped after the ACP tool_call schema handled by JunieAcpMessageMapper","format":"acp-jsonrpc"},"expectedToolKinds":{"junie-call-1":"search","junie-call-2":"fetch"}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"junie-session-1","update":{"sessionUpdate":"tool_call","toolCallId":"junie-call-1","title":"grep","kind":"search","status":"pending","rawInput":{"pattern":"TODO","path":"src"}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"junie-session-1","update":{"sessionUpdate":"tool_call_update","toolCallId":"junie-call-1","status":"completed"}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"junie-session-1","update":{"sessionUpdate":"tool_call","toolCallId":"junie-call-2","title":"web_fetch","kind":"fetch","status":"pending","rawInput":{"url":"https://example.com"}}}}

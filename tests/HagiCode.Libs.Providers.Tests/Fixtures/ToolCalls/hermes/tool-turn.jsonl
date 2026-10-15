@@ -1,0 +1,3 @@
+{"fixtureHeader":{"provenance":"synthetic","source":"synthetic; shaped after the ACP tool_call schema handled by HermesAcpMessageMapper","format":"acp-jsonrpc"},"expectedToolKinds":{"hermes-call-1":"read"}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"hermes-session-1","update":{"sessionUpdate":"tool_call","toolCallId":"hermes-call-1","title":"read_file","kind":"read","status":"pending","rawInput":{"path":"a.txt"}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"hermes-session-1","update":{"sessionUpdate":"tool_call_update","toolCallId":"hermes-call-1","status":"completed"}}}

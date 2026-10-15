@@ -1,0 +1,4 @@
+{"fixtureHeader":{"provenance":"synthetic","source":"synthetic; shaped after the ACP tool_call schema handled by QoderCliAcpMessageMapper","format":"acp-jsonrpc"},"expectedToolKinds":{"qoder-call-1":"shell","qoder-call-2":"read"}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"qoder-session-1","update":{"sessionUpdate":"tool_call","toolCallId":"qoder-call-1","title":"Bash","kind":"other","status":"pending","rawInput":{"command":"git status"}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"qoder-session-1","update":{"sessionUpdate":"tool_call_update","toolCallId":"qoder-call-1","status":"completed"}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"qoder-session-1","update":{"sessionUpdate":"tool_call","toolCallId":"qoder-call-2","title":"Read","kind":"read","status":"pending","rawInput":{"file_path":"go.mod"}}}}
