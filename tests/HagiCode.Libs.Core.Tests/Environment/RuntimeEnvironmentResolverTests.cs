@@ -8,7 +8,7 @@ public sealed class RuntimeEnvironmentResolverTests
 {
     private const string AgentCliPathEnvironmentVariable = "HAGICODE_AGENT_CLI_PATH";
 
-    [Fact]
+    [Test]
     public async Task ResolveAsync_returns_current_environment_when_not_on_macos()
     {
         var originalValue = System.Environment.GetEnvironmentVariable(AgentCliPathEnvironmentVariable);
@@ -35,7 +35,7 @@ public sealed class RuntimeEnvironmentResolverTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task ResolveAsync_uses_shell_output_on_macos_and_caches_result()
     {
         var customPathValue = string.Join(Path.PathSeparator, ["/tmp/agent-a", "/tmp/agent-b"]);
@@ -63,7 +63,7 @@ public sealed class RuntimeEnvironmentResolverTests
         runner.Verify(static mock => mock.RunAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    [Fact]
+    [Test]
     public async Task ResolveAsync_falls_back_when_shell_command_fails()
     {
         var runner = new Mock<IShellCommandRunner>();

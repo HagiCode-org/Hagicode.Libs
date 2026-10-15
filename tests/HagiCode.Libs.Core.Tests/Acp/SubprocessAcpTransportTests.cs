@@ -7,7 +7,7 @@ namespace HagiCode.Libs.Core.Tests.Acp;
 
 public sealed class SubprocessAcpTransportTests
 {
-    [Fact]
+    [Test]
     public async Task DisconnectAsync_ignores_expected_operation_canceled_errors_from_standard_error_pump()
     {
         var manager = new ThrowingStandardErrorCliProcessManager(
@@ -22,7 +22,7 @@ public sealed class SubprocessAcpTransportTests
         await transport.DisconnectAsync();
     }
 
-    [Fact]
+    [Test]
     public async Task DisconnectAsync_preserves_unrelated_standard_error_pump_failures()
     {
         var manager = new ThrowingStandardErrorCliProcessManager(
@@ -39,7 +39,7 @@ public sealed class SubprocessAcpTransportTests
         exception.Message.ShouldContain("stderr pipe failed unexpectedly");
     }
 
-    [Fact]
+    [Test]
     public async Task ReceiveMessagesAsync_cancellation_between_messages_throws()
     {
         await using var transport = new SubprocessAcpTransport(new CliProcessManager(), new ProcessStartContext

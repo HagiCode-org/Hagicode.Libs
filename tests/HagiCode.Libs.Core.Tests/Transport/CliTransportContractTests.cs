@@ -7,7 +7,7 @@ namespace HagiCode.Libs.Core.Tests.Transport;
 
 public sealed class CliTransportContractTests
 {
-    [Fact]
+    [Test]
     public async Task Transport_contract_can_send_receive_and_disconnect()
     {
         await using var transport = new InMemoryCliTransport();

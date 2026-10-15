@@ -8,7 +8,7 @@ public sealed class CliExecutionFacadeTests
 {
     private readonly CliExecutionFacade _facade = new(new CliProcessManager());
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_returns_structured_success_result_for_buffered_execution()
     {
         var result = await _facade.ExecuteAsync(new CliExecutionRequest
@@ -26,7 +26,7 @@ public sealed class CliExecutionFacadeTests
         result.CapturedOutput.ShouldContain(chunk => chunk.Channel == CliExecutionOutputChannel.StandardError && chunk.Text.Contains("oops", StringComparison.Ordinal));
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_returns_timeout_status_and_diagnostics()
     {
         var result = await _facade.ExecuteAsync(new CliExecutionRequest
@@ -42,7 +42,7 @@ public sealed class CliExecutionFacadeTests
         result.StandardError.ShouldContain("timed out");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_returns_rejected_result_when_policy_blocks_request()
     {
         var facade = new CliExecutionFacade(new CliProcessManager(), null, new RejectingPolicy());
@@ -58,7 +58,7 @@ public sealed class CliExecutionFacadeTests
         result.ExitCode.ShouldBeNull();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteStreamingAsync_emits_output_events_and_terminal_envelope()
     {
         var events = new List<CliExecutionEvent>();

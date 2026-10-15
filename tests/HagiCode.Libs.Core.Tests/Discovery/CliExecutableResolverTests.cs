@@ -7,7 +7,7 @@ public sealed class CliExecutableResolverTests
 {
     private const string AgentCliPathEnvironmentVariable = "HAGICODE_AGENT_CLI_PATH";
 
-    [Fact]
+    [Test]
     public void ResolveExecutablePath_prefers_hagicode_agent_cli_path_before_path()
     {
         using var sandbox = new DirectorySandbox();
@@ -24,7 +24,7 @@ public sealed class CliExecutableResolverTests
         resolved.ShouldBe(executable);
     }
 
-    [Fact]
+    [Test]
     public void ResolveExecutablePath_preserves_hagicode_agent_cli_path_directory_order()
     {
         using var sandbox = new DirectorySandbox();
@@ -43,7 +43,7 @@ public sealed class CliExecutableResolverTests
         resolved.ShouldBe(firstMatch);
     }
 
-    [Fact]
+    [Test]
     public void ResolveExecutablePath_falls_back_to_path_when_hagicode_agent_cli_path_has_no_match()
     {
         using var sandbox = new DirectorySandbox();
@@ -60,7 +60,7 @@ public sealed class CliExecutableResolverTests
         resolved.ShouldBe(executable);
     }
 
-    [Fact]
+    [Test]
     public void ResolveFirstAvailablePath_honors_candidate_order()
     {
         using var sandbox = new DirectorySandbox();
@@ -73,7 +73,7 @@ public sealed class CliExecutableResolverTests
         resolved.ShouldEndWith("beta");
     }
 
-    [Fact]
+    [Test]
     public void ResolveExecutablePaths_returns_all_distinct_matches_in_probe_order()
     {
         using var sandbox = new DirectorySandbox();
@@ -88,7 +88,7 @@ public sealed class CliExecutableResolverTests
         resolved.ShouldBe([executable]);
     }
 
-    [Fact]
+    [Test]
     public void IsExecutableAvailable_returns_false_when_missing()
     {
         using var sandbox = new DirectorySandbox();
@@ -97,7 +97,7 @@ public sealed class CliExecutableResolverTests
         resolver.IsExecutableAvailable("missing", sandbox.BuildEnvironment()).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public void ResolveExecutablePath_on_windows_tries_known_extensions_for_hagicode_agent_cli_path_entries()
     {
         using var sandbox = new DirectorySandbox();
@@ -113,7 +113,7 @@ public sealed class CliExecutableResolverTests
         resolved.ShouldBe(executable);
     }
 
-    [Fact]
+    [Test]
     public void ResolveExecutablePath_on_windows_probes_relative_paths_without_extensions_like_cliwrap()
     {
         using var sandbox = new DirectorySandbox();

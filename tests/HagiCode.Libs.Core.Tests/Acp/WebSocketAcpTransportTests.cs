@@ -9,7 +9,7 @@ namespace HagiCode.Libs.Core.Tests.Acp;
 
 public sealed class WebSocketAcpTransportTests
 {
-    [Fact]
+    [Test]
     public async Task ReceiveMessagesAsync_cancellation_between_messages_throws()
     {
         var port = GetFreeLoopbackPort();

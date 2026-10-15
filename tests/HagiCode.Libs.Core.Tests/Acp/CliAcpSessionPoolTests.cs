@@ -9,7 +9,7 @@ namespace HagiCode.Libs.Core.Tests.Acp;
 
 public sealed class CliAcpSessionPoolTests
 {
-    [Fact]
+    [Test]
     public async Task AcquireAsync_reuses_warm_compatible_entry_for_same_logical_key()
     {
         var timeProvider = new ManualTimeProvider();
@@ -42,7 +42,7 @@ public sealed class CliAcpSessionPoolTests
         diagnostics.ProviderDiagnostics[0].MissCount.ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public async Task AcquireAsync_replaces_named_entry_when_compatibility_fingerprint_changes()
     {
         var timeProvider = new ManualTimeProvider();
@@ -80,7 +80,7 @@ public sealed class CliAcpSessionPoolTests
         diagnostics.LastEviction.Reason.ShouldBe(CliAcpSessionPoolEventReason.CompatibilityMismatch);
     }
 
-    [Fact]
+    [Test]
     public async Task Entry_execution_lock_serializes_concurrent_prompt_access()
     {
         var timeProvider = new ManualTimeProvider();
@@ -102,7 +102,7 @@ public sealed class CliAcpSessionPoolTests
         secondLease.Entry.ExecutionLock.Release();
     }
 
-    [Fact]
+    [Test]
     public async Task ReapIdleEntriesAsync_evicts_entries_past_idle_timeout()
     {
         var timeProvider = new ManualTimeProvider();
@@ -136,7 +136,7 @@ public sealed class CliAcpSessionPoolTests
         diagnostics.LastEviction.Reason.ShouldBe(CliAcpSessionPoolEventReason.Idle);
     }
 
-    [Fact]
+    [Test]
     public async Task AcquireAsync_reclaims_expired_idle_entries_before_capacity_check()
     {
         var timeProvider = new ManualTimeProvider();
@@ -169,7 +169,7 @@ public sealed class CliAcpSessionPoolTests
         pool.GetDiagnosticsSnapshot().LastEviction?.Reason.ShouldBe(CliAcpSessionPoolEventReason.Idle);
     }
 
-    [Fact]
+    [Test]
     public async Task AcquireAsync_evicts_oldest_idle_entry_when_provider_is_still_at_capacity()
     {
         var timeProvider = new ManualTimeProvider();
@@ -216,7 +216,7 @@ public sealed class CliAcpSessionPoolTests
         pool.GetDiagnosticsSnapshot().LastEviction?.Reason.ShouldBe(CliAcpSessionPoolEventReason.Capacity);
     }
 
-    [Fact]
+    [Test]
     public async Task AcquireAsync_throws_when_provider_capacity_is_fully_leased()
     {
         var timeProvider = new ManualTimeProvider();
@@ -242,7 +242,7 @@ public sealed class CliAcpSessionPoolTests
         exception.Message.ShouldContain("maximum active session limit");
     }
 
-    [Fact]
+    [Test]
     public async Task ReturnAsync_faulted_lease_disposes_entry_immediately()
     {
         var timeProvider = new ManualTimeProvider();
@@ -274,7 +274,7 @@ public sealed class CliAcpSessionPoolTests
         diagnostics.ProviderDiagnostics.Single().FaultCount.ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public async Task AcquireAsync_creates_fresh_entry_after_fault_for_same_logical_key()
     {
         var timeProvider = new ManualTimeProvider();
@@ -314,7 +314,7 @@ public sealed class CliAcpSessionPoolTests
         diagnostics.ProviderDiagnostics.Single().ActiveEntryCount.ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public async Task GetDiagnosticsSnapshot_reports_live_counts_for_active_and_leased_entries()
     {
         var timeProvider = new ManualTimeProvider();
@@ -342,7 +342,7 @@ public sealed class CliAcpSessionPoolTests
         idleSnapshot.ProviderDiagnostics.Single().LeasedEntryCount.ShouldBe(0);
     }
 
-    [Fact]
+    [Test]
     public async Task GetDiagnosticsSnapshot_reports_provider_scoped_counts_and_recent_events()
     {
         var timeProvider = new ManualTimeProvider();
@@ -401,7 +401,7 @@ public sealed class CliAcpSessionPoolTests
         kimiDiagnostics.LastFault.Reason.ShouldBe(CliAcpSessionPoolEventReason.Fault);
     }
 
-    [Fact]
+    [Test]
     public async Task Pool_emits_structured_logs_and_metrics_for_pool_events()
     {
         var timeProvider = new ManualTimeProvider();

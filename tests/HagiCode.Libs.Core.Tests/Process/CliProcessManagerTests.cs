@@ -11,7 +11,7 @@ public sealed class CliProcessManagerTests
 {
     private readonly CliProcessManager _manager = new();
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_captures_standard_output_error_and_chunks()
     {
         var result = await _manager.ExecuteAsync(CreateShellContext("printf 'hello'; printf 'oops' >&2"));
@@ -26,7 +26,7 @@ public sealed class CliProcessManagerTests
         result.CompletedAtUtc.ShouldNotBeNull();
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_applies_environment_variable_overrides()
     {
         var result = await _manager.ExecuteAsync(new ProcessStartContext
@@ -42,7 +42,7 @@ public sealed class CliProcessManagerTests
         result.StandardOutput.ShouldBe("from-child");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_returns_timeout_result_when_process_runs_too_long()
     {
         var result = await _manager.ExecuteAsync(new ProcessStartContext
@@ -57,7 +57,7 @@ public sealed class CliProcessManagerTests
         result.StandardError.ShouldContain("timed out");
     }
 
-    [Fact]
+    [Test]
     public async Task ExecuteAsync_closes_redirected_stdin_so_processes_waiting_for_eof_can_exit()
     {
         var result = await _manager.ExecuteAsync(new ProcessStartContext
@@ -70,7 +70,7 @@ public sealed class CliProcessManagerTests
         result.StandardOutput.ShouldBe("done");
     }
 
-    [Fact]
+    [Test]
     public void CreateStartInfo_redirects_streams_and_preserves_utf8()
     {
         var startInfo = _manager.CreateStartInfo(CreateShellContext("printf 'ok'"));
@@ -89,7 +89,7 @@ public sealed class CliProcessManagerTests
         startInfo.StandardErrorEncoding.GetPreamble().ShouldBeEmpty();
     }
 
-    [Fact]
+    [Test]
     public void CreateStartInfo_on_windows_uses_resolved_batch_files_directly_after_resolution()
     {
         var manager = new TestCliProcessManager(@"C:\tools\npm.cmd");
@@ -107,7 +107,7 @@ public sealed class CliProcessManagerTests
         startInfo.StandardErrorEncoding.WebName.ShouldBe(Encoding.Unicode.WebName);
     }
 
-    [Fact]
+    [Test]
     public void CreateStartInfo_on_windows_preserves_batch_paths_with_spaces_and_argument_order()
     {
         var manager = new TestCliProcessManager(@"C:\Program Files\Anthropic\claude.cmd");
@@ -123,7 +123,7 @@ public sealed class CliProcessManagerTests
         startInfo.StandardErrorEncoding.WebName.ShouldBe(Encoding.Unicode.WebName);
     }
 
-    [Fact]
+    [Test]
     public void CreateStartInfo_on_windows_keeps_direct_executables_outside_cmd_shim_branch()
     {
         var manager = new TestCliProcessManager(@"C:\Program Files\Anthropic\claude.exe");
@@ -137,7 +137,7 @@ public sealed class CliProcessManagerTests
         startInfo.ArgumentList.ShouldBe(["--output-format", "stream-json"]);
     }
 
-    [Fact]
+    [Test]
     public void CreateStartInfo_on_non_windows_does_not_wrap_batch_extensions()
     {
         var manager = new TestCliProcessManager("/opt/anthropic/claude.cmd", isWindows: false);
@@ -151,7 +151,7 @@ public sealed class CliProcessManagerTests
         startInfo.ArgumentList.ShouldBe(["--output-format", "stream-json"]);
     }
 
-    [Fact]
+    [Test]
     public async Task StartAsync_persists_owned_process_and_stop_async_removes_record()
     {
         using var tempDirectory = new TempDirectory();
@@ -182,7 +182,7 @@ public sealed class CliProcessManagerTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task DisposeAsync_removes_owned_process_record_after_process_exit()
     {
         using var tempDirectory = new TempDirectory();
@@ -199,7 +199,7 @@ public sealed class CliProcessManagerTests
         File.Exists(statePath).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task RecoverOwnedProcessesAsync_deletes_corrupted_state_file()
     {
         using var tempDirectory = new TempDirectory();
@@ -213,7 +213,7 @@ public sealed class CliProcessManagerTests
         File.Exists(statePath).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task RecoverOwnedProcessesAsync_skips_start_time_mismatch_and_removes_record()
     {
         using var tempDirectory = new TempDirectory();
@@ -240,7 +240,7 @@ public sealed class CliProcessManagerTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task RecoverOwnedProcessesAsync_kills_matching_owned_process_and_removes_record()
     {
         using var tempDirectory = new TempDirectory();

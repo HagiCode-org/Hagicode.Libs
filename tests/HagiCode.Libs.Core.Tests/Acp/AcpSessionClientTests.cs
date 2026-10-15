@@ -8,7 +8,7 @@ namespace HagiCode.Libs.Core.Tests.Acp;
 
 public sealed class AcpSessionClientTests
 {
-    [Fact]
+    [Test]
     public async Task StartSessionAsync_bootstraps_initialize_and_parses_string_session_result()
     {
         var transport = new ScriptedAcpTransport(request => request.Method switch
@@ -31,7 +31,7 @@ public sealed class AcpSessionClientTests
         transport.Requests[1].Params.GetProperty("cwd").GetString().ShouldBe("/tmp/project");
     }
 
-    [Fact]
+    [Test]
     public async Task InitializeAsync_honors_cancellation_when_transport_never_responds()
     {
         var transport = new HangingAcpTransport();
@@ -43,7 +43,7 @@ public sealed class AcpSessionClientTests
         await Should.ThrowAsync<TaskCanceledException>(async () => await client.InitializeAsync(cts.Token));
     }
 
-    [Fact]
+    [Test]
     public async Task StartSessionAsync_trims_session_id_and_model_before_forwarding()
     {
         var transport = new ScriptedAcpTransport(request => request.Method switch
@@ -67,7 +67,7 @@ public sealed class AcpSessionClientTests
         transport.Requests[2].Params.GetProperty("modelId").GetString().ShouldBe("Claude Sonnet 4.5");
     }
 
-    [Fact]
+    [Test]
     public async Task StartSessionAsync_uses_hermes_session_settings_instead_of_session_set_model()
     {
         var transport = new ScriptedAcpTransport(request => request.Method switch
@@ -88,7 +88,7 @@ public sealed class AcpSessionClientTests
         transport.Requests[1].Params.GetProperty("settings").GetProperty("model").GetString().ShouldBe("minimax-m2.7-high-speed");
     }
 
-    [Fact]
+    [Test]
     public async Task StartSessionAsync_skips_session_set_model_when_resuming_hermes_session()
     {
         var transport = new ScriptedAcpTransport(request => request.Method switch
@@ -108,7 +108,7 @@ public sealed class AcpSessionClientTests
         transport.SentMethods.ShouldBe(["initialize", "session/load"]);
     }
 
-    [Fact]
+    [Test]
     public async Task StartSessionAsync_skips_session_set_model_when_hermes_hint_is_supplied()
     {
         var transport = new ScriptedAcpTransport(request => request.Method switch
@@ -128,7 +128,7 @@ public sealed class AcpSessionClientTests
         transport.SentMethods.ShouldBe(["initialize", "session/load"]);
     }
 
-    [Fact]
+    [Test]
     public async Task StartSessionAsync_treats_whitespace_only_optional_values_as_absent()
     {
         var transport = new ScriptedAcpTransport(request => request.Method switch
@@ -148,7 +148,7 @@ public sealed class AcpSessionClientTests
         transport.SentMethods.ShouldBe(["initialize", "session/new"]);
     }
 
-    [Fact]
+    [Test]
     public async Task InvokeBootstrapMethodAsync_initializes_once_and_forwards_method_payload()
     {
         var transport = new ScriptedAcpTransport(request => request.Method switch
@@ -178,7 +178,7 @@ public sealed class AcpSessionClientTests
         transport.Requests[1].Params.GetProperty("methodInfo").GetProperty("token").GetString().ShouldBe("secret");
     }
 
-    [Fact]
+    [Test]
     public async Task SendPromptAsync_enqueues_synthetic_prompt_completed_notification_for_end_turn_results()
     {
         var transport = new ScriptedAcpTransport(request => request.Method switch
@@ -202,7 +202,7 @@ public sealed class AcpSessionClientTests
         enumerator.Current.Parameters.GetProperty("update").GetProperty("sessionUpdate").GetString().ShouldBe("prompt_completed");
     }
 
-    [Fact]
+    [Test]
     public async Task SendPromptAsync_appends_transport_diagnostics_to_rpc_errors()
     {
         var transport = new ScriptedAcpTransport(
@@ -224,7 +224,7 @@ public sealed class AcpSessionClientTests
         exception.Message.ShouldContain("trace two");
     }
 
-    [Fact]
+    [Test]
     public async Task SetModeAsync_invokes_session_set_mode()
     {
         var transport = new ScriptedAcpTransport(request => request.Method switch
@@ -244,7 +244,7 @@ public sealed class AcpSessionClientTests
         transport.Requests[1].Params.GetProperty("modeId").GetString().ShouldBe("yolo");
     }
 
-    [Fact]
+    [Test]
     public async Task SendPromptAsync_auto_approves_request_permission_with_allow_always_when_available()
     {
         var transport = new ScriptedAcpTransport(request => request.Method switch
@@ -284,7 +284,7 @@ public sealed class AcpSessionClientTests
         enumerator.Current.Parameters.GetProperty("update").GetProperty("sessionUpdate").GetString().ShouldBe("prompt_completed");
     }
 
-    [Fact]
+    [Test]
     public async Task SendPromptAsync_auto_approves_request_permission_with_allow_once_when_allow_always_is_absent()
     {
         var transport = new ScriptedAcpTransport(request => request.Method switch
@@ -312,7 +312,7 @@ public sealed class AcpSessionClientTests
         transport.OutboundResponses["perm-2"].GetProperty("outcome").GetProperty("optionId").GetString().ShouldBe("approve");
     }
 
-    [Fact]
+    [Test]
     public async Task GetDiagnosticSummary_surfaces_transport_diagnostics()
     {
         var transport = new ScriptedAcpTransport(
@@ -324,7 +324,7 @@ public sealed class AcpSessionClientTests
         client.GetDiagnosticSummary().ShouldBe("429 您的使用量已超出频率限制");
     }
 
-    [Fact]
+    [Test]
     public void SanitizeIncomingMessage_strips_comment_preamble()
     {
         var payload = "// ready\n{\"jsonrpc\":\"2.0\",\"id\":\"1\",\"result\":{}}";

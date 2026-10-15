@@ -5,7 +5,7 @@ namespace HagiCode.Libs.Core.Tests.Discovery;
 
 public sealed class CliInstallRegistryTests
 {
-    [Fact]
+    [Test]
     public void Descriptors_include_copilot_with_public_install_metadata()
     {
         var descriptor = CliInstallRegistry.Descriptors.Single(d => d.ProviderName == "Copilot");
@@ -16,7 +16,7 @@ public sealed class CliInstallRegistryTests
         descriptor.IsPubliclyInstallable.ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public void Descriptors_include_kimi_with_explicit_local_only_metadata()
     {
         var descriptor = CliInstallRegistry.Descriptors.Single(d => d.ProviderName == "Kimi");
@@ -27,7 +27,7 @@ public sealed class CliInstallRegistryTests
         descriptor.IsPubliclyInstallable.ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public void Descriptors_include_gemini_with_explicit_local_only_metadata()
     {
         var descriptor = CliInstallRegistry.Descriptors.Single(d => d.ProviderName == "Gemini");
@@ -38,7 +38,7 @@ public sealed class CliInstallRegistryTests
         descriptor.IsPubliclyInstallable.ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public void Descriptors_include_junie_with_explicit_local_only_metadata()
     {
         var descriptor = CliInstallRegistry.Descriptors.Single(d => d.ProviderName == "Junie");
@@ -49,7 +49,7 @@ public sealed class CliInstallRegistryTests
         descriptor.IsPubliclyInstallable.ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public void Descriptors_include_dsh_with_explicit_local_only_metadata()
     {
         var descriptor = CliInstallRegistry.Descriptors.Single(d => d.ProviderName == "Dsh");
@@ -60,7 +60,7 @@ public sealed class CliInstallRegistryTests
         descriptor.IsPubliclyInstallable.ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public void Descriptors_include_deepagents_with_explicit_local_only_metadata()
     {
         var descriptor = CliInstallRegistry.Descriptors.Single(d => d.ProviderName == "DeepAgents");
@@ -71,7 +71,7 @@ public sealed class CliInstallRegistryTests
         descriptor.IsPubliclyInstallable.ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public void Descriptors_include_kiro_with_explicit_local_only_metadata()
     {
         var descriptor = CliInstallRegistry.Descriptors.Single(d => d.ProviderName == "Kiro");
@@ -82,7 +82,7 @@ public sealed class CliInstallRegistryTests
         descriptor.IsPubliclyInstallable.ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public void Descriptors_include_reasonix_with_explicit_local_only_metadata()
     {
         var descriptor = CliInstallRegistry.Descriptors.Single(d => d.ProviderName == "Reasonix");
@@ -93,7 +93,7 @@ public sealed class CliInstallRegistryTests
         descriptor.IsPubliclyInstallable.ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public void Descriptors_include_pi_with_published_package_but_local_only_and_unpinned()
     {
         var descriptor = CliInstallRegistry.Descriptors.Single(d => d.ProviderName == "Pi");
@@ -104,7 +104,7 @@ public sealed class CliInstallRegistryTests
         descriptor.IsPubliclyInstallable.ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public void Descriptors_include_omp_with_explicit_local_only_metadata()
     {
         var descriptor = CliInstallRegistry.Descriptors.Single(d => d.ProviderName == "Omp");
@@ -115,7 +115,7 @@ public sealed class CliInstallRegistryTests
         descriptor.IsPubliclyInstallable.ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public void Descriptors_include_opencode_with_public_install_metadata()
     {
         var descriptor = CliInstallRegistry.Descriptors.Single(d => d.ProviderName == "OpenCode");
@@ -126,7 +126,7 @@ public sealed class CliInstallRegistryTests
         descriptor.IsPubliclyInstallable.ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public void PubliclyInstallable_matrix_contains_claude_code_copilot_codex_and_opencode_only()
     {
         CliInstallRegistry.PubliclyInstallable

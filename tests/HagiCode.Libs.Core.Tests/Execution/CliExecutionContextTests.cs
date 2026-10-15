@@ -6,7 +6,7 @@ namespace HagiCode.Libs.Core.Tests.Execution;
 
 public sealed class CliExecutionContextTests
 {
-    [Fact]
+    [Test]
     public void Create_propagates_input_encoding_into_process_start_context()
     {
         var context = CliExecutionContext.Create(new CliExecutionRequest

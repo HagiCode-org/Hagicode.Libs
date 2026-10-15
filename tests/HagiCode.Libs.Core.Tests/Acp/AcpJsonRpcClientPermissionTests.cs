@@ -15,7 +15,7 @@ public sealed class AcpJsonRpcClientPermissionTests
         {"sessionId":"session-1","toolCall":{"toolCallId":"call-1","title":"Write file","rawInput":{"path":"a.txt"}},"options":[{"optionId":"reject","name":"Reject","kind":"reject_once"},{"optionId":"allow-once","name":"Allow once","kind":"allow_once"},{"optionId":"allow-always","name":"Allow always","kind":"allow_always"}]}
         """;
 
-    [Fact]
+    [Test]
     public async Task Without_a_handler_the_permission_request_gets_the_default_answer_after_its_notification()
     {
         var transport = new PermissionTestTransport();
@@ -31,7 +31,7 @@ public sealed class AcpJsonRpcClientPermissionTests
             """{"jsonrpc":"2.0","id":7,"result":{"outcome":{"outcome":"selected","optionId":"allow-always"}}}""");
     }
 
-    [Fact]
+    [Test]
     public async Task A_selected_decision_answers_with_that_option_and_the_handler_sees_the_parsed_request()
     {
         var transport = new PermissionTestTransport();
@@ -58,7 +58,7 @@ public sealed class AcpJsonRpcClientPermissionTests
         seen.Parameters.GetProperty("sessionId").GetString().ShouldBe("session-1");
     }
 
-    [Fact]
+    [Test]
     public async Task A_cancelled_decision_answers_with_the_cancelled_outcome()
     {
         var transport = new PermissionTestTransport();
@@ -73,7 +73,7 @@ public sealed class AcpJsonRpcClientPermissionTests
             """{"jsonrpc":"2.0","id":"req-9","result":{"outcome":{"outcome":"cancelled"}}}""");
     }
 
-    [Fact]
+    [Test]
     public async Task A_null_decision_falls_through_to_the_default_answer()
     {
         var transport = new PermissionTestTransport();
@@ -92,7 +92,7 @@ public sealed class AcpJsonRpcClientPermissionTests
         calls.ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public async Task The_handler_runs_after_the_notification_is_published()
     {
         var transport = new PermissionTestTransport();
@@ -111,7 +111,7 @@ public sealed class AcpJsonRpcClientPermissionTests
         (await transport.WaitForLineAsync(0)).ShouldContain("\"optionId\":\"reject\"");
     }
 
-    [Fact]
+    [Test]
     public async Task A_delayed_answer_written_while_another_request_is_sent_arrives_as_two_complete_lines()
     {
         var transport = new PermissionTestTransport { SplitWrites = true };
@@ -138,7 +138,7 @@ public sealed class AcpJsonRpcClientPermissionTests
         documents[1].RootElement.GetProperty("result").GetProperty("outcome").GetProperty("optionId").GetString().ShouldBe("allow-once");
     }
 
-    [Fact]
+    [Test]
     public async Task Disposing_with_a_pending_handler_cancels_it_and_completes_without_a_reply_or_fault()
     {
         var transport = new PermissionTestTransport();
@@ -160,7 +160,7 @@ public sealed class AcpJsonRpcClientPermissionTests
         transport.IsDisposed.ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public async Task Disposing_with_a_handler_that_ignores_its_token_completes_without_a_reply()
     {
         var transport = new PermissionTestTransport();

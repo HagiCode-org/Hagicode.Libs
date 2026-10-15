@@ -9,7 +9,7 @@ namespace HagiCode.Libs.Core.Tests.Transport;
 
 public sealed class SubprocessTransportTests
 {
-    [Fact]
+    [Test]
     public async Task SubprocessTransport_sends_and_receives_json_lines()
     {
         var manager = new CliProcessManager();
@@ -36,7 +36,7 @@ public sealed class SubprocessTransportTests
         messages.Select(static message => message.Type).ShouldBe(["assistant", "result"]);
     }
 
-    [Fact]
+    [Test]
     public async Task SubprocessTransport_tolerates_utf8_bom_prefix_on_first_output_line()
     {
         var manager = new CliProcessManager();
@@ -62,7 +62,7 @@ public sealed class SubprocessTransportTests
         messages[0].Content.GetProperty("text").GetString().ShouldBe("hello");
     }
 
-    [Fact]
+    [Test]
     public async Task SubprocessTransport_uses_payload_time_or_read_time_as_event_timestamp()
     {
         var manager = new CliProcessManager();
@@ -90,7 +90,7 @@ public sealed class SubprocessTransportTests
         messages[1].EventTimestamp.Offset.ShouldBe(TimeSpan.Zero);
     }
 
-    [Fact]
+    [Test]
     public async Task SubprocessTransport_rejects_send_before_connect()
     {
         var manager = new CliProcessManager();
@@ -105,7 +105,7 @@ public sealed class SubprocessTransportTests
         await Should.ThrowAsync<InvalidOperationException>(action());
     }
 
-    [Fact]
+    [Test]
     public async Task SubprocessTransport_windows_batch_shim_under_whitespace_path_preserves_messages()
     {
         var manager = new WindowsBatchRecordingCliProcessManager(
@@ -135,7 +135,7 @@ public sealed class SubprocessTransportTests
         manager.LastStartInfo.StandardErrorEncoding.WebName.ShouldBe(Encoding.Unicode.WebName);
     }
 
-    [Fact]
+    [Test]
     public async Task SubprocessTransport_preserves_non_zero_exit_diagnostics_for_unrelated_failures()
     {
         var manager = new CliProcessManager();
@@ -158,7 +158,7 @@ public sealed class SubprocessTransportTests
         exception.Message.ShouldContain("startup failed");
     }
 
-    [Fact]
+    [Test]
     public async Task SubprocessTransport_waits_for_non_zero_exit_after_stdout_closes()
     {
         var manager = new CliProcessManager();
@@ -181,7 +181,7 @@ public sealed class SubprocessTransportTests
         exception.Message.ShouldContain("auth required");
     }
 
-    [Fact]
+    [Test]
     public async Task SubprocessTransport_surfaces_exit_diagnostics_when_send_fails_after_process_exits()
     {
         var manager = new CliProcessManager();
@@ -214,7 +214,7 @@ public sealed class SubprocessTransportTests
         exception.Message.ShouldContain("auth required");
     }
 
-    [Fact]
+    [Test]
     public async Task SubprocessTransport_natural_eof_with_zero_exit_completes()
     {
         var manager = new CliProcessManager();
@@ -235,7 +235,7 @@ public sealed class SubprocessTransportTests
         messages.Select(static message => message.Type).ShouldBe(["result"]);
     }
 
-    [Fact]
+    [Test]
     public async Task SubprocessTransport_cancellation_while_waiting_for_output_throws()
     {
         var manager = new CliProcessManager();
@@ -256,7 +256,7 @@ public sealed class SubprocessTransportTests
         });
     }
 
-    [Fact]
+    [Test]
     public async Task SubprocessTransport_cancellation_between_yielded_messages_throws()
     {
         var manager = new CliProcessManager();

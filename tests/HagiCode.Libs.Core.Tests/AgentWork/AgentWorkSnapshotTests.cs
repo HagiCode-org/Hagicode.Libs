@@ -9,7 +9,7 @@ public sealed class AgentWorkSnapshotTests
 {
     private static readonly DateTimeOffset Start = new(2026, 10, 11, 10, 0, 0, TimeSpan.Zero);
 
-    [Fact]
+    [Test]
     public void ToCliMessage_uses_camel_case_and_omits_absent_members()
     {
         var snapshot = new AgentWorkSnapshot(
@@ -46,7 +46,7 @@ public sealed class AgentWorkSnapshotTests
         item.TryGetProperty("usage", out _).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public void TryFromCliMessage_round_trips_a_snapshot_with_usage_and_an_unknown_kind()
     {
         var snapshot = new AgentWorkSnapshot(
@@ -73,7 +73,7 @@ public sealed class AgentWorkSnapshotTests
         restored.ShouldBe(snapshot, new AgentWorkSnapshotComparer());
     }
 
-    [Fact]
+    [Test]
     public void TryFromCliMessage_rejects_other_message_types_and_malformed_content()
     {
         var notSnapshot = new CliMessage("assistant", JsonSerializer.SerializeToElement(new { sequence = 1, items = Array.Empty<object>() }));
@@ -85,14 +85,13 @@ public sealed class AgentWorkSnapshotTests
         AgentWorkSnapshot.TryFromCliMessage(notObject, out _).ShouldBeFalse();
     }
 
-    [Theory]
-    [InlineData("starting", true)]
-    [InlineData("running", true)]
-    [InlineData("completed", false)]
-    [InlineData("failed", false)]
-    [InlineData("stopped", false)]
-    [InlineData("whatever", false)]
-    [InlineData(null, false)]
+    [TestCase("starting", true)]
+    [TestCase("running", true)]
+    [TestCase("completed", false)]
+    [TestCase("failed", false)]
+    [TestCase("stopped", false)]
+    [TestCase("whatever", false)]
+    [TestCase(null, false)]
     public void IsActive_is_true_only_for_starting_and_running(string? status, bool expected)
     {
         AgentWorkStatuses.IsActive(status).ShouldBe(expected);
