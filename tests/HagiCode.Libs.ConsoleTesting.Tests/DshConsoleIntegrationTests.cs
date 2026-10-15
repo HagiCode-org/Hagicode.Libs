@@ -15,7 +15,7 @@ public sealed class DshConsoleIntegrationTests
     private const string TestProvider = "omniroute";
     private const string TestModel = "claude/claude-haiku-5-5";
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_runs_dsh_default_suite_with_fake_provider()
     {
         var provider = new FakeDshProvider();
@@ -35,7 +35,7 @@ public sealed class DshConsoleIntegrationTests
         rendered.ShouldNotContain("Model:");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_shows_provider_specific_help_text()
     {
         var provider = new FakeDshProvider();
@@ -58,7 +58,7 @@ public sealed class DshConsoleIntegrationTests
         rendered.ShouldContain("--verbose");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_accepts_the_dsh_cli_alias()
     {
         var provider = new FakeDshProvider();
@@ -71,7 +71,7 @@ public sealed class DshConsoleIntegrationTests
         output.ToString().ShouldContain("[PASS] dsh / Ping");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_rejects_foreign_provider_names()
     {
         var provider = new FakeDshProvider();
@@ -84,9 +84,8 @@ public sealed class DshConsoleIntegrationTests
         output.ToString().ShouldContain("dedicated provider console");
     }
 
-    [Theory]
-    [InlineData("--executable", "--executable requires a value")]
-    [InlineData("--bogus", "Unknown option: --bogus")]
+    [TestCase("--executable", "--executable requires a value")]
+    [TestCase("--bogus", "Unknown option: --bogus")]
     public async Task DispatchAsync_reports_configuration_failures_for_invalid_dsh_options(string option, string expectedMessage)
     {
         var provider = new FakeDshProvider();
@@ -104,7 +103,7 @@ public sealed class DshConsoleIntegrationTests
         provider.ReceivedOptions.ShouldBeEmpty();
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_forwards_no_default_model_or_environment_when_flags_are_absent()
     {
         var provider = new FakeDshProvider();
@@ -125,7 +124,7 @@ public sealed class DshConsoleIntegrationTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_passes_explicit_runtime_options_and_resumes_the_returned_session()
     {
         var provider = new FakeDshProvider();
@@ -164,7 +163,7 @@ public sealed class DshConsoleIntegrationTests
         output.ToString().ShouldContain("Summary: 5/5 passed");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_verbose_adds_model_and_workspace_details_to_scenarios()
     {
         var provider = new FakeDshProvider();
@@ -184,7 +183,7 @@ public sealed class DshConsoleIntegrationTests
         rendered.ShouldContain("Workspace: /tmp/dsh-console-workspace");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_session_resume_fails_when_dsh_exposes_no_session_id()
     {
         var provider = new FakeDshProvider(omitSessionId: true);
@@ -200,7 +199,7 @@ public sealed class DshConsoleIntegrationTests
         rendered.ShouldContain("Summary: 4/5 passed");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_verbose_lists_tool_calls_and_assistant_message_identity()
     {
         var provider = new FakeDshProvider();
@@ -219,7 +218,7 @@ public sealed class DshConsoleIntegrationTests
         rendered.ShouldContain("Assistant message ids: 2");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_tool_call_fails_when_no_tool_activity_is_observed()
     {
         var provider = new FakeDshProvider(toolBehavior: FakeToolBehavior.NoToolCall);
@@ -235,9 +234,8 @@ public sealed class DshConsoleIntegrationTests
         rendered.ShouldContain("Summary: 4/5 passed");
     }
 
-    [Theory]
-    [InlineData(FakeToolBehavior.Unfinished, "never completed", "in_progress")]
-    [InlineData(FakeToolBehavior.Failed, "failed", "failed")]
+    [TestCase(FakeToolBehavior.Unfinished, "never completed", "in_progress")]
+    [TestCase(FakeToolBehavior.Failed, "failed", "failed")]
     public async Task DispatchAsync_tool_call_fails_for_unfinished_or_failed_tools(
         FakeToolBehavior toolBehavior,
         string expectedProblem,
@@ -257,8 +255,8 @@ public sealed class DshConsoleIntegrationTests
         rendered.ShouldContain($"final status: {expectedStatus}");
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task ProgramMain_can_ping_the_real_dsh_cli_when_opted_in()
     {
         if (!IsRealCliTestsEnabled())
@@ -281,8 +279,8 @@ public sealed class DshConsoleIntegrationTests
         }
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task ProgramMain_can_run_the_full_default_suite_when_opted_in()
     {
         if (!IsRealCliTestsEnabled())

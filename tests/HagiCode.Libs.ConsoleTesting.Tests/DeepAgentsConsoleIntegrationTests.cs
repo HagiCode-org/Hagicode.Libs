@@ -11,7 +11,7 @@ namespace HagiCode.Libs.ConsoleTesting.Tests;
 
 public sealed class DeepAgentsConsoleIntegrationTests
 {
-    [Fact]
+    [Test]
     public async Task DispatchAsync_runs_deepagents_default_suite_with_fake_provider()
     {
         var provider = new FakeDeepAgentsProvider();
@@ -30,7 +30,7 @@ public sealed class DeepAgentsConsoleIntegrationTests
         rendered.ShouldContain("Summary: 4/4 passed");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_shows_provider_specific_help_text()
     {
         var provider = new FakeDeepAgentsProvider();
@@ -51,7 +51,7 @@ public sealed class DeepAgentsConsoleIntegrationTests
         rendered.ShouldContain("deepagents-acp");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_normalizes_the_deepagents_acp_alias()
     {
         var provider = new FakeDeepAgentsProvider();
@@ -65,7 +65,7 @@ public sealed class DeepAgentsConsoleIntegrationTests
         output.ToString().ShouldContain("[PASS] deepagents / Ping");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_rejects_foreign_provider_names()
     {
         var provider = new FakeDeepAgentsProvider();
@@ -79,7 +79,7 @@ public sealed class DeepAgentsConsoleIntegrationTests
         output.ToString().ShouldContain("dedicated provider console");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_reports_configuration_failures_for_unknown_deepagents_options()
     {
         var provider = new FakeDeepAgentsProvider();
@@ -97,7 +97,7 @@ public sealed class DeepAgentsConsoleIntegrationTests
         output.ToString().ShouldContain("Unknown option: --unknown-option");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_passes_runtime_options_to_scenarios()
     {
         var provider = new FakeDeepAgentsProvider();
@@ -150,7 +150,7 @@ public sealed class DeepAgentsConsoleIntegrationTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_includes_bypass_network_scenario_when_mode_id_requests_bypass()
     {
         var provider = new FakeDeepAgentsProvider();
@@ -181,7 +181,7 @@ public sealed class DeepAgentsConsoleIntegrationTests
         output.ToString().ShouldContain("Summary: 5/5 passed");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_appends_toolcall_scenarios_when_enabled()
     {
         var provider = new FakeDeepAgentsProvider();
@@ -207,7 +207,7 @@ public sealed class DeepAgentsConsoleIntegrationTests
         rendered.ShouldContain("Summary: 7/7 passed");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_toolcall_case_filters_to_the_named_scenario()
     {
         var provider = new FakeDeepAgentsProvider();
@@ -233,7 +233,7 @@ public sealed class DeepAgentsConsoleIntegrationTests
         rendered.ShouldContain("Summary: 5/5 passed");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_reports_available_toolcall_cases_when_selection_is_unknown()
     {
         var provider = new FakeDeepAgentsProvider();
@@ -256,7 +256,7 @@ public sealed class DeepAgentsConsoleIntegrationTests
         rendered.ShouldContain("parsing, failure, mixed");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_renders_verbose_toolcall_trace_details()
     {
         var provider = new FakeDeepAgentsProvider();

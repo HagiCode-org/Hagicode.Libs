@@ -16,7 +16,7 @@ public sealed class CodexConsoleIntegrationTests
 {
     private const string RealCliTestsEnvironmentVariable = "HAGICODE_REAL_CLI_TESTS";
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_runs_codex_default_suite_with_fake_provider()
     {
         var provider = new FakeCodexProvider();
@@ -35,7 +35,7 @@ public sealed class CodexConsoleIntegrationTests
         rendered.ShouldContain("Summary: 4/4 passed");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_shows_provider_specific_help_text()
     {
         var provider = new FakeCodexProvider();
@@ -54,7 +54,7 @@ public sealed class CodexConsoleIntegrationTests
         rendered.ShouldContain("--approval-policy <mode>");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_normalizes_codex_aliases_for_provider_commands()
     {
         var provider = new FakeCodexProvider();
@@ -68,7 +68,7 @@ public sealed class CodexConsoleIntegrationTests
         output.ToString().ShouldContain("[PASS] codex / Ping");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_rejects_foreign_provider_names()
     {
         var provider = new FakeCodexProvider();
@@ -82,7 +82,7 @@ public sealed class CodexConsoleIntegrationTests
         output.ToString().ShouldContain("dedicated provider console");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_reports_configuration_failures_for_invalid_codex_options()
     {
         var provider = new FakeCodexProvider();
@@ -100,7 +100,7 @@ public sealed class CodexConsoleIntegrationTests
         output.ToString().ShouldContain("Unsupported sandbox mode");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_passes_codex_specific_runtime_options_to_scenarios()
     {
         var provider = new FakeCodexProvider();
@@ -140,8 +140,8 @@ public sealed class CodexConsoleIntegrationTests
         }
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task ProgramMain_can_ping_the_real_codex_cli_when_opted_in()
     {
         if (!IsRealCliTestsEnabled())

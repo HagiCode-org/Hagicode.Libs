@@ -14,7 +14,7 @@ public sealed class PiConsoleIntegrationTests
 {
     private const string RealCliTestsEnvironmentVariable = "HAGICODE_REAL_CLI_TESTS";
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_runs_pi_default_suite_with_fake_provider()
     {
         var provider = new FakePiProvider();
@@ -33,7 +33,7 @@ public sealed class PiConsoleIntegrationTests
         rendered.ShouldContain("Summary: 4/4 passed");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_accepts_terminal_completed_text_when_no_assistant_chunks_are_emitted()
     {
         var provider = new FakePiProvider(emitAssistantMessages: false, includeTerminalText: true);
@@ -47,7 +47,7 @@ public sealed class PiConsoleIntegrationTests
         output.ToString().ShouldContain("Summary: 4/4 passed");
     }
 
-    [Fact]
+    [Test]
     public async Task PiScenarioMessageReader_deduplicates_cumulative_snapshots_and_reconciles_terminal_completion()
     {
         var provider = new ScriptedPiProvider(
@@ -70,7 +70,7 @@ public sealed class PiConsoleIntegrationTests
         result.AssistantText.ShouldBe("1234");
     }
 
-    [Fact]
+    [Test]
     public async Task PiScenarioMessageReader_appends_delta_marked_fragments_exactly_as_they_arrive()
     {
         var provider = new ScriptedPiProvider(
@@ -94,7 +94,7 @@ public sealed class PiConsoleIntegrationTests
         result.AssistantText.ShouldBe("The cat.\nThe dog.");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_shows_provider_specific_help_text()
     {
         var provider = new FakePiProvider();
@@ -116,7 +116,7 @@ public sealed class PiConsoleIntegrationTests
         rendered.ShouldContain("--arg <value>");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_accepts_the_pi_cli_alias()
     {
         var provider = new FakePiProvider();
@@ -130,7 +130,7 @@ public sealed class PiConsoleIntegrationTests
         output.ToString().ShouldContain("[PASS] pi / Ping");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_rejects_foreign_provider_names()
     {
         var provider = new FakePiProvider();
@@ -144,7 +144,7 @@ public sealed class PiConsoleIntegrationTests
         output.ToString().ShouldContain("dedicated provider console");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_reports_configuration_failures_for_invalid_pi_options()
     {
         var provider = new FakePiProvider();
@@ -162,7 +162,7 @@ public sealed class PiConsoleIntegrationTests
         output.ToString().ShouldContain("--provider requires a value");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_passes_default_and_explicit_runtime_options_to_scenarios()
     {
         var provider = new FakePiProvider();
@@ -231,8 +231,8 @@ public sealed class PiConsoleIntegrationTests
         provider.ReceivedOptions[0].Model.ShouldBe("another-model");
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task ProgramMain_can_ping_the_real_pi_cli_when_opted_in()
     {
         if (!IsRealCliTestsEnabled())
@@ -254,8 +254,8 @@ public sealed class PiConsoleIntegrationTests
         }
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task ProgramMain_can_run_the_full_default_suite_when_opted_in()
     {
         if (!IsRealCliTestsEnabled())

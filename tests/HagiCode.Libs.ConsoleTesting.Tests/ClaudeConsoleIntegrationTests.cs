@@ -13,7 +13,7 @@ public sealed class ClaudeConsoleIntegrationTests
 {
     private const string RealCliTestsEnvironmentVariable = "HAGICODE_REAL_CLI_TESTS";
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_runs_claude_default_suite_with_fake_provider()
     {
         var provider = new FakeClaudeProvider();
@@ -33,7 +33,7 @@ public sealed class ClaudeConsoleIntegrationTests
         rendered.ShouldContain("Summary: 5/5 passed");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_restores_conversations_by_explicit_session_id_and_by_reported_resume_id()
     {
         var provider = new FakeClaudeProvider();
@@ -64,7 +64,7 @@ public sealed class ClaudeConsoleIntegrationTests
         provider.ReportedSessionIds.ShouldContain(reportedIdFollowUps[0].Options.Resume!);
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_fails_resume_id_scenarios_when_the_provider_does_not_restore_the_conversation()
     {
         var provider = new FakeClaudeProvider { RestoreByResumeId = false };
@@ -82,7 +82,7 @@ public sealed class ClaudeConsoleIntegrationTests
         rendered.ShouldContain("Summary: 3/5 passed");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_fails_session_id_scenario_when_the_provider_ignores_the_requested_session_id()
     {
         var provider = new FakeClaudeProvider { HonorRequestedSessionId = false };
@@ -99,7 +99,7 @@ public sealed class ClaudeConsoleIntegrationTests
         rendered.ShouldContain("[PASS] claude-code / Session Restore (Resume Id)");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_shows_provider_specific_help_text()
     {
         var provider = new FakeClaudeProvider();
@@ -117,8 +117,8 @@ public sealed class ClaudeConsoleIntegrationTests
         rendered.ShouldContain("--repo <path>");
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task ProgramMain_can_ping_the_real_claude_cli_when_opted_in()
     {
         if (!IsRealCliTestsEnabled())
@@ -140,8 +140,8 @@ public sealed class ClaudeConsoleIntegrationTests
         }
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task ProgramMain_can_run_the_full_default_suite_when_opted_in()
     {
         if (!IsRealCliTestsEnabled())
@@ -163,8 +163,8 @@ public sealed class ClaudeConsoleIntegrationTests
         }
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task Real_claude_cli_restores_two_sessions_in_one_working_directory_by_resume_id_when_opted_in()
     {
         if (!IsRealCliTestsEnabled())

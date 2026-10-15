@@ -13,7 +13,7 @@ public sealed class GeminiConsoleIntegrationTests
 {
     private const string RealCliTestsEnvironmentVariable = "HAGICODE_REAL_CLI_TESTS";
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_runs_gemini_default_suite_with_fake_provider()
     {
         var provider = new FakeGeminiProvider();
@@ -32,7 +32,7 @@ public sealed class GeminiConsoleIntegrationTests
         rendered.ShouldContain("Summary: 4/4 passed");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_shows_provider_specific_help_text()
     {
         var provider = new FakeGeminiProvider();
@@ -53,7 +53,7 @@ public sealed class GeminiConsoleIntegrationTests
         rendered.ShouldContain("--auth-method <id>");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_accepts_the_gemini_cli_alias()
     {
         var provider = new FakeGeminiProvider();
@@ -67,7 +67,7 @@ public sealed class GeminiConsoleIntegrationTests
         output.ToString().ShouldContain("[PASS] gemini / Ping");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_rejects_foreign_provider_names()
     {
         var provider = new FakeGeminiProvider();
@@ -81,7 +81,7 @@ public sealed class GeminiConsoleIntegrationTests
         output.ToString().ShouldContain("dedicated provider console");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_reports_configuration_failures_for_invalid_gemini_options()
     {
         var provider = new FakeGeminiProvider();
@@ -99,7 +99,7 @@ public sealed class GeminiConsoleIntegrationTests
         output.ToString().ShouldContain("--executable requires a value");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_passes_default_and_explicit_runtime_options_to_scenarios()
     {
         var provider = new FakeGeminiProvider();
@@ -147,8 +147,8 @@ public sealed class GeminiConsoleIntegrationTests
         provider.ReceivedOptions[0].AuthenticationToken.ShouldBe("secret");
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task ProgramMain_can_ping_the_real_gemini_cli_when_opted_in()
     {
         if (!IsRealCliTestsEnabled())
@@ -170,8 +170,8 @@ public sealed class GeminiConsoleIntegrationTests
         }
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task ProgramMain_can_run_the_full_default_suite_when_opted_in()
     {
         if (!IsRealCliTestsEnabled())

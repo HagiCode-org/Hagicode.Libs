@@ -13,7 +13,7 @@ public sealed class ProviderConsoleCommandDispatcherTests
         helpDescription: "Shared harness test console.",
         aliases: ["claude", "claudecode"]);
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_runs_default_suite_when_no_arguments_are_supplied()
     {
         var runner = new RecordingRunner();
@@ -27,7 +27,7 @@ public sealed class ProviderConsoleCommandDispatcherTests
         runner.PingCalls.ShouldBe(0);
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_normalizes_supported_aliases_for_provider_commands()
     {
         var runner = new RecordingRunner();
@@ -43,7 +43,7 @@ public sealed class ProviderConsoleCommandDispatcherTests
         runner.LastPingProvider.ShouldBe("claude-code");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_rejects_foreign_provider_names()
     {
         var runner = new RecordingRunner();

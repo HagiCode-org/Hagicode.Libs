@@ -13,7 +13,7 @@ public sealed class HermesConsoleIntegrationTests
 {
     private const string RealCliTestsEnvironmentVariable = "HAGICODE_REAL_CLI_TESTS";
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_runs_hermes_default_suite_with_fake_provider()
     {
         var provider = new FakeHermesProvider();
@@ -32,7 +32,7 @@ public sealed class HermesConsoleIntegrationTests
         rendered.ShouldContain("Summary: 4/4 passed");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_shows_provider_specific_help_text()
     {
         var provider = new FakeHermesProvider();
@@ -51,7 +51,7 @@ public sealed class HermesConsoleIntegrationTests
         rendered.ShouldContain("--arguments <value>");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_normalizes_hermes_aliases_for_provider_commands()
     {
         var provider = new FakeHermesProvider();
@@ -65,7 +65,7 @@ public sealed class HermesConsoleIntegrationTests
         output.ToString().ShouldContain("[PASS] hermes / Ping");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_rejects_foreign_provider_names()
     {
         var provider = new FakeHermesProvider();
@@ -79,7 +79,7 @@ public sealed class HermesConsoleIntegrationTests
         output.ToString().ShouldContain("dedicated provider console");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_reports_configuration_failures_for_invalid_hermes_options()
     {
         var provider = new FakeHermesProvider();
@@ -97,7 +97,7 @@ public sealed class HermesConsoleIntegrationTests
         output.ToString().ShouldContain("unterminated quoted value");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_passes_hermes_specific_runtime_options_to_scenarios()
     {
         var provider = new FakeHermesProvider();
@@ -136,8 +136,8 @@ public sealed class HermesConsoleIntegrationTests
         }
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task ProgramMain_can_ping_the_real_hermes_cli_when_opted_in()
     {
         if (!IsRealCliTestsEnabled())

@@ -13,7 +13,7 @@ public sealed class CopilotConsoleIntegrationTests
 {
     private const string RealCliTestsEnvironmentVariable = "HAGICODE_REAL_CLI_TESTS";
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_runs_copilot_default_suite_with_fake_provider()
     {
         var provider = new FakeCopilotProvider();
@@ -31,7 +31,7 @@ public sealed class CopilotConsoleIntegrationTests
         rendered.ShouldContain("Summary: 3/3 passed");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_shows_provider_specific_help_text()
     {
         var provider = new FakeCopilotProvider();
@@ -48,7 +48,7 @@ public sealed class CopilotConsoleIntegrationTests
         rendered.ShouldContain("--auth-source <mode>");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_normalizes_copilot_aliases_for_provider_commands()
     {
         var provider = new FakeCopilotProvider();
@@ -62,7 +62,7 @@ public sealed class CopilotConsoleIntegrationTests
         output.ToString().ShouldContain("[PASS] copilot / Ping");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_rejects_foreign_provider_names()
     {
         var provider = new FakeCopilotProvider();
@@ -76,7 +76,7 @@ public sealed class CopilotConsoleIntegrationTests
         output.ToString().ShouldContain("dedicated provider console");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_reports_configuration_failures_for_invalid_copilot_options()
     {
         var provider = new FakeCopilotProvider();
@@ -94,7 +94,7 @@ public sealed class CopilotConsoleIntegrationTests
         output.ToString().ShouldContain("Unsupported auth source");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_passes_copilot_specific_runtime_options_to_scenarios()
     {
         var provider = new FakeCopilotProvider();
@@ -135,8 +135,8 @@ public sealed class CopilotConsoleIntegrationTests
         }
     }
 
-    [Fact]
-    [Trait("Category", "RealCli")]
+    [Test]
+    [Category("RealCli")]
     public async Task ProgramMain_can_ping_the_real_copilot_cli_when_opted_in()
     {
         if (!IsRealCliTestsEnabled())

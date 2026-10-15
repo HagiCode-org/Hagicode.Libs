@@ -12,7 +12,7 @@ public sealed class ProviderConsoleRunnerTests
         defaultProviderName: "claude-code",
         helpDescription: "Shared harness test console.");
 
-    [Fact]
+    [Test]
     public async Task RunProviderFullSuiteAsync_formats_scenario_results_and_summary()
     {
         var provider = new StubProvider(successfulPing: true);
@@ -31,7 +31,7 @@ public sealed class ProviderConsoleRunnerTests
         rendered.ShouldContain("Summary: 3/3 passed");
     }
 
-    [Fact]
+    [Test]
     public async Task DispatchAsync_returns_non_zero_when_required_scenario_fails()
     {
         var provider = new StubProvider(successfulPing: true);
