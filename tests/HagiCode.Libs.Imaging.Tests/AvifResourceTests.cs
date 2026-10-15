@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using HagiCode.Libs.Imaging.Tests.Support;
 using Shouldly;
-using Xunit;
 
 namespace HagiCode.Libs.Imaging.Tests;
 
@@ -9,7 +8,7 @@ namespace HagiCode.Libs.Imaging.Tests;
 /// Cancellation and resource behavior against the real engine. The memory bound is documented in
 /// <c>AvifResourceBounds.md</c> next to this file.
 /// </summary>
-[Collection("NativeEngine")]
+[NonParallelizable]
 public class AvifResourceTests
 {
     /// <summary>Largest working-set growth tolerated after several hundred conversions, measured after a forced GC.</summary>
@@ -18,7 +17,7 @@ public class AvifResourceTests
     /// <summary>Largest managed-heap growth tolerated after a forced GC.</summary>
     internal const long ManagedGrowthBoundBytes = 16L * 1024 * 1024;
 
-    [NativeAvifFact]
+    [Test, NativeAvifGate]
     public async Task Token_canceled_before_start_does_no_work_against_the_real_engine()
     {
         NativeRuntime.Require();
@@ -30,7 +29,7 @@ public class AvifResourceTests
             converter.ConvertAsync(Fixtures.Read("photo.png"), cancellationToken: cts.Token));
     }
 
-    [NativeAvifFact]
+    [Test, NativeAvifGate]
     public async Task Cancel_while_encoding_ends_as_canceled_and_leaves_no_file()
     {
         NativeRuntime.Require();
@@ -49,7 +48,7 @@ public class AvifResourceTests
         Directory.GetFiles(directory, "*.tmp").ShouldBeEmpty();
     }
 
-    [NativeAvifFact]
+    [Test, NativeAvifGate]
     public async Task Several_hundred_conversions_and_failure_paths_stay_within_the_memory_bound()
     {
         NativeRuntime.Require();
@@ -87,7 +86,7 @@ public class AvifResourceTests
         workingSetGrowth.ShouldBeLessThan(WorkingSetGrowthBoundBytes);
     }
 
-    [NativeAvifFact]
+    [Test, NativeAvifGate]
     public void Disposal_is_idempotent_with_the_real_engine()
     {
         NativeRuntime.Require();

@@ -2,13 +2,12 @@ using HagiCode.Libs.Imaging.Engine;
 using HagiCode.Libs.Imaging.Internal;
 using HagiCode.Libs.Imaging.Tests.Support;
 using Shouldly;
-using Xunit;
 
 namespace HagiCode.Libs.Imaging.Tests;
 
 public class AtomicFileAndErrorMappingTests
 {
-    [Fact]
+    [Test]
     public async Task Failed_conversion_keeps_the_existing_destination_and_leaves_no_temp_file()
     {
         var directory = Fixtures.NewTempDirectory();
@@ -26,7 +25,7 @@ public class AtomicFileAndErrorMappingTests
         Directory.GetFiles(directory, ".*").ShouldBeEmpty();
     }
 
-    [Fact]
+    [Test]
     public async Task Existing_destination_is_protected_unless_overwrite_is_requested()
     {
         var directory = Fixtures.NewTempDirectory();
@@ -43,7 +42,7 @@ public class AtomicFileAndErrorMappingTests
         engine.HeaderCalls.ShouldBe(0);
     }
 
-    [Fact]
+    [Test]
     public async Task Destination_that_is_the_source_is_invalid_and_source_is_untouched()
     {
         var directory = Fixtures.NewTempDirectory();
@@ -59,7 +58,7 @@ public class AtomicFileAndErrorMappingTests
         File.ReadAllBytes(source).ShouldBe(before);
     }
 
-    [Fact]
+    [Test]
     public async Task Successful_file_conversion_moves_output_into_place()
     {
         var directory = Fixtures.NewTempDirectory();
@@ -73,22 +72,21 @@ public class AtomicFileAndErrorMappingTests
         Directory.GetFiles(directory, "*.tmp").ShouldBeEmpty();
     }
 
-    [Fact]
+    [Test]
     public void Engine_load_failure_maps_to_corrupt_source()
     {
         ErrorMapper.Map(new EngineLoadException("decode failed"), ConversionStage.Header).ErrorCode.ShouldBe(AvifErrorCode.CorruptSource);
     }
 
-    [Fact]
+    [Test]
     public void Engine_encode_failure_maps_to_encode_failed()
     {
         ErrorMapper.Map(new EngineEncodeException("encode failed"), ConversionStage.Encode).ErrorCode.ShouldBe(AvifErrorCode.EncodeFailed);
     }
 
-    [Theory]
-    [InlineData(typeof(DllNotFoundException))]
-    [InlineData(typeof(BadImageFormatException))]
-    [InlineData(typeof(EntryPointNotFoundException))]
+    [TestCase(typeof(DllNotFoundException))]
+    [TestCase(typeof(BadImageFormatException))]
+    [TestCase(typeof(EntryPointNotFoundException))]
     public void Native_loader_failures_map_to_runtime_unavailable_with_rid_and_supported_list(Type exceptionType)
     {
         var exception = (Exception)Activator.CreateInstance(exceptionType, "libvips-42.dll not found")!;
@@ -102,7 +100,7 @@ public class AtomicFileAndErrorMappingTests
         error.Message.ShouldNotContain("PNG");
     }
 
-    [Fact]
+    [Test]
     public async Task Engine_load_failure_reaches_the_caller_as_corrupt_source_without_source_bytes()
     {
         var engine = new FakeAvifEngine { HeaderException = new EngineLoadException("libvips could not load the source.") };

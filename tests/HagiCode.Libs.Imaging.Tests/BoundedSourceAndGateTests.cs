@@ -1,13 +1,12 @@
 using HagiCode.Libs.Imaging.Internal;
 using HagiCode.Libs.Imaging.Tests.Support;
 using Shouldly;
-using Xunit;
 
 namespace HagiCode.Libs.Imaging.Tests;
 
 public class BoundedSourceAndGateTests
 {
-    [Fact]
+    [Test]
     public async Task Oversize_forward_only_stream_fails_after_at_most_one_extra_chunk()
     {
         var stream = new CountingForwardStream(new byte[500_000]);
@@ -19,7 +18,7 @@ public class BoundedSourceAndGateTests
         stream.BytesRead.ShouldBeLessThanOrEqualTo(1_000 + BoundedSourceReader.ChunkSize);
     }
 
-    [Fact]
+    [Test]
     public async Task Non_seekable_stream_within_the_limit_is_accepted()
     {
         var payload = Enumerable.Range(0, 5_000).Select(i => (byte)i).ToArray();
@@ -29,7 +28,7 @@ public class BoundedSourceAndGateTests
         read.ShouldBe(payload);
     }
 
-    [Fact]
+    [Test]
     public async Task Seekable_stream_longer_than_the_limit_is_rejected_without_reading()
     {
         var stream = new MemoryStream(new byte[5_000]);
@@ -41,7 +40,7 @@ public class BoundedSourceAndGateTests
         stream.Position.ShouldBe(0);
     }
 
-    [Fact]
+    [Test]
     public async Task Gate_never_runs_more_than_the_limit_under_sixteen_parallel_waiters()
     {
         var gate = new ConversionGate(3);
@@ -63,7 +62,7 @@ public class BoundedSourceAndGateTests
         maxActive.ShouldBeGreaterThan(0);
     }
 
-    [Fact]
+    [Test]
     public async Task Canceled_waiter_does_not_occupy_a_slot()
     {
         var gate = new ConversionGate(1);

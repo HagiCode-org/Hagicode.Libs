@@ -2,24 +2,22 @@ using System.Text;
 using HagiCode.Libs.Imaging.Internal;
 using HagiCode.Libs.Imaging.Tests.Support;
 using Shouldly;
-using Xunit;
 
 namespace HagiCode.Libs.Imaging.Tests;
 
 public class AvifOptionsAndFormatTests
 {
-    [Theory]
-    [InlineData("photo.png", AvifSourceFormat.Png)]
-    [InlineData("photo.jpg", AvifSourceFormat.Jpeg)]
-    [InlineData("photo.webp", AvifSourceFormat.WebP)]
-    [InlineData("anim.gif", AvifSourceFormat.Gif)]
-    [InlineData("photo.avif", AvifSourceFormat.Avif)]
+    [TestCase("photo.png", AvifSourceFormat.Png)]
+    [TestCase("photo.jpg", AvifSourceFormat.Jpeg)]
+    [TestCase("photo.webp", AvifSourceFormat.WebP)]
+    [TestCase("anim.gif", AvifSourceFormat.Gif)]
+    [TestCase("photo.avif", AvifSourceFormat.Avif)]
     public void Sniffer_identifies_each_supported_format_from_content(string file, AvifSourceFormat expected)
     {
         SourceSniffer.Detect(Fixtures.Read(file)).ShouldBe(expected);
     }
 
-    [Fact]
+    [Test]
     public void Sniffer_ignores_the_file_extension_for_a_jpeg_named_png()
     {
         var bytes = Fixtures.Read("photo.jpg");
@@ -29,11 +27,10 @@ public class AvifOptionsAndFormatTests
         SourceSniffer.Detect(File.ReadAllBytes(path)).ShouldBe(AvifSourceFormat.Jpeg);
     }
 
-    [Theory]
-    [InlineData("svg")]
-    [InlineData("text")]
-    [InlineData("empty")]
-    [InlineData("truncated-png")]
+    [TestCase("svg")]
+    [TestCase("text")]
+    [TestCase("empty")]
+    [TestCase("truncated-png")]
     public void Sniffer_rejects_unsupported_or_too_short_content(string kind)
     {
         var bytes = kind switch
@@ -47,7 +44,7 @@ public class AvifOptionsAndFormatTests
         SourceSniffer.Detect(bytes).ShouldBeNull();
     }
 
-    [Fact]
+    [Test]
     public void Sniffer_and_signature_check_run_without_the_native_runtime()
     {
         // Pure managed code: no NetVips call is made on this path.
@@ -55,7 +52,7 @@ public class AvifOptionsAndFormatTests
         AvifFormat.IsAvif(Fixtures.Read("photo.jpg")).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public void IsAvif_accepts_avis_major_brand_and_compatible_avif_brand()
     {
         var avisMajor = Ftyp("avis", ["mif1"]);
@@ -65,14 +62,14 @@ public class AvifOptionsAndFormatTests
         AvifFormat.IsAvif(compatibleAvif).ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public void IsAvif_rejects_truncated_header_and_non_avif_ftyp()
     {
         AvifFormat.IsAvif(Fixtures.Read("photo.avif")[..11]).ShouldBeFalse();
         AvifFormat.IsAvif(Ftyp("heic", ["mif1"])).ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public void Options_defaults_are_valid()
     {
         var options = new AvifConversionOptions();
@@ -84,11 +81,10 @@ public class AvifOptionsAndFormatTests
         Should.NotThrow(() => options.Validate());
     }
 
-    [Theory]
-    [InlineData(101, 6)]
-    [InlineData(-1, 6)]
-    [InlineData(60, 11)]
-    [InlineData(60, -1)]
+    [TestCase(101, 6)]
+    [TestCase(-1, 6)]
+    [TestCase(60, 11)]
+    [TestCase(60, -1)]
     public void Quality_and_speed_out_of_range_are_invalid_options(int quality, int speed)
     {
         var error = Should.Throw<AvifConversionException>(() =>
@@ -96,10 +92,9 @@ public class AvifOptionsAndFormatTests
         error.ErrorCode.ShouldBe(AvifErrorCode.InvalidOptions);
     }
 
-    [Theory]
-    [InlineData(0, 100)]
-    [InlineData(100, 0)]
-    [InlineData(-5, 100)]
+    [TestCase(0, 100)]
+    [TestCase(100, 0)]
+    [TestCase(-5, 100)]
     public void Zero_size_resize_target_is_invalid_options(int width, int height)
     {
         var error = Should.Throw<AvifConversionException>(() =>
@@ -107,11 +102,10 @@ public class AvifOptionsAndFormatTests
         error.ErrorCode.ShouldBe(AvifErrorCode.InvalidOptions);
     }
 
-    [Theory]
-    [InlineData("red")]
-    [InlineData("#12345")]
-    [InlineData("#zzzzzz")]
-    [InlineData("64748b")]
+    [TestCase("red")]
+    [TestCase("#12345")]
+    [TestCase("#zzzzzz")]
+    [TestCase("64748b")]
     public void Flatten_color_must_be_hex_rrggbb(string color)
     {
         var error = Should.Throw<AvifConversionException>(() =>
@@ -119,7 +113,7 @@ public class AvifOptionsAndFormatTests
         error.ErrorCode.ShouldBe(AvifErrorCode.InvalidOptions);
     }
 
-    [Fact]
+    [Test]
     public void Flatten_color_parses_to_channel_bytes()
     {
         AvifConversionOptions.ParseHexColor("#64748b").ShouldBe(((byte)0x64, (byte)0x74, (byte)0x8b));

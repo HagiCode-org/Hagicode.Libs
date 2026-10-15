@@ -1,14 +1,13 @@
 using System.Runtime.InteropServices;
 using HagiCode.Libs.Imaging.Tests.Support;
 using Shouldly;
-using Xunit;
 
 namespace HagiCode.Libs.Imaging.Tests;
 
-[Collection("NativeEngine")]
+[NonParallelizable]
 public class AvifRuntimeTests
 {
-    [NativeAvifFact]
+    [Test, NativeAvifGate]
     public void Healthy_probe_reports_encoding_and_the_five_decodable_formats()
     {
         NativeRuntime.Require();
@@ -27,7 +26,7 @@ public class AvifRuntimeTests
         });
     }
 
-    [Fact]
+    [Test]
     public void Probe_result_is_cached_and_safe_from_many_threads()
     {
         var first = AvifRuntime.Probe();
@@ -36,7 +35,7 @@ public class AvifRuntimeTests
         AvifRuntime.Probe().ShouldBeSameAs(first);
     }
 
-    [Fact]
+    [Test]
     public void Simulated_unavailable_runtime_fails_the_native_check_with_the_reason()
     {
         var error = Should.Throw<InvalidOperationException>(() =>

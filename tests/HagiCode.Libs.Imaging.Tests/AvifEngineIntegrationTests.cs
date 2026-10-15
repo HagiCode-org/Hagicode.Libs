@@ -4,12 +4,11 @@ using HagiCode.Libs.Imaging.Engine;
 using HagiCode.Libs.Imaging.Tests.Support;
 using NetVips;
 using Shouldly;
-using Xunit;
 
 namespace HagiCode.Libs.Imaging.Tests;
 
 /// <summary>Real-engine checks for the source formats, options, resize, orientation and metadata behavior.</summary>
-[Collection("NativeEngine")]
+[NonParallelizable]
 public class AvifEngineIntegrationTests
 {
     private static readonly AvifConverter Converter = new(new AvifConverterOptions());
@@ -23,8 +22,8 @@ public class AvifEngineIntegrationTests
         new object[] { "photo.avif", AvifSourceFormat.Avif },
     };
 
-    [NativeAvifTheory]
-    [MemberData(nameof(SupportedSources))]
+    [NativeAvifGate]
+    [TestCaseSource(nameof(SupportedSources))]
     public async Task Every_supported_source_converts_to_a_valid_avif(string file, AvifSourceFormat format)
     {
         NativeRuntime.Require();
@@ -36,7 +35,7 @@ public class AvifEngineIntegrationTests
         IsoBmff.MajorBrand(result.Data.ToArray()).ShouldBe("avif");
     }
 
-    [NativeAvifFact]
+    [Test, NativeAvifGate]
     public async Task Animated_gif_yields_a_single_still_frame_from_the_first_frame()
     {
         NativeRuntime.Require();
@@ -49,7 +48,7 @@ public class AvifEngineIntegrationTests
         Encoding.ASCII.GetString(file).Contains("msf1", StringComparison.Ordinal).ShouldBeFalse();
     }
 
-    [NativeAvifFact]
+    [Test, NativeAvifGate]
     public async Task Exif_orientation_six_swaps_dimensions_and_reports_upright_source_size()
     {
         NativeRuntime.Require();
@@ -62,7 +61,7 @@ public class AvifEngineIntegrationTests
         result.OutputHeight.ShouldBe(600);
     }
 
-    [NativeAvifFact]
+    [Test, NativeAvifGate]
     public async Task Exif_orientation_six_with_fit_200_gives_200_by_150()
     {
         NativeRuntime.Require();
@@ -76,7 +75,7 @@ public class AvifEngineIntegrationTests
         (result.OutputWidth, result.OutputHeight).ShouldBe((200, 150));
     }
 
-    [NativeAvifFact]
+    [Test, NativeAvifGate]
     public async Task Fit_2000_by_1000_into_500_box_gives_500_by_250()
     {
         NativeRuntime.Require();
@@ -87,7 +86,7 @@ public class AvifEngineIntegrationTests
         (result.OutputWidth, result.OutputHeight).ShouldBe((500, 250));
     }
 
-    [NativeAvifFact]
+    [Test, NativeAvifGate]
     public async Task Fit_never_enlarges_a_100_by_100_source()
     {
         NativeRuntime.Require();
@@ -98,7 +97,7 @@ public class AvifEngineIntegrationTests
         (result.OutputWidth, result.OutputHeight).ShouldBe((100, 100));
     }
 
-    [NativeAvifFact]
+    [Test, NativeAvifGate]
     public async Task Cover_300_by_100_into_128_box_is_exactly_128_square()
     {
         NativeRuntime.Require();
@@ -110,7 +109,7 @@ public class AvifEngineIntegrationTests
         IsoBmff.ImageSize(result.Data.ToArray()).ShouldBe((128, 128));
     }
 
-    [NativeAvifFact]
+    [Test, NativeAvifGate]
     public async Task Gps_metadata_is_absent_by_default_and_kept_only_on_request()
     {
         NativeRuntime.Require();
@@ -123,7 +122,7 @@ public class AvifEngineIntegrationTests
         Encoding.ASCII.GetString(kept.Data.ToArray()).ShouldContain("TestCam");
     }
 
-    [NativeAvifFact]
+    [Test, NativeAvifGate]
     public async Task Alpha_is_preserved_by_default()
     {
         NativeRuntime.Require();
@@ -136,7 +135,7 @@ public class AvifEngineIntegrationTests
         IsoBmff.HasAlphaAuxiliary(result.Data.ToArray()).ShouldBeTrue();
     }
 
-    [NativeAvifFact]
+    [Test, NativeAvifGate]
     public async Task Alpha_flattened_onto_slate_gives_no_alpha_and_transparent_pixels_take_the_color()
     {
         NativeRuntime.Require();
@@ -155,7 +154,7 @@ public class AvifEngineIntegrationTests
         decoded.Rgb[offset + 2].ShouldBeInRange((byte)136, (byte)142);
     }
 
-    [NativeAvifFact]
+    [Test, NativeAvifGate]
     public async Task Higher_quality_is_larger_and_closer_to_the_source()
     {
         NativeRuntime.Require();
@@ -171,7 +170,7 @@ public class AvifEngineIntegrationTests
         psnrHigh.ShouldBeGreaterThanOrEqualTo(psnrLow);
     }
 
-    [NativeAvifFact]
+    [Test, NativeAvifGate]
     public async Task Speed_zero_and_speed_ten_both_produce_valid_output_of_the_same_size()
     {
         NativeRuntime.Require();
@@ -185,7 +184,7 @@ public class AvifEngineIntegrationTests
         (slow.OutputWidth, slow.OutputHeight).ShouldBe((fast.OutputWidth, fast.OutputHeight));
     }
 
-    [NativeAvifFact]
+    [Test, NativeAvifGate]
     public async Task Truncated_png_is_reported_as_corrupt_source_with_no_output()
     {
         NativeRuntime.Require();
@@ -198,7 +197,7 @@ public class AvifEngineIntegrationTests
         File.Exists(destination).ShouldBeFalse();
     }
 
-    [NativeAvifFact]
+    [Test, NativeAvifGate]
     public async Task Decompression_bomb_fails_from_the_header_without_a_pixel_buffer()
     {
         NativeRuntime.Require();
@@ -213,7 +212,7 @@ public class AvifEngineIntegrationTests
         growth.ShouldBeLessThan(256L * 1024 * 1024);
     }
 
-    [Fact]
+    [Test]
     public async Task Svg_and_text_are_rejected_as_unsupported_by_the_real_converter()
     {
         var error = await Should.ThrowAsync<AvifConversionException>(() =>
@@ -222,7 +221,7 @@ public class AvifEngineIntegrationTests
         error.ErrorCode.ShouldBe(AvifErrorCode.UnsupportedSourceFormat);
     }
 
-    [NativeAvifFact]
+    [Test, NativeAvifGate]
     public async Task Chroma_request_is_reflected_in_the_av1_configuration()
     {
         NativeRuntime.Require();

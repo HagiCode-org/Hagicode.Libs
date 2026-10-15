@@ -2,7 +2,6 @@ using System.Reflection;
 using HagiCode.Libs.Imaging.Engine;
 using HagiCode.Libs.Imaging.Tests.Support;
 using Shouldly;
-using Xunit;
 
 namespace HagiCode.Libs.Imaging.Tests;
 
@@ -42,10 +41,10 @@ internal sealed class ObservingEngine(IAvifEngine inner) : IAvifEngine
 }
 
 /// <summary>Collection that runs without parallel tests, so environment changes cannot leak into other tests.</summary>
-[Collection("NativeEngine")]
+[NonParallelizable]
 public class AvifConcurrencyTests
 {
-    [NativeAvifFact]
+    [Test, NativeAvifGate]
     public async Task Sixteen_parallel_real_encodes_with_a_limit_of_two_never_overlap_more_than_two()
     {
         NativeRuntime.Require();
@@ -66,10 +65,10 @@ public class AvifConcurrencyTests
     }
 }
 
-[Collection("NativeEngine")]
+[NonParallelizable]
 public class AvifInProcessGuardTests
 {
-    [Fact]
+    [Test]
     public void Imaging_assembly_has_no_reference_to_process_or_process_start_info()
     {
         var hits = ProcessApiScanner.FindProcessReferences(typeof(HagiCode.Libs.Imaging.AvifConverter).Assembly.Location);
@@ -77,7 +76,7 @@ public class AvifInProcessGuardTests
         hits.ShouldBeEmpty();
     }
 
-    [Fact]
+    [Test]
     public void The_scanner_detects_a_sample_type_that_does_reference_process_apis()
     {
         var hits = ProcessApiScanner.FindProcessReferences(typeof(ProcessGuardSample).Assembly.Location);
@@ -85,7 +84,7 @@ public class AvifInProcessGuardTests
         hits.ShouldContain("System.Diagnostics.ProcessStartInfo");
     }
 
-    [NativeAvifFact]
+    [Test, NativeAvifGate]
     public async Task Every_supported_format_converts_with_an_empty_path_and_no_executables()
     {
         NativeRuntime.Require();

@@ -1,13 +1,12 @@
 using HagiCode.Libs.Imaging.Engine;
 using HagiCode.Libs.Imaging.Tests.Support;
 using Shouldly;
-using Xunit;
 
 namespace HagiCode.Libs.Imaging.Tests;
 
 public class AvifConverterUnitTests
 {
-    [Fact]
+    [Test]
     public async Task Token_canceled_before_start_ends_as_canceled_without_engine_work()
     {
         var engine = new FakeAvifEngine();
@@ -22,7 +21,7 @@ public class AvifConverterUnitTests
         engine.ConvertCalls.ShouldBe(0);
     }
 
-    [Fact]
+    [Test]
     public async Task Token_canceled_while_queued_releases_the_waiter_and_later_work_proceeds()
     {
         var engine = new FakeAvifEngine { Block = new ManualResetEventSlim(false) };
@@ -40,7 +39,7 @@ public class AvifConverterUnitTests
         engine.Block.Dispose();
     }
 
-    [Fact]
+    [Test]
     public async Task Sixteen_parallel_conversions_never_exceed_the_limit_and_all_succeed()
     {
         var engine = new FakeAvifEngine { Delay = TimeSpan.FromMilliseconds(20) };
@@ -55,7 +54,7 @@ public class AvifConverterUnitTests
         engine.MaxConcurrentConverts.ShouldBeGreaterThan(1);
     }
 
-    [Fact]
+    [Test]
     public async Task Failed_stream_conversion_writes_zero_bytes_to_the_destination()
     {
         var engine = new FakeAvifEngine { ConvertException = new EngineEncodeException("boom") };
@@ -69,7 +68,7 @@ public class AvifConverterUnitTests
         destination.Length.ShouldBe(0);
     }
 
-    [Fact]
+    [Test]
     public async Task Caller_streams_stay_open_and_receive_the_output_on_success()
     {
         using var converter = NewConverter(new FakeAvifEngine());
@@ -84,7 +83,7 @@ public class AvifConverterUnitTests
         result.Data.IsEmpty.ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public async Task Caller_input_buffer_is_unchanged_and_buffer_result_carries_the_bytes()
     {
         using var converter = NewConverter(new FakeAvifEngine());
@@ -98,7 +97,7 @@ public class AvifConverterUnitTests
         result.SourceFormat.ShouldBe(AvifSourceFormat.Png);
     }
 
-    [Fact]
+    [Test]
     public async Task Result_reports_source_output_dimensions_length_and_alpha()
     {
         var engine = new FakeAvifEngine { Header = new SourceHeader(800, 600, HasAlpha: true) };
@@ -114,7 +113,7 @@ public class AvifConverterUnitTests
         result.HasAlpha.ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public async Task Unsupported_source_is_rejected_before_the_engine_runs()
     {
         var engine = new FakeAvifEngine();
@@ -127,7 +126,7 @@ public class AvifConverterUnitTests
         engine.HeaderCalls.ShouldBe(0);
     }
 
-    [Fact]
+    [Test]
     public async Task Source_above_the_input_limit_is_rejected_as_source_too_large()
     {
         var engine = new FakeAvifEngine();
@@ -142,7 +141,7 @@ public class AvifConverterUnitTests
         engine.HeaderCalls.ShouldBe(0);
     }
 
-    [Fact]
+    [Test]
     public async Task Declared_pixels_above_the_limit_fail_before_encoding()
     {
         var engine = new FakeAvifEngine { Header = new SourceHeader(100_000, 100_000, HasAlpha: false) };
@@ -154,7 +153,7 @@ public class AvifConverterUnitTests
         engine.ConvertCalls.ShouldBe(0);
     }
 
-    [Fact]
+    [Test]
     public async Task Unavailable_runtime_reports_native_error_with_the_probe_reason()
     {
         var converter = new AvifConverter(
@@ -169,7 +168,7 @@ public class AvifConverterUnitTests
         error.Message.ShouldContain("not in the supported set");
     }
 
-    [Fact]
+    [Test]
     public void Disposal_is_idempotent_and_blocks_new_work()
     {
         var converter = NewConverter(new FakeAvifEngine());
@@ -180,7 +179,7 @@ public class AvifConverterUnitTests
         Should.Throw<ObjectDisposedException>(() => converter.ConvertAsync(Fixtures.Read("photo.png")).GetAwaiter().GetResult());
     }
 
-    [Fact]
+    [Test]
     public void Invalid_converter_limits_are_rejected_at_construction()
     {
         Should.Throw<ArgumentOutOfRangeException>(() =>

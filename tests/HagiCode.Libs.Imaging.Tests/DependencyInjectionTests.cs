@@ -1,14 +1,13 @@
 using HagiCode.Libs.Imaging.Tests.Support;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
-using Xunit;
 
 namespace HagiCode.Libs.Imaging.Tests;
 
-[Collection("NativeEngine")]
+[NonParallelizable]
 public class DependencyInjectionTests
 {
-    [Fact]
+    [Test]
     public void Converter_resolves_as_a_singleton_with_the_configured_limits()
     {
         var services = new ServiceCollection();
@@ -31,7 +30,7 @@ public class DependencyInjectionTests
         limits.MaxConcurrentConversions.ShouldBe(3);
     }
 
-    [NativeAvifFact]
+    [Test, NativeAvifGate]
     public async Task Configured_input_limit_reaches_the_resolved_converter()
     {
         NativeRuntime.Require();

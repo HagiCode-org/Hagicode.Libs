@@ -1,6 +1,5 @@
 using HagiCode.Libs.Imaging.Tests.Support;
 using Shouldly;
-using Xunit;
 
 namespace HagiCode.Libs.Imaging.Tests;
 
@@ -8,7 +7,7 @@ namespace HagiCode.Libs.Imaging.Tests;
 /// Structure is read with the test-only ISO BMFF reader, not the engine. Fidelity is PSNR against the decoded source.
 /// Thresholds are the gate G1 values from design D11 (quality 30 at least 28 dB, default 60 at least 33 dB, 90 at least 40 dB).
 /// </summary>
-[Collection("NativeEngine")]
+[NonParallelizable]
 public class AvifStructureAndFidelityTests
 {
     private static readonly AvifConverter Converter = new(new AvifConverterOptions());
@@ -20,7 +19,7 @@ public class AvifStructureAndFidelityTests
         new object[] { 90, 40.0 },
     };
 
-    [NativeAvifFact]
+    [Test, NativeAvifGate]
     public async Task Output_carries_the_avif_brand_and_declared_dimensions()
     {
         NativeRuntime.Require();
@@ -33,8 +32,8 @@ public class AvifStructureAndFidelityTests
         IsoBmff.ImageSize(file).ShouldBe((result.OutputWidth, result.OutputHeight));
     }
 
-    [NativeAvifTheory]
-    [MemberData(nameof(QualityThresholds))]
+    [NativeAvifGate]
+    [TestCaseSource(nameof(QualityThresholds))]
     public async Task Fidelity_meets_the_documented_threshold_for_each_quality(int quality, double minimumPsnr)
     {
         NativeRuntime.Require();
