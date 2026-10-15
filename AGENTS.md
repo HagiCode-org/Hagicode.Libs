@@ -25,6 +25,7 @@ dotnet test HagiCode.Libs.slnx
 - `src/HagiCode.Libs.Prompts/`: Handlebars prompt catalog
 - `src/HagiCode.Libs.Providers/`: provider abstractions (Claude, Copilot, Codex, Gemini, etc.)
 - `src/HagiCode.Libs.Skills/`: skills infrastructure and online API client
+- `src/HagiCode.Libs.Imaging/`: in-process AVIF conversion with bundled libvips native libraries (tests: `tests/HagiCode.Libs.Imaging.Tests/`, backend guide: `docs/avif-backend-integration-guide.md`)
 - `src/HagiCode.Libs.Exploration/`: Git repository discovery and state inspection
 - `tests/`: xUnit coverage for each project
 
