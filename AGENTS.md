@@ -27,14 +27,14 @@ dotnet test HagiCode.Libs.slnx
 - `src/HagiCode.Libs.Skills/`: skills infrastructure and online API client
 - `src/HagiCode.Libs.Imaging/`: in-process AVIF conversion with bundled libvips native libraries (tests: `tests/HagiCode.Libs.Imaging.Tests/`, backend guide: `docs/avif-backend-integration-guide.md`)
 - `src/HagiCode.Libs.Exploration/`: Git repository discovery and state inspection
-- `tests/`: xUnit coverage for each project
+- `tests/`: NUnit coverage for each project; shared test settings, packages and global usings are in `tests/Directory.Build.props`
 
 ## Agent Guidelines
 
 - Use `dotnet` CLI for all build and test operations.
 - Keep library abstractions provider-agnostic; new provider implementations should extend existing base classes.
 - Treat the solution file (`.slnx`) as the authoritative build entrypoint.
-- If changing public API surfaces, update corresponding xUnit tests.
+- If changing public API surfaces, update corresponding NUnit tests.
 
 ## References
 

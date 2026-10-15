@@ -10,7 +10,7 @@
 - `src/HagiCode.Libs.Skills` - skills-oriented infrastructure. Its first shipped capability is a typed online API client for search, well-known discovery, audit, telemetry, and GitHub metadata/tree requests.
 - `src/HagiCode.Libs.Imaging` - in-process AVIF conversion (PNG, JPEG, WebP and GIF first frame to AVIF) with bundled libvips native libraries. No `ffmpeg`, `avifenc` or other tool is used or looked up. Tests: `tests/HagiCode.Libs.Imaging.Tests`. Backend integration guide: `docs/avif-backend-integration-guide.md`.
 - `src/HagiCode.Libs.Exploration` - Git repository discovery and state inspection.
-- `tests/*` - xUnit coverage for each project.
+- `tests/*` - NUnit coverage for each project. Shared test settings, the NUnit and Shouldly packages and the global usings live in `tests/Directory.Build.props`; each test project lists only its own references.
 
 ## Getting started
 
