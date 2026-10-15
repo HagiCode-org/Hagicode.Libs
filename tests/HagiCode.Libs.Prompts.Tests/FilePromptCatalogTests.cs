@@ -11,7 +11,7 @@ namespace HagiCode.Libs.Prompts.Tests;
 
 public sealed class FilePromptCatalogTests
 {
-    [Fact]
+    [Test]
     public void Resolve_prefers_override_prompt_for_same_scenario_and_locale()
     {
         using var workspace = new PromptTestWorkspace();
@@ -28,7 +28,7 @@ public sealed class FilePromptCatalogTests
         catalog.GetAllPrompts().Count.ShouldBe(1);
     }
 
-    [Fact]
+    [Test]
     public void Resolve_falls_back_to_default_locale_when_exact_match_is_missing()
     {
         using var workspace = new PromptTestWorkspace();
@@ -44,7 +44,7 @@ public sealed class FilePromptCatalogTests
         prompt.ResolvedLocale.ShouldBe("en-US");
     }
 
-    [Fact]
+    [Test]
     public void Diagnostics_report_orphan_metadata_and_templates()
     {
         using var workspace = new PromptTestWorkspace();
@@ -59,7 +59,7 @@ public sealed class FilePromptCatalogTests
         diagnostics.Issues.Any(static issue => issue.Kind == PromptCatalogIssueKind.MissingMetadata).ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public void Reload_refreshes_definitions_and_invalidates_renderer_cache()
     {
         using var workspace = new PromptTestWorkspace();
@@ -78,7 +78,7 @@ public sealed class FilePromptCatalogTests
             .ShouldBe("Hi Bob");
     }
 
-    [Fact]
+    [Test]
     public void Strict_template_validation_throws_when_handlebars_syntax_is_invalid()
     {
         using var workspace = new PromptTestWorkspace();
@@ -92,7 +92,7 @@ public sealed class FilePromptCatalogTests
         }));
     }
 
-    [Fact]
+    [Test]
     public void Lenient_template_validation_records_issue_and_keeps_prompt_visible()
     {
         using var workspace = new PromptTestWorkspace();
@@ -109,7 +109,7 @@ public sealed class FilePromptCatalogTests
         catalog.GetSnapshot().Issues.Any(static issue => issue.Kind == PromptCatalogIssueKind.InvalidTemplateSyntax).ShouldBeTrue();
     }
 
-    [Fact]
+    [Test]
     public void ValidateCompleteness_reports_missing_scenario_locale_combinations()
     {
         using var workspace = new PromptTestWorkspace();
@@ -127,7 +127,7 @@ public sealed class FilePromptCatalogTests
         report.Missing[0].Locale.ShouldBe("zh-CN");
     }
 
-    [Fact]
+    [Test]
     public void Renderer_registers_expected_built_in_helpers()
     {
         using var workspace = new PromptTestWorkspace();

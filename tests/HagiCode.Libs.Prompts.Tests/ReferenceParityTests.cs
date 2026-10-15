@@ -10,7 +10,7 @@ namespace HagiCode.Libs.Prompts.Tests;
 
 public sealed class ReferenceParityTests
 {
-    [Fact]
+    [Test]
     public void Catalog_loads_hagicode_core_prompt_directory_structure()
     {
         var monorepoRoot = FindMonorepoRoot();

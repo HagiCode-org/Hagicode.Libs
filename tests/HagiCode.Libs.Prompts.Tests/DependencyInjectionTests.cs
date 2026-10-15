@@ -8,7 +8,7 @@ namespace HagiCode.Libs.Prompts.Tests;
 
 public sealed class DependencyInjectionTests
 {
-    [Fact]
+    [Test]
     public void AddHagiCodePrompts_registers_catalog_renderer_and_diagnostics_services()
     {
         using var workspace = new PromptWorkspace();
