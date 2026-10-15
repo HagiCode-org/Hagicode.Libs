@@ -82,7 +82,9 @@ public sealed class OpenCodeProviderTests
         resumedMessages[0].Content.GetProperty("requestedSessionId").GetString().ShouldBe(sessionId);
         resumedMessages[0].Content.GetProperty("poolFingerprint").GetString().ShouldBe(sessionId);
         resumedMessages[1].Content.GetProperty("resumeMode").GetString().ShouldBe("resumed");
-        resumedMessages[1].Content.GetProperty("text").GetString().ShouldContain("BLUEPRINT-");
+        var resumedText = resumedMessages[1].Content.GetProperty("text").GetString();
+        resumedText.ShouldNotBeNull();
+        resumedText.ShouldContain("BLUEPRINT-");
     }
 
     [Fact]

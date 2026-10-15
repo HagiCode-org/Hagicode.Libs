@@ -330,7 +330,9 @@ public sealed class OmpProviderUserQuestionTests
         provider.PrintContext.ShouldBeNull();
         var terminal = messages.ShouldHaveSingleItem();
         terminal.Type.ShouldBe("terminal.failed");
-        terminal.Content.GetProperty("text").GetString().ShouldContain("not found");
+        var terminalText = terminal.Content.GetProperty("text").GetString();
+        terminalText.ShouldNotBeNull();
+        terminalText.ShouldContain("not found");
         terminal.Content.GetProperty("stderr").GetString().ShouldBe(standardError.Trim());
         terminal.Content.GetProperty("exit_code").GetInt32().ShouldBe(1);
     }
@@ -502,7 +504,9 @@ public sealed class OmpProviderUserQuestionTests
 
         var terminal = messages.ShouldHaveSingleItem();
         terminal.Type.ShouldBe("terminal.failed");
-        terminal.Content.GetProperty("text").GetString().ShouldContain("state unavailable");
+        var terminalText = terminal.Content.GetProperty("text").GetString();
+        terminalText.ShouldNotBeNull();
+        terminalText.ShouldContain("state unavailable");
         process.Written.Select(ScriptedOmpProcess.Parse).Select(static command => command.Type).ShouldNotContain("prompt");
     }
 
@@ -529,8 +533,12 @@ public sealed class OmpProviderUserQuestionTests
         var terminal = messages.Last();
         terminal.Type.ShouldBe("terminal.failed");
         terminal.Content.GetProperty("exit_code").GetInt32().ShouldBe(3);
-        terminal.Content.GetProperty("stderr").GetString().ShouldContain("omp: out of memory");
-        terminal.Content.GetProperty("text").GetString().ShouldContain("omp: out of memory");
+        var terminalStderr = terminal.Content.GetProperty("stderr").GetString();
+        terminalStderr.ShouldNotBeNull();
+        terminalStderr.ShouldContain("omp: out of memory");
+        var terminalText = terminal.Content.GetProperty("text").GetString();
+        terminalText.ShouldNotBeNull();
+        terminalText.ShouldContain("omp: out of memory");
     }
 
     [Fact]
@@ -559,7 +567,9 @@ public sealed class OmpProviderUserQuestionTests
 
         var terminal = messages.Last();
         terminal.Type.ShouldBe("terminal.failed");
-        terminal.Content.GetProperty("text").GetString().ShouldContain("before the run settled");
+        var terminalText = terminal.Content.GetProperty("text").GetString();
+        terminalText.ShouldNotBeNull();
+        terminalText.ShouldContain("before the run settled");
         terminal.Content.GetProperty("session_id").GetString().ShouldBe(TwoQuestionsSessionId);
     }
 
@@ -589,8 +599,10 @@ public sealed class OmpProviderUserQuestionTests
 
         var terminal = messages.Last();
         terminal.Type.ShouldBe("terminal.failed");
-        terminal.Content.GetProperty("text").GetString().ShouldContain("before the run settled");
-        terminal.Content.GetProperty("text").GetString().ShouldContain("Segmentation fault (core dumped)");
+        var terminalText = terminal.Content.GetProperty("text").GetString();
+        terminalText.ShouldNotBeNull();
+        terminalText.ShouldContain("before the run settled");
+        terminalText.ShouldContain("Segmentation fault (core dumped)");
         terminal.Content.GetProperty("invalid_output_lines")[0].GetString().ShouldBe("Segmentation fault (core dumped)");
     }
 
@@ -1942,7 +1954,11 @@ public sealed class OmpProviderUserQuestionTests
         {
             var path = System.IO.Path.Combine(Path, name);
             File.WriteAllText(path, "#!/bin/sh\n" + body.Replace("\r\n", "\n", StringComparison.Ordinal), new UTF8Encoding(false));
-            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
+
             return path;
         }
 

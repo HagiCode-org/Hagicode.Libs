@@ -355,8 +355,12 @@ public sealed class PiProviderUserQuestionTests
         var terminal = messages.Last();
         terminal.Type.ShouldBe("terminal.failed");
         terminal.Content.GetProperty("exit_code").GetInt32().ShouldBe(3);
-        terminal.Content.GetProperty("stderr").GetString().ShouldContain("pi: out of memory");
-        terminal.Content.GetProperty("text").GetString().ShouldContain("pi: out of memory");
+        var terminalStderr = terminal.Content.GetProperty("stderr").GetString();
+        terminalStderr.ShouldNotBeNull();
+        terminalStderr.ShouldContain("pi: out of memory");
+        var terminalText = terminal.Content.GetProperty("text").GetString();
+        terminalText.ShouldNotBeNull();
+        terminalText.ShouldContain("pi: out of memory");
     }
 
     [Fact]
@@ -380,7 +384,9 @@ public sealed class PiProviderUserQuestionTests
 
         var terminal = messages.Last();
         terminal.Type.ShouldBe("terminal.failed");
-        terminal.Content.GetProperty("text").GetString().ShouldContain("before the run settled");
+        var terminalText = terminal.Content.GetProperty("text").GetString();
+        terminalText.ShouldNotBeNull();
+        terminalText.ShouldContain("before the run settled");
         terminal.Content.GetProperty("session_id").GetString().ShouldBe("pi-session-fixture");
     }
 
@@ -427,7 +433,9 @@ public sealed class PiProviderUserQuestionTests
 
         var terminal = messages.ShouldHaveSingleItem();
         terminal.Type.ShouldBe("terminal.failed");
-        terminal.Content.GetProperty("text").GetString().ShouldContain("state unavailable");
+        var terminalText = terminal.Content.GetProperty("text").GetString();
+        terminalText.ShouldNotBeNull();
+        terminalText.ShouldContain("state unavailable");
         process.Written.Select(ScriptedPiProcess.Parse).Select(static command => command.Type).ShouldNotContain("prompt");
     }
 
@@ -490,7 +498,9 @@ public sealed class PiProviderUserQuestionTests
 
         var terminal = messages.Last();
         terminal.Type.ShouldBe("terminal.failed");
-        terminal.Content.GetProperty("text").GetString().ShouldContain("401");
+        var terminalText = terminal.Content.GetProperty("text").GetString();
+        terminalText.ShouldNotBeNull();
+        terminalText.ShouldContain("401");
         terminal.Content.GetProperty("stop_reason").GetString().ShouldBe("error");
     }
 
@@ -980,7 +990,9 @@ public sealed class PiProviderUserQuestionTests
         provider.PrintContext.ShouldBeNull();
         var terminal = messages.ShouldHaveSingleItem();
         terminal.Type.ShouldBe("terminal.failed");
-        terminal.Content.GetProperty("text").GetString().ShouldContain("Unknown provider");
+        var terminalText = terminal.Content.GetProperty("text").GetString();
+        terminalText.ShouldNotBeNull();
+        terminalText.ShouldContain("Unknown provider");
         terminal.Content.GetProperty("exit_code").GetInt32().ShouldBe(1);
     }
 
@@ -1500,7 +1512,11 @@ public sealed class PiProviderUserQuestionTests
         {
             var path = System.IO.Path.Combine(Path, name);
             File.WriteAllText(path, "#!/bin/sh\n" + body.Replace("\r\n", "\n", StringComparison.Ordinal), new UTF8Encoding(false));
-            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
+
             return path;
         }
 

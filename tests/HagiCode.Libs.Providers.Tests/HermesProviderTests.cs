@@ -268,8 +268,12 @@ public sealed class HermesProviderTests
 
         messages.ShouldHaveSingleItem();
         messages[0].Type.ShouldBe("terminal.failed");
-        messages[0].Content.GetProperty("message").GetString().ShouldContain("HTTP 403 Forbidden");
-        messages[0].Content.GetProperty("text").GetString().ShouldContain("Permission denied");
+        var failureMessage = messages[0].Content.GetProperty("message").GetString();
+        failureMessage.ShouldNotBeNull();
+        failureMessage.ShouldContain("HTTP 403 Forbidden");
+        var failureText = messages[0].Content.GetProperty("text").GetString();
+        failureText.ShouldNotBeNull();
+        failureText.ShouldContain("Permission denied");
     }
 
     [Fact]
@@ -297,8 +301,12 @@ public sealed class HermesProviderTests
         }
 
         messages.Select(static message => message.Type).ShouldBe(["session.started", "terminal.failed"]);
-        messages[1].Content.GetProperty("message").GetString().ShouldContain("HTTP 403 Forbidden");
-        messages[1].Content.GetProperty("text").GetString().ShouldContain("Permission denied");
+        var failureMessage = messages[1].Content.GetProperty("message").GetString();
+        failureMessage.ShouldNotBeNull();
+        failureMessage.ShouldContain("HTTP 403 Forbidden");
+        var failureText = messages[1].Content.GetProperty("text").GetString();
+        failureText.ShouldNotBeNull();
+        failureText.ShouldContain("Permission denied");
     }
 
     [Fact]

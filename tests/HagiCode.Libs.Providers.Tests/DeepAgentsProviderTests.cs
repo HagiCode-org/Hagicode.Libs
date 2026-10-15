@@ -141,6 +141,7 @@ public sealed class DeepAgentsProviderTests
         var result = await provider.PingAsync();
 
         result.Success.ShouldBeTrue();
+        result.Version.ShouldNotBeNull();
         result.Version.ShouldContain("deepagents");
         provider.LastStartContext!.ExecutablePath.ShouldBe("/usr/bin/uvx");
         provider.LastStartContext.Arguments.ShouldBe(["--from", "deepagents-cli", "deepagents", "--acp"]);
@@ -154,6 +155,7 @@ public sealed class DeepAgentsProviderTests
         var result = await provider.PingAsync();
 
         result.Success.ShouldBeFalse();
+        result.ErrorMessage.ShouldNotBeNull();
         result.ErrorMessage.ShouldContain("Install 'deepagents-cli'");
     }
 
@@ -627,7 +629,9 @@ public sealed class DeepAgentsProviderTests
             "tool.failed",
             "terminal.failed"
         ]);
-        messages.Last().Content.GetProperty("message").GetString().ShouldContain("permission denied");
+        var terminalMessage = messages.Last().Content.GetProperty("message").GetString();
+        terminalMessage.ShouldNotBeNull();
+        terminalMessage.ShouldContain("permission denied");
     }
 
     [Fact(Skip = "DeepAgents real CLI validation is excluded by default because CI does not guarantee a deepagents binary on PATH.")]

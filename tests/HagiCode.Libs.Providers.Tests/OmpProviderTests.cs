@@ -69,8 +69,10 @@ public sealed class OmpProviderTests
             "--offline",
             "Plan a two-day trip."
         ]);
-        processManager.LastContext.EnvironmentVariables!.ShouldContainKeyAndValue("OMP_OFFLINE", "1");
-        processManager.LastContext.EnvironmentVariables.ShouldContainKeyAndValue("PATH", "/tmp/bin");
+        var environmentVariables = processManager.LastContext.EnvironmentVariables;
+        environmentVariables.ShouldNotBeNull();
+        environmentVariables.ShouldContainKeyAndValue("OMP_OFFLINE", "1");
+        environmentVariables.ShouldContainKeyAndValue("PATH", "/tmp/bin");
     }
 
     [Fact]
@@ -240,8 +242,10 @@ public sealed class OmpProviderTests
         messages.Where(static message => message.Type == "assistant")
             .Select(static message => message.Content.GetProperty("text").GetString())
             .ShouldBe(["hello", " from", " omp"]);
-        messages.Single(static message => message.Type == "assistant.thought")
-            .Content.GetProperty("text").GetString().ShouldContain("exactly three words");
+        var thoughtText = messages.Single(static message => message.Type == "assistant.thought")
+            .Content.GetProperty("text").GetString();
+        thoughtText.ShouldNotBeNull();
+        thoughtText.ShouldContain("exactly three words");
     }
 
     [Fact]
@@ -353,6 +357,7 @@ public sealed class OmpProviderTests
             .Single();
 
         assistantText.ShouldBe(golden);
+        assistantText.ShouldNotBeNull();
         assistantText.ShouldContain("- [x] 1.1–1.4");
         assistantText.ShouldContain("| col | val |\n| --- | --- |\n| a | b |");
         assistantText.ShouldContain("**bold** 中文Latin");
@@ -417,10 +422,14 @@ public sealed class OmpProviderTests
         messages[1].Content.GetProperty("tool_call_id").GetString().ShouldBe("tool-1");
         messages[1].Content.GetProperty("tool_name").GetString().ShouldBe("ls");
         messages[2].Content.GetProperty("tool_call_id").GetString().ShouldBe("tool-1");
-        messages[2].Content.GetProperty("text").GetString().ShouldContain("README.md");
+        var toolOutputText = messages[2].Content.GetProperty("text").GetString();
+        toolOutputText.ShouldNotBeNull();
+        toolOutputText.ShouldContain("README.md");
         messages[2].Content.GetProperty("timestamp").GetInt64().ShouldBe(1780796361956L);
         messages[2].Content.GetProperty("update").GetProperty("rawOutput").ValueKind.ShouldBe(JsonValueKind.Array);
-        messages[2].Content.GetProperty("update").GetProperty("rawOutput").EnumerateArray().First().GetProperty("text").GetString().ShouldContain("README.md");
+        var rawOutputText = messages[2].Content.GetProperty("update").GetProperty("rawOutput").EnumerateArray().First().GetProperty("text").GetString();
+        rawOutputText.ShouldNotBeNull();
+        rawOutputText.ShouldContain("README.md");
         messages[4].Content.TryGetProperty("text", out _).ShouldBeFalse();
     }
 

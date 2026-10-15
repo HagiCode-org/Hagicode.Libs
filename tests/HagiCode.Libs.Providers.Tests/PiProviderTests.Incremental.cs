@@ -134,7 +134,9 @@ public sealed partial class PiProviderTests
 
         completed.Content.GetProperty("tool_call_id").GetString().ShouldBe("call_mock_1");
         completed.Content.GetProperty("tool_name").GetString().ShouldBe("bash");
-        completed.Content.GetProperty("text").GetString().ShouldContain("hello");
+        var completedText = completed.Content.GetProperty("text").GetString();
+        completedText.ShouldNotBeNull();
+        completedText.ShouldContain("hello");
 
         // Thinking before the tool call is kept, and no partial argument JSON is forwarded as text or input.
         messages.Where(static message => message.Type == "assistant.thought")
@@ -158,7 +160,9 @@ public sealed partial class PiProviderTests
         var messages = await CollectMessagesAsync(provider, FixtureOptions, "Fail.");
 
         messages.Select(static message => message.Type).ShouldBe(["session.started", "terminal.failed"]);
-        messages[^1].Content.GetProperty("text").GetString().ShouldContain("mock upstream rejected");
+        var errorText = messages[^1].Content.GetProperty("text").GetString();
+        errorText.ShouldNotBeNull();
+        errorText.ShouldContain("mock upstream rejected");
         messages[^1].Content.GetProperty("stop_reason").GetString().ShouldBe("error");
     }
 
@@ -620,7 +624,10 @@ public sealed partial class PiProviderTests
                 // Absolute tool paths: other tests leave PATH=/tmp/bin in the shared test process.
                 $"#!/bin/sh\n/bin/cat '{firstPath}'\nwhile [ ! -e '{gatePath}' ]; do /bin/sleep 0.05; done\n/bin/cat '{secondPath}'\nexit 0\n",
                 cancellationToken);
-            File.SetUnixFileMode(scriptPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(scriptPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
 
             return await base.StartAsync(
                 new ProcessStartContext

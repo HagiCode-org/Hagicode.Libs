@@ -58,7 +58,9 @@ public sealed class ClaudeCodeProviderRealCliUserQuestionTests(ITestOutputHelper
 
         var result = messages.Last(static message => message.Type == "result").Content;
         result.GetProperty("is_error").GetBoolean().ShouldBeFalse();
-        result.GetProperty("result").GetString().ShouldContain(chosen, Case.Insensitive);
+        var resultText = result.GetProperty("result").GetString();
+        resultText.ShouldNotBeNull();
+        resultText.ShouldContain(chosen, Case.Insensitive);
         result.GetProperty("permission_denials").GetArrayLength().ShouldBe(0);
     }
 

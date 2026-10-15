@@ -75,8 +75,10 @@ public sealed partial class PiProviderTests
             "--offline",
             "Plan a two-day trip."
         ]);
-        processManager.LastContext.EnvironmentVariables!.ShouldContainKeyAndValue("PI_OFFLINE", "1");
-        processManager.LastContext.EnvironmentVariables.ShouldContainKeyAndValue("PATH", "/tmp/bin");
+        var environmentVariables = processManager.LastContext.EnvironmentVariables;
+        environmentVariables.ShouldNotBeNull();
+        environmentVariables.ShouldContainKeyAndValue("PI_OFFLINE", "1");
+        environmentVariables.ShouldContainKeyAndValue("PATH", "/tmp/bin");
     }
 
     [Fact]
@@ -365,6 +367,7 @@ public sealed partial class PiProviderTests
             .Single();
 
         assistantText.ShouldBe(golden);
+        assistantText.ShouldNotBeNull();
         assistantText.ShouldContain("- [x] 1.1–1.4");
         assistantText.ShouldContain("| col | val |\n| --- | --- |\n| a | b |");
         assistantText.ShouldContain("**bold** 中文Latin");
@@ -431,10 +434,14 @@ public sealed partial class PiProviderTests
         messages[1].Content.GetProperty("tool_call_id").GetString().ShouldBe("tool-1");
         messages[1].Content.GetProperty("tool_name").GetString().ShouldBe("ls");
         messages[2].Content.GetProperty("tool_call_id").GetString().ShouldBe("tool-1");
-        messages[2].Content.GetProperty("text").GetString().ShouldContain("README.md");
+        var toolOutputText = messages[2].Content.GetProperty("text").GetString();
+        toolOutputText.ShouldNotBeNull();
+        toolOutputText.ShouldContain("README.md");
         messages[2].Content.GetProperty("timestamp").GetInt64().ShouldBe(1780796361956L);
         messages[2].Content.GetProperty("update").GetProperty("rawOutput").ValueKind.ShouldBe(JsonValueKind.Array);
-        messages[2].Content.GetProperty("update").GetProperty("rawOutput").EnumerateArray().First().GetProperty("text").GetString().ShouldContain("README.md");
+        var rawOutputText = messages[2].Content.GetProperty("update").GetProperty("rawOutput").EnumerateArray().First().GetProperty("text").GetString();
+        rawOutputText.ShouldNotBeNull();
+        rawOutputText.ShouldContain("README.md");
         messages[4].Content.TryGetProperty("text", out _).ShouldBeFalse();
     }
 

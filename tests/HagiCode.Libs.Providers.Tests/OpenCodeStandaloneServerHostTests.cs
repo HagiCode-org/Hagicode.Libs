@@ -81,6 +81,7 @@ public sealed class OpenCodeStandaloneServerHostTests
 
         result.Status.ShouldBe(OpenCodeStandaloneServerStatus.Unhealthy);
         result.Stage.ShouldBe(OpenCodeLifecycleStage.HealthProbe);
+        result.ErrorMessage.ShouldNotBeNull();
         result.ErrorMessage.ShouldContain("health_probe");
     }
 
@@ -100,8 +101,10 @@ public sealed class OpenCodeStandaloneServerHostTests
         result.Stage.ShouldBe(OpenCodeLifecycleStage.StartOwnedRuntime);
         result.ExecutionProfile.ShouldBe("live");
         result.OwnsRuntime.ShouldBeTrue();
+        result.ErrorMessage.ShouldNotBeNull();
         result.ErrorMessage.ShouldContain("OpenCode executable was not found");
         result.ErrorMessage.ShouldContain(missingExecutablePath);
+        result.DiagnosticOutput.ShouldNotBeNull();
         result.DiagnosticOutput.ShouldContain(missingExecutablePath);
     }
 
@@ -120,6 +123,7 @@ public sealed class OpenCodeStandaloneServerHostTests
 
         exception.Result.Status.ShouldBe(OpenCodeStandaloneServerStatus.Unhealthy);
         exception.Result.Stage.ShouldBe(OpenCodeLifecycleStage.StartOwnedRuntime);
+        exception.Result.ErrorMessage.ShouldNotBeNull();
         exception.Result.ErrorMessage.ShouldContain("OpenCode executable was not found");
         exception.Result.ErrorMessage.ShouldContain(missingExecutablePath);
     }
