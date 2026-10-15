@@ -216,7 +216,7 @@ jobs:
           echo "Running real CLI invocation error contract tests on ${RUNNER_OS}"
           dotnet test tests/HagiCode.Libs.Providers.Tests/HagiCode.Libs.Providers.Tests.csproj \
             --no-restore \
-            --filter "Category=RealCliInvocationContract" \
+            --filter "TestCategory=RealCliInvocationContract" \
             --logger "console;verbosity=normal"
 
       - name: Run Windows zh-CN real Claude whitespace shim regression
