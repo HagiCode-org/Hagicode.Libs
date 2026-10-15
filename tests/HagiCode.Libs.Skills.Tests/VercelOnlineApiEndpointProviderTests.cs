@@ -7,7 +7,7 @@ namespace HagiCode.Libs.Skills.Tests;
 
 public sealed class VercelOnlineApiEndpointProviderTests
 {
-    [Fact]
+    [Test]
     public void Uses_documented_default_hosts()
     {
         var provider = CreateProvider();
@@ -20,7 +20,7 @@ public sealed class VercelOnlineApiEndpointProviderTests
         provider.GetGitHubTreeEndpoint().RelativePathTemplate.ShouldBe("repos/{owner}/{repo}/git/trees/{branch}");
     }
 
-    [Fact]
+    [Test]
     public void Uses_option_based_overrides_when_configured()
     {
         var provider = CreateProvider(options =>
@@ -39,7 +39,7 @@ public sealed class VercelOnlineApiEndpointProviderTests
         provider.GetGitHubRepositoryEndpoint().DefaultHeaders!["User-Agent"].ShouldBe("skills-tests");
     }
 
-    [Fact]
+    [Test]
     public void Returns_path_relative_well_known_candidate_before_root_fallback()
     {
         var provider = CreateProvider();
@@ -53,7 +53,7 @@ public sealed class VercelOnlineApiEndpointProviderTests
         candidates[1].ResolvedBaseUri.AbsoluteUri.ShouldBe("https://example.com/");
     }
 
-    [Fact]
+    [Test]
     public void Returns_only_root_well_known_candidate_for_root_urls()
     {
         var provider = CreateProvider();

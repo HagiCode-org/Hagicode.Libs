@@ -8,7 +8,7 @@ namespace HagiCode.Libs.Skills.Tests;
 
 public sealed class DependencyInjectionTests
 {
-    [Fact]
+    [Test]
     public async Task AddHagiCodeSkills_registers_default_online_api_services()
     {
         var services = new ServiceCollection();
@@ -22,7 +22,7 @@ public sealed class DependencyInjectionTests
         provider.ShouldBeOfType<VercelOnlineApiEndpointProvider>();
     }
 
-    [Fact]
+    [Test]
     public async Task AddHagiCodeSkills_allows_endpoint_provider_override()
     {
         var services = new ServiceCollection();

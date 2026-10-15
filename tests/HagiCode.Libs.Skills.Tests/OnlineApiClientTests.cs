@@ -9,7 +9,7 @@ namespace HagiCode.Libs.Skills.Tests;
 
 public sealed class OnlineApiClientTests
 {
-    [Fact]
+    [Test]
     public async Task SearchAsync_builds_documented_query_and_deserializes_response()
     {
         var handler = new TestHttpMessageHandler((request, _) =>
@@ -36,7 +36,7 @@ public sealed class OnlineApiClientTests
         response.Skills.Select(static skill => skill.Id).ShouldBe(["a", "b"]);
     }
 
-    [Fact]
+    [Test]
     public async Task DiscoverWellKnownAsync_deserializes_valid_index_response()
     {
         var handler = new TestHttpMessageHandler((request, _) =>
@@ -69,7 +69,7 @@ public sealed class OnlineApiClientTests
         response.Skills[0].Name.ShouldBe("my-skill");
     }
 
-    [Fact]
+    [Test]
     public async Task SearchAsync_throws_online_api_http_exception_for_non_success_status_codes()
     {
         var handler = new TestHttpMessageHandler((_, _) =>
@@ -90,7 +90,7 @@ public sealed class OnlineApiClientTests
         exception.ResponseBody.ShouldContain("upstream failed");
     }
 
-    [Fact]
+    [Test]
     public async Task SearchAsync_honors_cancellation_tokens()
     {
         var handler = new TestHttpMessageHandler(async (_, cancellationToken) =>
@@ -107,7 +107,7 @@ public sealed class OnlineApiClientTests
             cancellationTokenSource.Token));
     }
 
-    [Fact]
+    [Test]
     public async Task TrackTelemetryAsync_returns_skipped_result_when_disabled()
     {
         var handler = new TestHttpMessageHandler((_, _) =>
@@ -126,7 +126,7 @@ public sealed class OnlineApiClientTests
         handler.Requests.ShouldBeEmpty();
     }
 
-    [Fact]
+    [Test]
     public async Task GetGitHubRepositoryMetadataAsync_shapes_request_headers_and_path()
     {
         var handler = new TestHttpMessageHandler((request, _) =>
@@ -163,7 +163,7 @@ public sealed class OnlineApiClientTests
         response.Private.ShouldBeFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task DiscoverWellKnownAsync_rejects_invalid_payloads_with_validation_details()
     {
         var handler = new TestHttpMessageHandler((request, _) =>

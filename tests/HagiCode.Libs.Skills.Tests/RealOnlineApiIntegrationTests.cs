@@ -10,8 +10,8 @@ public sealed class RealOnlineApiIntegrationTests
 {
     private const string RealOnlineApiTestsEnvironmentVariable = "HAGICODE_REAL_ONLINE_API_TESTS";
 
-    [Fact]
-    [Trait("Category", "RealOnlineApi")]
+    [Test]
+    [Category("RealOnlineApi")]
     public async Task SearchAsync_can_query_the_real_search_api_when_opted_in()
     {
         if (!IsRealOnlineApiTestsEnabled())
@@ -34,8 +34,8 @@ public sealed class RealOnlineApiIntegrationTests
             !string.IsNullOrWhiteSpace(skill.Name));
     }
 
-    [Fact]
-    [Trait("Category", "RealOnlineApi")]
+    [Test]
+    [Category("RealOnlineApi")]
     public async Task DiscoverWellKnownAsync_can_fallback_to_the_real_root_index_when_opted_in()
     {
         if (!IsRealOnlineApiTestsEnabled())
@@ -57,8 +57,8 @@ public sealed class RealOnlineApiIntegrationTests
             skill.Files.Contains("SKILL.md", StringComparer.OrdinalIgnoreCase));
     }
 
-    [Fact]
-    [Trait("Category", "RealOnlineApi")]
+    [Test]
+    [Category("RealOnlineApi")]
     public async Task GetAuditMetadataAsync_can_call_the_real_audit_api_when_opted_in()
     {
         if (!IsRealOnlineApiTestsEnabled())
@@ -79,8 +79,8 @@ public sealed class RealOnlineApiIntegrationTests
         response.Sources.ShouldContainKey("find-skills");
     }
 
-    [Fact]
-    [Trait("Category", "RealOnlineApi")]
+    [Test]
+    [Category("RealOnlineApi")]
     public async Task TrackTelemetryAsync_can_reach_the_real_telemetry_endpoint_when_opted_in()
     {
         if (!IsRealOnlineApiTestsEnabled())
@@ -100,8 +100,8 @@ public sealed class RealOnlineApiIntegrationTests
         result.RequestUri.Host.ShouldBe("add-skill.vercel.sh");
     }
 
-    [Fact]
-    [Trait("Category", "RealOnlineApi")]
+    [Test]
+    [Category("RealOnlineApi")]
     public async Task GitHub_operations_can_query_the_real_github_api_when_opted_in()
     {
         if (!IsRealOnlineApiTestsEnabled())
