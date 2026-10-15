@@ -99,8 +99,8 @@ internal static class KiroAcpMessageMapper
         {
             "agent_message_chunk" => [CreateAssistantUpdateMessage(sessionId, updateElement, "assistant")],
             "agent_thought_chunk" => [CreateAssistantUpdateMessage(sessionId, updateElement, "assistant.thought")],
-            "tool_call" => [CreateUpdateMessage("tool.call", sessionId, updateElement)],
-            "tool_call_update" => [CreateUpdateMessage("tool.update", sessionId, updateElement)],
+            "tool_call" => [CreateUpdateMessage("tool.call", sessionId, AcpToolKindAnnotator.Annotate(updateElement))],
+            "tool_call_update" => [CreateUpdateMessage("tool.update", sessionId, AcpToolKindAnnotator.Annotate(updateElement))],
             "prompt_completed" => [CreatePromptCompletedMessage(sessionId, updateElement)],
             "error" or "agent_error" or "prompt_failed" => [CreatePromptFailureMessage(sessionId, updateElement)],
             _ =>

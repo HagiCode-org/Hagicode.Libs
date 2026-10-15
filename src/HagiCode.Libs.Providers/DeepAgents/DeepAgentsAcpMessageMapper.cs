@@ -44,8 +44,8 @@ internal static class DeepAgentsAcpMessageMapper
         var updateKind = TryGetUpdateKind(updateElement.Value);
         return updateKind switch
         {
-            "tool_call" => [CreateToolLifecycleMessage("tool.call", sessionId, updateElement.Value)],
-            "tool_call_update" => [CreateToolLifecycleMessage(ResolveToolMessageType(updateElement.Value) ?? "tool.update", sessionId, updateElement.Value)],
+            "tool_call" => [CreateToolLifecycleMessage("tool.call", sessionId, AcpToolKindAnnotator.Annotate(updateElement.Value))],
+            "tool_call_update" => [CreateToolLifecycleMessage(ResolveToolMessageType(updateElement.Value) ?? "tool.update", sessionId, AcpToolKindAnnotator.Annotate(updateElement.Value))],
             _ => KimiAcpMessageMapper.NormalizeNotification(notification)
         };
     }

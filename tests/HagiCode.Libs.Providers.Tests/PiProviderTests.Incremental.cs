@@ -125,9 +125,14 @@ public sealed partial class PiProviderTests
         call.Content.GetProperty("tool_name").GetString().ShouldBe("bash");
         call.Content.GetProperty("status").GetString().ShouldBe("running");
         call.Content.GetProperty("update").TryGetProperty("rawInput", out _).ShouldBeFalse();
+        // kind is the classified vocabulary value and title keeps the tool name Pi reported.
+        call.Content.GetProperty("update").GetProperty("kind").GetString().ShouldBe("shell");
+        call.Content.GetProperty("update").GetProperty("title").GetString().ShouldBe("bash");
 
         update.Content.GetProperty("tool_call_id").GetString().ShouldBe("call_mock_1");
         update.Content.GetProperty("tool_name").GetString().ShouldBe("bash");
+        update.Content.GetProperty("update").GetProperty("kind").GetString().ShouldBe("shell");
+        update.Content.GetProperty("update").GetProperty("title").GetString().ShouldBe("bash");
         var rawInput = update.Content.GetProperty("update").GetProperty("rawInput");
         rawInput.ValueKind.ShouldBe(JsonValueKind.Object);
         rawInput.GetProperty("command").GetString().ShouldBe("echo hello");

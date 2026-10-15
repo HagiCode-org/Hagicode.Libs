@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using HagiCode.Libs.Core.Process;
+using HagiCode.Libs.Core.Tools;
 using HagiCode.Libs.Core.Transport;
 
 namespace HagiCode.Libs.Providers.Pi;
@@ -1223,10 +1224,14 @@ internal sealed class PiJsonEventMapper
         string? text,
         JsonElement? sourceMessage = null)
     {
+        var kind = ToolKindClassifier.Resolve(
+            providerKind: null,
+            rawName: toolName,
+            inputJson: rawInput is null ? null : JsonSerializer.Serialize(rawInput)).Kind;
         var update = new Dictionary<string, object?>
         {
             ["title"] = toolName,
-            ["kind"] = toolName,
+            ["kind"] = kind,
             ["status"] = status,
         };
 

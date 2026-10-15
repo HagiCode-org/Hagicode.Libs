@@ -190,8 +190,8 @@ internal static class ReasonixAcpMessageMapper
             "agent_thought_chunk" => [CreateAssistantUpdateMessage(sessionId, updateElement, "assistant.thought")],
             // Replayed history only: a live turn never produces user_message_chunk.
             "user_message_chunk" => [],
-            "tool_call" => [CreateUpdateMessage("tool.call", sessionId, updateElement)],
-            "tool_call_update" => [CreateUpdateMessage("tool.update", sessionId, updateElement)],
+            "tool_call" => [CreateUpdateMessage("tool.call", sessionId, AcpToolKindAnnotator.Annotate(updateElement))],
+            "tool_call_update" => [CreateUpdateMessage("tool.update", sessionId, AcpToolKindAnnotator.Annotate(updateElement))],
             "prompt_completed" => [CreatePromptCompletedMessage(sessionId, updateElement)],
             "error" or "agent_error" or "prompt_failed" => [CreatePromptFailureMessage(sessionId, updateElement)],
             _ =>

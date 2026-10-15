@@ -273,6 +273,8 @@ public sealed class OmpProviderTests
         var toolCall = messages.First(static message => message.Type == "tool.call");
         toolCall.Content.GetProperty("tool_name").GetString().ShouldBe("bash");
         toolCall.Content.GetProperty("tool_call_id").GetString().ShouldBe("tool-bash-1");
+        toolCall.Content.GetProperty("update").GetProperty("kind").GetString().ShouldBe("shell");
+        toolCall.Content.GetProperty("update").GetProperty("title").GetString().ShouldBe("bash");
     }
 
     [Fact]
@@ -421,6 +423,9 @@ public sealed class OmpProviderTests
         ]);
         messages[1].Content.GetProperty("tool_call_id").GetString().ShouldBe("tool-1");
         messages[1].Content.GetProperty("tool_name").GetString().ShouldBe("ls");
+        // "ls" is outside the alias table and the input has no shape signal, so kind falls back to other.
+        messages[1].Content.GetProperty("update").GetProperty("kind").GetString().ShouldBe("other");
+        messages[1].Content.GetProperty("update").GetProperty("title").GetString().ShouldBe("ls");
         messages[2].Content.GetProperty("tool_call_id").GetString().ShouldBe("tool-1");
         var toolOutputText = messages[2].Content.GetProperty("text").GetString();
         toolOutputText.ShouldNotBeNull();

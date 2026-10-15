@@ -100,8 +100,8 @@ internal static class KimiAcpMessageMapper
         {
             "assistant" or "assistant_message" or "agent_message_chunk" => [CreateAssistantUpdateMessage(sessionId, updateElement.Value, "assistant")],
             "thought" or "assistant_thought" or "agent_thought_chunk" => [CreateAssistantUpdateMessage(sessionId, updateElement.Value, "assistant.thought")],
-            "tool_call" => [CreateUpdateMessage("tool.call", sessionId, updateElement.Value)],
-            "tool_call_update" => [CreateUpdateMessage("tool.update", sessionId, updateElement.Value)],
+            "tool_call" => [CreateUpdateMessage("tool.call", sessionId, AcpToolKindAnnotator.Annotate(updateElement.Value))],
+            "tool_call_update" => [CreateUpdateMessage("tool.update", sessionId, AcpToolKindAnnotator.Annotate(updateElement.Value))],
             "error" => [CreateErrorMessage(sessionId, updateElement.Value)],
             "prompt_completed" or "completed" => [CreatePromptCompletedMessage(sessionId, updateElement.Value)],
             _ =>
@@ -200,8 +200,8 @@ internal static class KimiAcpMessageMapper
 
     private static string? TryGetUpdateKind(JsonElement updateElement)
     {
-        return TryGetString(updateElement, "kind") ??
-               TryGetString(updateElement, "sessionUpdate") ??
+        return TryGetString(updateElement, "sessionUpdate") ??
+               TryGetString(updateElement, "kind") ??
                TryGetString(updateElement, "type");
     }
 

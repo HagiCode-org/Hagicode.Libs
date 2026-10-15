@@ -718,6 +718,9 @@ public sealed class OmpProviderUserQuestionTests
         tools.Select(static message => message.Type).ShouldBe(["tool.call", "tool.update", "tool.completed"]);
         tools.ShouldAllBe(static message => message.Content.GetProperty("tool_call_id").GetString() == "toolu_01PAHx8Azmtj3HCLVFYE775u");
         tools.ShouldAllBe(static message => message.Content.GetProperty("tool_name").GetString() == "bash");
+        // kind is the classified vocabulary value; title keeps the name OMP reported.
+        tools.ShouldAllBe(static message => message.Content.GetProperty("update").GetProperty("kind").GetString() == "shell");
+        tools.ShouldAllBe(static message => message.Content.GetProperty("update").GetProperty("title").GetString() == "bash");
         tools[1].Content.GetProperty("update").GetProperty("rawInput").GetProperty("command").GetString().ShouldBe("echo hagicode-probe");
         json.First(static message => message.Type == "tool.call").Content.GetProperty("tool_name").GetString().ShouldBe("tool_call");
         rpc.Last().Type.ShouldBe("terminal.completed");

@@ -77,8 +77,8 @@ internal static class DshAcpMessageMapper
         {
             "agent_message_chunk" or "assistant" => [CreateUpdate("assistant", sessionId, update, ExtractText(update))],
             "agent_thought_chunk" or "thought" => [CreateUpdate("assistant.thought", sessionId, update, ExtractText(update))],
-            "tool_call" => [CreateUpdate("tool.call", sessionId, update)],
-            "tool_call_update" => [CreateUpdate("tool.update", sessionId, update)],
+            "tool_call" => [CreateUpdate("tool.call", sessionId, AcpToolKindAnnotator.Annotate(update))],
+            "tool_call_update" => [CreateUpdate("tool.update", sessionId, AcpToolKindAnnotator.Annotate(update))],
             "error" => [CreateTerminalFailureMessage(sessionId, TryGetString(update, "message") ?? ExtractText(update) ?? "dsh reported an error.")],
             "prompt_completed" => [CreateTerminal(sessionId, TryGetString(update, "stopReason"), ExtractText(update) ?? ExtractResultText(parameters), update)],
             _ => [CreateUpdate("session.update", sessionId, update)]
