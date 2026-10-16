@@ -115,6 +115,16 @@ public sealed class CliVersionProbeTests
     }
 
     [Test]
+    public async Task ProbeVersionAsync_accepts_a_version_followed_by_a_sentence_period()
+    {
+        using var fixture = CreateExecutable("echo 'GitHub Copilot CLI 1.0.60.'");
+
+        var result = await new CliVersionProbe().ProbeVersionAsync(fixture.Path, [["--version"]]);
+
+        result.Version.ShouldBe("1.0.60");
+    }
+
+    [Test]
     public async Task ProbeVersionAsync_searches_standard_error_when_standard_output_has_no_version()
     {
         using var fixture = CreateExecutable("echo 'Checking CLI...' && echo 'GitHub Copilot CLI 1.0.88' >&2");

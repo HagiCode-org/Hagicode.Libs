@@ -267,8 +267,9 @@ public sealed partial class CliVersionProbe
         return null;
     }
 
+    // A trailing sentence period is allowed (Copilot prints "GitHub Copilot CLI 1.0.60."); a period followed by more version text is not.
     [GeneratedRegex(
-        @"(?<![0-9A-Za-z])v?(?<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?(?:\+[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?)(?![0-9A-Za-z.+-])",
+        @"(?<![0-9A-Za-z])v?(?<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?(?:\+[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?)(?![0-9A-Za-z+-])(?!\.[0-9A-Za-z])",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex VersionTokenRegex();
 }
