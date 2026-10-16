@@ -2,11 +2,11 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace HagiCode.Libs.Imaging;
 
-/// <summary>Dependency injection registration for <see cref="IAvifConverter"/>.</summary>
+/// <summary>Dependency injection registration for <see cref="IAvifConverter"/> and <see cref="IModelImagePreparer"/>.</summary>
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers <see cref="IAvifConverter"/> as a singleton and applies the configured limits. The
+    /// Registers <see cref="IAvifConverter"/> and <see cref="IModelImagePreparer"/> as singletons and applies the configured limits. The
     /// <see cref="AvifConverterOptions"/> instance is also registered so hosts can read the effective limits.
     /// </summary>
     public static IServiceCollection AddHagiCodeImaging(
@@ -21,6 +21,7 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton(options);
         services.AddSingleton<IAvifConverter>(_ => new AvifConverter(options.Snapshot()));
+        services.AddSingleton<IModelImagePreparer>(_ => new ModelImagePreparer(options.MaxConcurrentConversions));
         return services;
     }
 }

@@ -7,7 +7,7 @@ namespace HagiCode.Libs.Imaging.Engine;
 /// The libvips engine (NetVips managed binding over the bundled <c>libvips</c> shared library). It is the only type that
 /// touches NetVips. Every loader is explicit and uses <c>failOn: Error</c> so truncated input is rejected.
 /// </summary>
-internal sealed class LibvipsAvifEngine : IAvifEngine
+internal sealed class LibvipsAvifEngine : IAvifEngine, IModelImageEngine
 {
     /// <inheritdoc />
     public SourceHeader ReadHeader(byte[] source, AvifSourceFormat format)
@@ -61,6 +61,48 @@ internal sealed class LibvipsAvifEngine : IAvifEngine
             }
 
             return new EncodedImage(bytes, output.Width, output.Height, output.HasAlpha());
+        }
+    }
+
+    /// <inheritdoc />
+    public IDecodedRaster Decode(byte[] source, AvifSourceFormat format)
+    {
+        var loaded = Load(source, format, Access.Random);
+        try
+        {
+            return new LibvipsDecodedRaster(loaded.Autorot());
+        }
+        finally
+        {
+            loaded.Dispose();
+        }
+    }
+
+    /// <inheritdoc />
+    public IDecodedRaster DecodeSvg(byte[] source, int longEdgeLimit)
+    {
+        // The intrinsic size comes from a header-only load (nothing is rendered yet). The render then uses a scale that
+        // keeps the longest edge within the limit, so a declared size of 100000 px never allocates that raster.
+        double scale;
+        using (var probe = LoadSvg(source, 1.0))
+        {
+            var longest = Math.Max(probe.Width, probe.Height);
+            scale = longest <= 0 ? 1.0 : Math.Min(1.0, (double)longEdgeLimit / longest);
+        }
+
+        // Ownership moves to the returned wrapper, which disposes the native image.
+        return new LibvipsDecodedRaster(LoadSvg(source, scale));
+    }
+
+    private static Image LoadSvg(byte[] source, double scale)
+    {
+        try
+        {
+            return Image.SvgloadBuffer(source, scale: scale, failOn: FailOn.Error);
+        }
+        catch (VipsException exception)
+        {
+            throw new EngineLoadException("libvips could not rasterize the SVG.", exception);
         }
     }
 
@@ -147,4 +189,65 @@ internal sealed class LibvipsAvifEngine : IAvifEngine
         AvifChromaSubsampling.Yuv444 => ForeignSubsample.Off,
         _ => ForeignSubsample.Auto,
     };
+}
+
+/// <summary>Owns one native image for the lifetime of a preparation. Only managed bytes and sizes leave it.</summary>
+internal sealed class LibvipsDecodedRaster : IDecodedRaster
+{
+    private Image? _raster;
+
+    internal LibvipsDecodedRaster(Image raster)
+    {
+        _raster = raster;
+    }
+
+    private Image Raster => _raster ?? throw new ObjectDisposedException(nameof(LibvipsDecodedRaster));
+
+    public int Width => Raster.Width;
+
+    public int Height => Raster.Height;
+
+    public bool HasAlpha => Raster.HasAlpha();
+
+    public void ForceDecode()
+    {
+        // Avg reads every pixel in a streaming pass, so truncated input raises here without a full-size buffer.
+        _ = Raster.Avg();
+    }
+
+    public byte[] EncodeJpeg(int longEdge, int quality)
+    {
+        using var srgb = ToSrgb(Raster);
+        using var opaque = srgb.Bands > 3 ? srgb.ExtractBand(0, n: 3) : srgb.Copy();
+        using var fitted = Fit(opaque, longEdge);
+        return fitted.JpegsaveBuffer(q: quality, keep: ForeignKeep.None);
+    }
+
+    public byte[] EncodePng(int longEdge)
+    {
+        using var srgb = ToSrgb(Raster);
+        using var fitted = Fit(srgb, longEdge);
+        return fitted.PngsaveBuffer(keep: ForeignKeep.None);
+    }
+
+    public void Dispose()
+    {
+        _raster?.Dispose();
+        _raster = null;
+    }
+
+    /// <summary>Returns a new sRGB image (alpha kept). The caller disposes it.</summary>
+    private static Image ToSrgb(Image image) =>
+        image.Interpretation == Interpretation.Srgb ? image.Copy() : image.Colourspace(Interpretation.Srgb);
+
+    private static Image Fit(Image image, int longEdge)
+    {
+        if (longEdge >= Math.Max(image.Width, image.Height))
+        {
+            return image.Copy();
+        }
+
+        // A square box keeps the aspect ratio of the longest edge, and Size.Down never enlarges.
+        return image.ThumbnailImage(longEdge, height: longEdge, size: Size.Down, noRotate: true);
+    }
 }
