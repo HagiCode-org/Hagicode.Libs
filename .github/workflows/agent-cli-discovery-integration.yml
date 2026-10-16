@@ -210,6 +210,22 @@ jobs:
           echo "Adding $dir to PATH for the following steps"
           echo "$dir" >> "$GITHUB_PATH"
 
+      - name: Show raw version output (diagnostics)
+        if: always()
+        continue-on-error: true
+        run: |
+          for cmd in claude copilot codex; do
+            case "$cmd" in
+              claude) [ "${{ matrix.provider }}" = ClaudeCode ] || continue ;;
+              copilot) [ "${{ matrix.provider }}" = Copilot ] || continue ;;
+              codex) [ "${{ matrix.provider }}" = Codex ] || continue ;;
+            esac
+            for arg in version --version -v; do
+              echo "--- $cmd $arg"
+              "$cmd" $arg 2>&1 | head -5 | cat -A | head -5 || true
+            done
+          done
+
       - name: Verify discovery with the install directory on PATH
         run: |
           dotnet run --project src/HagiCode.Libs.CiSetup.Console -- \
@@ -228,6 +244,7 @@ jobs:
           HAGICODE_REAL_CLI_TESTS: '1'
           HAGICODE_REAL_CLI_PROVIDER: ${{ matrix.provider }}
           HAGICODE_REAL_CLI_STRATEGY: ${{ matrix.install_strategy }}
+          HAGICODE_REAL_CLI_OFF_PATH: ${{ matrix.off_path }}
         run: |
           dotnet test tests/HagiCode.Libs.Core.Tests/HagiCode.Libs.Core.Tests.csproj \
             --filter "TestCategory=RealCliDiscovery"

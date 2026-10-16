@@ -14,6 +14,7 @@ public sealed class RealCliDiscoveryTests
     private const string EnableVariable = "HAGICODE_REAL_CLI_TESTS";
     private const string ProviderVariable = "HAGICODE_REAL_CLI_PROVIDER";
     private const string StrategyVariable = "HAGICODE_REAL_CLI_STRATEGY";
+    private const string OffPathVariable = "HAGICODE_REAL_CLI_OFF_PATH";
     private const string DefaultProvider = "ClaudeCode";
 
     private static readonly Regex WellFormedVersion = new(
@@ -49,12 +50,23 @@ public sealed class RealCliDiscoveryTests
             Assert.Ignore($"Set {StrategyVariable} to a strategy that declares a well-known location to run the off-PATH check.");
         }
 
+        if (!IsEnabled(OffPathVariable))
+        {
+            Assert.Ignore($"Set {OffPathVariable} to true for lanes whose install directory is a well-known location; npm lanes use the runner's own prefix.");
+        }
+
         var environment = RemoveStrategyDirectoriesFromPath(CurrentEnvironment(), strategy!);
 
         var result = await DiscoverAsync(descriptor, environment);
 
         AssertFoundWithExpectations(descriptor, strategy, result);
         result.Source.ShouldBe(CliDiscoverySource.WellKnownLocation);
+    }
+
+    private static bool IsEnabled(string variable)
+    {
+        var value = System.Environment.GetEnvironmentVariable(variable);
+        return string.Equals(value, "1", StringComparison.Ordinal) || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
     }
 
     private static (CliInstallDescriptor Descriptor, CliInstallStrategy? Strategy) ResolveExpectation()
