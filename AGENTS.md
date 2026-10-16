@@ -6,7 +6,7 @@ Inherits all behavior from `/AGENTS.md` at the monorepo root. Local rules extend
 
 ## Project Context
 
-`HagiCode.Libs` is a lightweight .NET 10 library workspace for reusable HagiCode CLI integrations and repository exploration. Contains multiple project libraries for transport, prompts, providers, skills, and Git exploration.
+`HagiCode.Libs` is a lightweight .NET 10 library workspace for reusable HagiCode CLI integrations and repository exploration. Contains multiple project libraries for transport, prompts, providers, skills, imaging, and console testing.
 
 ## Working Directory
 
@@ -31,7 +31,7 @@ Tier markers, switch variables and filter expressions: `docs/testing-tiers.md`.
 - `src/HagiCode.Libs.Providers/`: provider abstractions (Claude, Copilot, Codex, Gemini, etc.)
 - `src/HagiCode.Libs.Skills/`: skills infrastructure and online API client
 - `src/HagiCode.Libs.Imaging/`: in-process AVIF conversion with bundled libvips native libraries (tests: `tests/HagiCode.Libs.Imaging.Tests/`, backend guide: `docs/avif-backend-integration-guide.md`)
-- `src/HagiCode.Libs.Exploration/`: Git repository discovery and state inspection
+- `src/HagiCode.Libs.ConsoleTesting/`: shared harness for the per-provider `*.Console` projects (tests: `tests/HagiCode.Libs.ConsoleTesting.Tests/`)
 - `tests/`: NUnit coverage for each project; shared test settings, packages and global usings are in `tests/Directory.Build.props`
 
 ## Agent Guidelines
