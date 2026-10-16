@@ -588,6 +588,9 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
             return;
         }
 
+        // The question is announced in the turn's stream before its handler runs, so the caller shows it in order.
+        _activeTurn?.Events.Writer.TryWrite(new CodexUserQuestionEvent(request));
+
         var runToken = _activeTurn?.CancellationToken ?? _shutdown.Token;
         var task = Task.Run(() => AnswerQuestionAsync(request, runToken));
         _questionTasks[task] = 0;

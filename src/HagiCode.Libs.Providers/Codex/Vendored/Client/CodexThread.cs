@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
+using HagiCode.Libs.Providers.Codex.AppServer;
 using ManagedCode.CodexSharpSDK.Configuration;
 using ManagedCode.CodexSharpSDK.Exceptions;
 using ManagedCode.CodexSharpSDK.Execution;
@@ -25,7 +26,8 @@ public sealed class CodexThread
     private const string AotUnsafeTypedRunMessage =
         "This overload relies on reflection-based JSON serialization and is not AOT/trimming-safe. Use the JsonTypeInfo<TResponse> overload.";
 
-    private readonly CodexExec _exec;
+    private readonly CodexExec? _exec;
+    private readonly CodexAppServerSession? _appServer;
     private readonly CodexOptions _options;
     private readonly ThreadOptions _threadOptions;
     // One active turn per thread instance (ADR 002).
@@ -34,12 +36,14 @@ public sealed class CodexThread
     private string? _id;
 
     internal CodexThread(
-        CodexExec exec,
+        CodexExec? exec,
         CodexOptions options,
         ThreadOptions threadOptions,
-        string? id = null)
+        string? id = null,
+        CodexAppServerSession? appServer = null)
     {
         _exec = exec;
+        _appServer = appServer;
         _options = options;
         _threadOptions = threadOptions;
         _id = id;
@@ -269,6 +273,37 @@ public sealed class CodexThread
         TurnOptions turnOptions,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        if (_appServer is not null)
+        {
+            // The interactive transport: the turn runs over codex app-server, which can carry user questions.
+            if (turnOptions.OutputSchema is not null)
+            {
+                throw new NotSupportedException("Structured output is not supported on the interactive Codex transport.");
+            }
+
+            if (normalizedInput.Images.Count > 0)
+            {
+                throw new NotSupportedException("Image input is not supported on the interactive Codex transport.");
+            }
+
+            var threadParameters = CodexAppServerSession.BuildThreadParameters(_threadOptions, _options.Config);
+            var turnParameters = CodexAppServerSession.BuildTurnParameters(_threadOptions);
+            await foreach (var appServerEvent in _appServer
+                               .RunTurnAsync(Volatile.Read(ref _id), normalizedInput.Prompt, threadParameters, turnParameters, cancellationToken)
+                               .WithCancellation(cancellationToken)
+                               .ConfigureAwait(false))
+            {
+                if (appServerEvent is ThreadStartedEvent appServerStarted)
+                {
+                    Volatile.Write(ref _id, appServerStarted.ThreadId);
+                }
+
+                yield return appServerEvent;
+            }
+
+            yield break;
+        }
+
         await using var resolvedImages = await ResolvedImages
             .CreateAsync(normalizedInput.Images, _options.Logger, cancellationToken)
             .ConfigureAwait(false);
@@ -310,7 +345,7 @@ public sealed class CodexThread
             CancellationToken = cancellationToken,
         };
 
-        await foreach (var line in _exec.RunAsync(execArgs)
+        await foreach (var line in (_exec ?? throw new InvalidOperationException("The exec transport is not available for this thread.")).RunAsync(execArgs)
                            .WithCancellation(cancellationToken)
                            .ConfigureAwait(false))
         {

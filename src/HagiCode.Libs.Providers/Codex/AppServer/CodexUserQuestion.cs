@@ -1,3 +1,5 @@
+using ManagedCode.CodexSharpSDK.Models;
+
 namespace HagiCode.Libs.Providers.Codex.AppServer;
 
 /// <summary>
@@ -61,3 +63,16 @@ public sealed record CodexUserQuestionResponse(IReadOnlyDictionary<string, IRead
 public delegate Task<CodexUserQuestionResponse?> CodexUserInputHandler(
     CodexUserQuestionRequest request,
     CancellationToken cancellationToken);
+
+/// <summary>
+/// The event that tells the caller a user question has arrived, in the position it arrived in the turn's event stream. The
+/// answer is still delivered through <see cref="CodexUserInputHandler"/>; this event only makes the question visible to the
+/// caller's stream, so the caller can surface it in order with the agent's output.
+/// </summary>
+/// <param name="Request">The question that arrived.</param>
+public sealed record CodexUserQuestionEvent(CodexUserQuestionRequest Request)
+    : ThreadEvent(EventType)
+{
+    /// <summary>The <see cref="ThreadEvent.Type"/> of a user-question event.</summary>
+    public const string EventType = "user_question";
+}

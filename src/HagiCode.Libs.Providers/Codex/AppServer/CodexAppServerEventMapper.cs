@@ -28,6 +28,8 @@ internal sealed class CodexAppServerEventMapper
     private const string TurnFailedMessage = "Codex turn failed.";
     private const string EmptyErrorMessage = "";
 
+    // The app-server item types that the exec path also reports as started (tool-like items). Matched on the raw
+    // app-server "type" value, because ThreadItem.Type carries the exec protocol's snake_case constant.
     private static readonly HashSet<string> StartedItemTypes = new(StringComparer.Ordinal)
     {
         "commandExecution",
@@ -36,9 +38,9 @@ internal sealed class CodexAppServerEventMapper
         "webSearch"
     };
 
-    private int _inputTokens;
-    private int _cachedInputTokens;
-    private int _outputTokens;
+    private long _inputTokens;
+    private long _cachedInputTokens;
+    private long _outputTokens;
     private string? _resultText;
     private string? _lastErrorMessage;
 
@@ -144,7 +146,9 @@ internal sealed class CodexAppServerEventMapper
 
         if (started)
         {
-            return StartedItemTypes.Contains(item.Type) ? new ItemStartedEvent(item) : null;
+            return StartedItemTypes.Contains(ReadString(itemElement, "type") ?? string.Empty)
+                ? new ItemStartedEvent(item)
+                : null;
         }
 
         return new ItemCompletedEvent(item);
@@ -158,7 +162,7 @@ internal sealed class CodexAppServerEventMapper
         }
 
         var status = ReadString(turn, "status");
-        var usage = new Usage(_inputTokens, _cachedInputTokens, _outputTokens);
+        var usage = new Usage((int)_inputTokens, (int)_cachedInputTokens, (int)_outputTokens);
         switch (status)
         {
             case "completed":

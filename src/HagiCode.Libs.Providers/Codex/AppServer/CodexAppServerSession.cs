@@ -1,0 +1,318 @@
+using System.Runtime.CompilerServices;
+using System.Text.Json.Nodes;
+using ManagedCode.CodexSharpSDK.Client;
+using ManagedCode.CodexSharpSDK.Configuration;
+using ManagedCode.CodexSharpSDK.Execution;
+using ManagedCode.CodexSharpSDK.Models;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
+namespace HagiCode.Libs.Providers.Codex.AppServer;
+
+/// <summary>
+/// The interactive Codex transport for one run: a <c>codex app-server</c> process, its JSON-RPC client, and the thread
+/// that the run uses.
+/// </summary>
+/// <remarks>
+/// A session is opened only when the interactive path is allowed: the CLI meets the version floor, the handshake succeeds, and
+/// the server lists the user-input feature. Otherwise <see cref="OpenAsync"/> throws, and the provider runs the exec path with
+/// questions disabled for that run (design D7).
+/// </remarks>
+internal sealed class CodexAppServerSession : IAsyncDisposable
+{
+    /// <summary>The minimum Codex CLI version for the interactive path (gate G6).</summary>
+    public static readonly Version MinimumCliVersion = new(0, 163, 0);
+
+    /// <summary>How long the handshake may take before the interactive path is abandoned.</summary>
+    public static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(30);
+
+    private const string ExecutableOriginatorEnvironmentName = "CODEX_INTERNAL_ORIGINATOR_OVERRIDE";
+    private const string SdkOriginator = "codex_sdk_csharp";
+    private const string OpenAiBaseUrlEnvironmentName = "OPENAI_BASE_URL";
+    private const string CodexApiKeyEnvironmentName = "CODEX_API_KEY";
+    private const string ConfigFeaturesKey = "features";
+    private const string TextInputType = "text";
+
+    private readonly CodexAppServerProcess _process;
+    private readonly CodexAppServerClient _client;
+    private readonly ILogger _logger;
+    private string? _loadedThreadId;
+
+    private CodexAppServerSession(CodexAppServerProcess process, CodexAppServerClient client, ILogger logger)
+    {
+        _process = process;
+        _client = client;
+        _logger = logger;
+    }
+
+    /// <summary>
+    /// Starts the app-server, runs the handshake, and confirms the user-input feature. Throws when any step fails, and releases
+    /// the process in that case.
+    /// </summary>
+    public static async Task<CodexAppServerSession> OpenAsync(
+        string executablePath,
+        IReadOnlyDictionary<string, string> environment,
+        string? workingDirectory,
+        CodexUserInputHandler userInputHandler,
+        TimeSpan questionTimeout,
+        ILogger? logger,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(userInputHandler);
+        var effectiveLogger = logger ?? NullLogger.Instance;
+
+        var process = CodexAppServerProcess.Start(executablePath, environment, workingDirectory, effectiveLogger);
+        var client = new CodexAppServerClient(process.Output, process.Input, userInputHandler, questionTimeout, effectiveLogger);
+        try
+        {
+            client.Start();
+
+            using var handshakeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            handshakeCts.CancelAfter(HandshakeTimeout);
+
+            await client.InitializeAsync(handshakeCts.Token).ConfigureAwait(false);
+            var hasFeature = await client.HasExperimentalFeatureAsync(
+                CodexAppServerClient.UserInputFeatureName,
+                handshakeCts.Token).ConfigureAwait(false);
+            if (!hasFeature)
+            {
+                throw new NotSupportedException(
+                    $"codex app-server does not list the '{CodexAppServerClient.UserInputFeatureName}' feature, so user-input requests are unavailable.");
+            }
+
+            return new CodexAppServerSession(process, client, effectiveLogger);
+        }
+        catch
+        {
+            await client.DisposeAsync().ConfigureAwait(false);
+            await process.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Runs one prompt on the run's thread. The thread is started when <paramref name="threadId"/> is empty, and resumed
+    /// otherwise, which carries the conversation of a stored exec thread into the app-server (gate G2).
+    /// </summary>
+    /// <returns>The thread events. The first event is always <see cref="ThreadStartedEvent"/>, so the caller binds the id.</returns>
+    public async IAsyncEnumerable<ThreadEvent> RunTurnAsync(
+        string? threadId,
+        string prompt,
+        JsonObject threadParameters,
+        JsonObject turnParameters,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(prompt);
+        ArgumentNullException.ThrowIfNull(threadParameters);
+        ArgumentNullException.ThrowIfNull(turnParameters);
+
+        string activeThreadId;
+        if (string.IsNullOrWhiteSpace(threadId))
+        {
+            activeThreadId = await _client.StartThreadAsync(threadParameters, cancellationToken).ConfigureAwait(false);
+        }
+        else if (string.Equals(_loadedThreadId, threadId, StringComparison.Ordinal))
+        {
+            activeThreadId = threadId;
+        }
+        else
+        {
+            activeThreadId = await _client.ResumeThreadAsync(threadId, threadParameters, cancellationToken).ConfigureAwait(false);
+        }
+
+        _loadedThreadId = activeThreadId;
+        yield return new ThreadStartedEvent(activeThreadId);
+
+        var input = new JsonArray
+        {
+            new JsonObject
+            {
+                ["type"] = TextInputType,
+                ["text"] = prompt,
+                ["text_elements"] = new JsonArray()
+            }
+        };
+
+        await foreach (var threadEvent in _client.RunTurnAsync(activeThreadId, input, turnParameters, cancellationToken)
+                           .ConfigureAwait(false))
+        {
+            yield return threadEvent;
+        }
+    }
+
+    /// <summary>
+    /// Delivers the answer to an open question of the active turn. Passing <see langword="null"/> declines the question.
+    /// </summary>
+    /// <returns><see langword="true"/> when this call answered the request.</returns>
+    public Task<bool> RespondToUserQuestionAsync(
+        string requestId,
+        CodexUserQuestionResponse? response,
+        CancellationToken cancellationToken)
+    {
+        return _client.RespondToUserQuestionAsync(requestId, response, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
+    {
+        await _client.DisposeAsync().ConfigureAwait(false);
+        await _process.DisposeAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Whether the installed CLI is at or above <see cref="MinimumCliVersion"/>. The version is read from the first number
+    /// group of the reported text, so suffixes such as <c>-beta</c> are ignored.
+    /// </summary>
+    public static bool MeetsMinimumCliVersion(string? installedVersion)
+    {
+        if (string.IsNullOrWhiteSpace(installedVersion))
+        {
+            return false;
+        }
+
+        var match = System.Text.RegularExpressions.Regex.Match(installedVersion, @"\d+(\.\d+){1,3}");
+        if (!match.Success || !Version.TryParse(match.Value, out var parsed))
+        {
+            return false;
+        }
+
+        // Version.TryParse leaves the missing components at -1 (for "0.163" the build is -1); treat them as 0.
+        var normalized = new Version(parsed.Major, parsed.Minor, Math.Max(parsed.Build, 0));
+        return normalized >= MinimumCliVersion;
+    }
+
+    /// <summary>
+    /// Builds the environment of the app-server process, with the same rules the exec path applies to its child process.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> BuildEnvironment(
+        IReadOnlyDictionary<string, string>? environmentOverride,
+        string? baseUrl,
+        string? apiKey)
+    {
+        var environment = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (environmentOverride is not null)
+        {
+            foreach (var (key, value) in environmentOverride)
+            {
+                environment[key] = value;
+            }
+        }
+        else
+        {
+            foreach (System.Collections.DictionaryEntry variable in Environment.GetEnvironmentVariables())
+            {
+                if (variable.Key is string key && variable.Value is string value)
+                {
+                    environment[key] = value;
+                }
+            }
+        }
+
+        environment.TryAdd(ExecutableOriginatorEnvironmentName, SdkOriginator);
+
+        if (!string.IsNullOrWhiteSpace(baseUrl))
+        {
+            environment[OpenAiBaseUrlEnvironmentName] = baseUrl;
+        }
+
+        if (!string.IsNullOrWhiteSpace(apiKey))
+        {
+            environment[CodexApiKeyEnvironmentName] = apiKey;
+        }
+
+        return environment;
+    }
+
+    /// <summary>
+    /// Builds the <c>thread/start</c> and <c>thread/resume</c> parameters. The raw config override is merged with the user-input
+    /// feature flag, which is set for interactive runs only.
+    /// </summary>
+    public static JsonObject BuildThreadParameters(ThreadOptions threadOptions, JsonObject? config)
+    {
+        ArgumentNullException.ThrowIfNull(threadOptions);
+
+        var configObject = config is null
+            ? new JsonObject()
+            : (JsonObject)config.DeepClone();
+        var features = configObject[ConfigFeaturesKey] as JsonObject ?? new JsonObject();
+        features[CodexAppServerClient.UserInputFeatureName] = true;
+        foreach (var enabled in threadOptions.EnabledFeatures ?? [])
+        {
+            if (!string.IsNullOrWhiteSpace(enabled))
+            {
+                features[enabled.Trim()] = true;
+            }
+        }
+
+        foreach (var disabled in threadOptions.DisabledFeatures ?? [])
+        {
+            if (!string.IsNullOrWhiteSpace(disabled))
+            {
+                features[disabled.Trim()] = false;
+            }
+        }
+
+        configObject[ConfigFeaturesKey] = features;
+
+        var parameters = new JsonObject
+        {
+            ["config"] = configObject
+        };
+
+        if (!string.IsNullOrWhiteSpace(threadOptions.Model))
+        {
+            parameters["model"] = threadOptions.Model;
+        }
+
+        if (!string.IsNullOrWhiteSpace(threadOptions.WorkingDirectory))
+        {
+            parameters["cwd"] = threadOptions.WorkingDirectory;
+        }
+
+        if (threadOptions.SandboxMode is { } sandboxMode)
+        {
+            parameters["sandbox"] = sandboxMode.ToCliValue();
+        }
+
+        if (threadOptions.ApprovalPolicy is { } approvalPolicy)
+        {
+            parameters["approvalPolicy"] = approvalPolicy.ToCliValue();
+        }
+
+        return parameters;
+    }
+
+    /// <summary>
+    /// Builds the <c>turn/start</c> parameters that are specific to one turn: the reasoning effort, and a writable-roots sandbox
+    /// policy when additional directories are configured.
+    /// </summary>
+    public static JsonObject BuildTurnParameters(ThreadOptions threadOptions)
+    {
+        ArgumentNullException.ThrowIfNull(threadOptions);
+
+        var parameters = new JsonObject();
+        if (threadOptions.ModelReasoningEffort is { } effort)
+        {
+            parameters["effort"] = effort.ToCliValue();
+        }
+
+        if (threadOptions.SandboxMode == SandboxMode.WorkspaceWrite
+            && threadOptions.AdditionalDirectories is { Count: > 0 } directories)
+        {
+            var roots = new JsonArray();
+            foreach (var directory in directories.Where(static value => !string.IsNullOrWhiteSpace(value)))
+            {
+                roots.Add(directory.Trim());
+            }
+
+            parameters["sandboxPolicy"] = new JsonObject
+            {
+                ["type"] = "workspaceWrite",
+                ["writableRoots"] = roots,
+                ["networkAccess"] = threadOptions.NetworkAccessEnabled ?? false
+            };
+        }
+
+        return parameters;
+    }
+}

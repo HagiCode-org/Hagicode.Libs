@@ -2,8 +2,10 @@ using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Environment;
 using HagiCode.Libs.Core.Execution;
 using HagiCode.Libs.Core.Process;
+using HagiCode.Libs.Providers.Codex.AppServer;
 using ManagedCode.CodexSharpSDK.Client;
 using ManagedCode.CodexSharpSDK.Configuration;
+using ManagedCode.CodexSharpSDK.Internal;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -67,11 +69,97 @@ public sealed class CodexProvider : ICodexProvider
             CodexOptions = sdkOptions
         });
 
+        if (options.InteractiveUserInput && options.UserInputHandler is { } userInputHandler)
+        {
+            ValidateQuestionTimeout(options.QuestionTimeout);
+            var appServer = await TryOpenAppServerSessionAsync(
+                    executablePath,
+                    sdkOptions,
+                    options,
+                    userInputHandler,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (appServer is not null)
+            {
+                var appServerThreadId = string.IsNullOrWhiteSpace(options.ThreadId) ? null : options.ThreadId.Trim();
+                var appServerThread = client.CreateAppServerThread(appServer, appServerThreadId, options.ThreadOptions);
+                return new CodexSessionHandle(client, appServerThread, appServer);
+            }
+        }
+
         var thread = string.IsNullOrWhiteSpace(options.ThreadId)
             ? client.StartThread(options.ThreadOptions)
             : client.ResumeThread(options.ThreadId.Trim(), options.ThreadOptions);
 
         return new CodexSessionHandle(client, thread);
+    }
+
+    /// <summary>
+    /// Opens the interactive transport, or returns <see langword="null"/> so the run uses the exec transport with questions
+    /// disabled (design D7). The transport is refused below <see cref="CodexAppServerSession.MinimumCliVersion"/>, when the
+    /// version cannot be read, and when the app-server handshake or the user-input feature check fails.
+    /// </summary>
+    private async Task<CodexAppServerSession?> TryOpenAppServerSessionAsync(
+        string executablePath,
+        CodexOptions sdkOptions,
+        CodexSessionOptions options,
+        CodexUserInputHandler userInputHandler,
+        CancellationToken cancellationToken)
+    {
+        string? installedVersion;
+        try
+        {
+            installedVersion = CodexCliMetadataReader.Read(CodexCliLocator.FindCodexPath(executablePath)).InstalledVersion;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _logger.LogWarning(exception, "Could not read the Codex CLI version; user questions are disabled for this run.");
+            return null;
+        }
+
+        if (!CodexAppServerSession.MeetsMinimumCliVersion(installedVersion))
+        {
+            _logger.LogWarning(
+                "Codex CLI {InstalledVersion} is below the interactive minimum {MinimumVersion}; user questions are disabled for this run.",
+                installedVersion ?? "(unknown)",
+                CodexAppServerSession.MinimumCliVersion);
+            return null;
+        }
+
+        try
+        {
+            var environment = CodexAppServerSession.BuildEnvironment(
+                sdkOptions.EnvironmentVariables,
+                sdkOptions.BaseUrl,
+                sdkOptions.ApiKey);
+            return await CodexAppServerSession.OpenAsync(
+                    executablePath,
+                    environment,
+                    options.ThreadOptions.WorkingDirectory,
+                    userInputHandler,
+                    options.QuestionTimeout,
+                    _logger,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(
+                exception,
+                "The Codex app-server did not start for an interactive run; user questions are disabled for this run.");
+            return null;
+        }
+    }
+
+    private static void ValidateQuestionTimeout(TimeSpan questionTimeout)
+    {
+        if (questionTimeout != Timeout.InfiniteTimeSpan && questionTimeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(questionTimeout),
+                questionTimeout,
+                "The question timeout must be positive, or Timeout.InfiniteTimeSpan.");
+        }
     }
 
     /// <inheritdoc />

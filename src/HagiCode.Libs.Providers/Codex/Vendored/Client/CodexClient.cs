@@ -59,6 +59,18 @@ public sealed class CodexClient : IDisposable
         return new CodexThread(exec, _options, options ?? new ThreadOptions(), id);
     }
 
+    /// <summary>
+    /// Creates a thread that runs its turns over an open codex app-server session (the interactive transport).
+    /// </summary>
+    internal CodexThread CreateAppServerThread(
+        HagiCode.Libs.Providers.Codex.AppServer.CodexAppServerSession appServer,
+        string? id,
+        ThreadOptions? options)
+    {
+        ArgumentNullException.ThrowIfNull(appServer);
+        return new CodexThread(null, _options, options ?? new ThreadOptions(), id, appServer);
+    }
+
     public CodexCliMetadata GetCliMetadata()
     {
         var executablePath = CodexCliLocator.FindCodexPath(_options.CodexExecutablePath);
