@@ -31,7 +31,7 @@ public sealed class PromptMetadata
 
     public PromptImageDefinition? Image { get; set; }
 
-    public PromptDungeonConfiguration? Dungeon { get; set; }
+    public PromptScenarioConfiguration? ScenarioConfiguration { get; set; }
 
     public List<string> Tags { get; set; } = [];
 
@@ -83,9 +83,9 @@ public sealed class PromptImageDefinition
 }
 
 /// <summary>
-/// Represents prompt-owned dungeon catalog metadata.
+/// Represents prompt-owned scenario catalog metadata.
 /// </summary>
-public sealed class PromptDungeonConfiguration
+public sealed class PromptScenarioConfiguration
 {
     public bool Enabled { get; set; }
 

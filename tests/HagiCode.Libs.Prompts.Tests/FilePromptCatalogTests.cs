@@ -46,6 +46,29 @@ public sealed class FilePromptCatalogTests
     }
 
     [Test]
+    public void Resolve_loads_scenario_configuration_block()
+    {
+        using var workspace = new PromptTestWorkspace();
+        workspace.AddPrompt("apply", "en-US", "hello");
+        File.WriteAllText(Path.Combine(workspace.RootPath, "apply.en-US.json"), """
+            {
+              "scenario": "apply",
+              "locale": "en-US",
+              "scenarioConfiguration": { "enabled": true, "scriptKey": "proposal.execute", "groupKey": "proposal", "sortOrder": 3 }
+            }
+            """);
+
+        var prompt = CreateCatalog(workspace).Resolve("apply", "en-US");
+
+        var configuration = prompt.ShouldNotBeNull().Definition.Metadata.ScenarioConfiguration;
+        configuration.ShouldNotBeNull();
+        configuration.Enabled.ShouldBeTrue();
+        configuration.ScriptKey.ShouldBe("proposal.execute");
+        configuration.GroupKey.ShouldBe("proposal");
+        configuration.SortOrder.ShouldBe(3);
+    }
+
+    [Test]
     public void Diagnostics_report_orphan_metadata_and_templates()
     {
         using var workspace = new PromptTestWorkspace();
