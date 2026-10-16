@@ -71,6 +71,50 @@ public sealed class CliProcessManagerTests
     }
 
     [Test]
+    public async Task ExecuteAsync_truncates_both_streams_at_the_cap_and_the_process_still_exits()
+    {
+        var result = await _manager.ExecuteAsync(new ProcessStartContext
+        {
+            ExecutablePath = "/bin/sh",
+            Arguments = ["-lc", "head -c 5000 /dev/zero | tr '\\0' 'o'; head -c 5000 /dev/zero | tr '\\0' 'e' >&2"],
+            MaxCapturedOutputCharacters = 100,
+            Timeout = TimeSpan.FromSeconds(30)
+        });
+
+        result.ExitCode.ShouldBe(0);
+        result.TimedOut.ShouldBeFalse();
+        result.StandardOutput.ShouldBe(new string('o', 100));
+        result.StandardError.ShouldBe(new string('e', 100));
+        result.CapturedOutput.Where(chunk => chunk.Channel == ProcessOutputChannel.StandardOutput).Sum(chunk => chunk.Text.Length).ShouldBe(100);
+        result.CapturedOutput.Where(chunk => chunk.Channel == ProcessOutputChannel.StandardError).Sum(chunk => chunk.Text.Length).ShouldBe(100);
+    }
+
+    [Test]
+    public async Task ExecuteAsync_keeps_all_output_when_the_cap_is_unset()
+    {
+        var result = await _manager.ExecuteAsync(new ProcessStartContext
+        {
+            ExecutablePath = "/bin/sh",
+            Arguments = ["-lc", "head -c 5000 /dev/zero | tr '\\0' 'o'; head -c 5000 /dev/zero | tr '\\0' 'e' >&2"]
+        });
+
+        result.ExitCode.ShouldBe(0);
+        result.StandardOutput.ShouldBe(new string('o', 5000));
+        result.StandardError.ShouldBe(new string('e', 5000));
+    }
+
+    [Test]
+    public async Task ExecuteAsync_rejects_a_negative_output_cap()
+    {
+        await Should.ThrowAsync<ArgumentOutOfRangeException>(() => _manager.ExecuteAsync(new ProcessStartContext
+        {
+            ExecutablePath = "/bin/sh",
+            Arguments = ["-lc", "true"],
+            MaxCapturedOutputCharacters = -1
+        }));
+    }
+
+    [Test]
     public void CreateStartInfo_redirects_streams_and_preserves_utf8()
     {
         var startInfo = _manager.CreateStartInfo(CreateShellContext("printf 'ok'"));

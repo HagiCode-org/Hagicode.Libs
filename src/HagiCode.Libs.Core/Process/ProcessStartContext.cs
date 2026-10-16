@@ -46,6 +46,13 @@ public sealed record ProcessStartContext
     public TimeSpan? Timeout { get; init; }
 
     /// <summary>
+    /// Gets or sets the maximum number of characters retained per output stream during <see cref="CliProcessManager.ExecuteAsync" />.
+    /// Output past the cap is still drained so the process can exit, but it is not kept.
+    /// <see langword="null" /> keeps every character, which is the default.
+    /// </summary>
+    public int? MaxCapturedOutputCharacters { get; init; }
+
+    /// <summary>
     /// Gets or sets provider ownership metadata for managed subprocess persistence.
     /// </summary>
     public CliProcessOwnershipRegistration? Ownership { get; init; }

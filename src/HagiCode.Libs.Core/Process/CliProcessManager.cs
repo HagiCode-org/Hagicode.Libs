@@ -159,6 +159,10 @@ public class CliProcessManager
     public virtual async Task<ProcessResult> ExecuteAsync(ProcessStartContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
+        if (context.MaxCapturedOutputCharacters is < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(context), "MaxCapturedOutputCharacters must be zero or greater when set.");
+        }
 
         var startedAtUtc = _timeProvider.GetUtcNow();
         await using var handle = await StartAsync(context, cancellationToken).ConfigureAwait(false);
@@ -167,8 +171,8 @@ public class CliProcessManager
         var standardError = new StringBuilder();
         var capturedOutput = new ConcurrentQueue<ProcessOutputChunk>();
 
-        var stdoutTask = CaptureStreamAsync(handle.StandardOutput, ProcessOutputChannel.StandardOutput, standardOutput, capturedOutput, CancellationToken.None);
-        var stderrTask = CaptureStreamAsync(handle.StandardError, ProcessOutputChannel.StandardError, standardError, capturedOutput, CancellationToken.None);
+        var stdoutTask = CaptureStreamAsync(handle.StandardOutput, ProcessOutputChannel.StandardOutput, standardOutput, capturedOutput, context.MaxCapturedOutputCharacters, CancellationToken.None);
+        var stderrTask = CaptureStreamAsync(handle.StandardError, ProcessOutputChannel.StandardError, standardError, capturedOutput, context.MaxCapturedOutputCharacters, CancellationToken.None);
 
         // One-shot executions never stream request payloads over stdin, so close the pipe early.
         // Some CLIs wait for EOF before terminating even when all request arguments are provided on the command line.
@@ -506,9 +510,11 @@ public class CliProcessManager
         ProcessOutputChannel channel,
         StringBuilder destination,
         ConcurrentQueue<ProcessOutputChunk> capturedOutput,
+        int? maxCharacters,
         CancellationToken cancellationToken)
     {
         var buffer = new char[1024];
+        var remaining = maxCharacters ?? long.MaxValue;
         while (true)
         {
             var read = await reader.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false);
@@ -517,7 +523,15 @@ public class CliProcessManager
                 break;
             }
 
-            var text = new string(buffer, 0, read);
+            // Past the cap the stream is still read to EOF so the child never blocks on a full pipe.
+            if (remaining <= 0)
+            {
+                continue;
+            }
+
+            var keptLength = (int)Math.Min(read, remaining);
+            var text = new string(buffer, 0, keptLength);
+            remaining -= keptLength;
             destination.Append(text);
             capturedOutput.Enqueue(new ProcessOutputChunk(channel, text, DateTimeOffset.UtcNow));
         }
