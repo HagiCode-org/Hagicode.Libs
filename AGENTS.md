@@ -16,8 +16,13 @@ Run commands from `repos/Hagicode.Libs/`.
 
 ```bash
 dotnet build HagiCode.Libs.slnx
-dotnet test HagiCode.Libs.slnx
+dotnet test HagiCode.Libs.slnx                                  # regression profile (default): skips External and Slow
+dotnet test HagiCode.Libs.slnx -p:TestProfile=full              # every test, including real-CLI and online-API tests (skipped unless their switch is set)
+dotnet test HagiCode.Libs.slnx -p:TestProfile=unit              # hermetic: no Integration, External or Slow
+dotnet test HagiCode.Libs.slnx -p:TestProfile=critical          # CriticalRegression smoke gate
 ```
+
+Tier markers, switch variables and filter expressions: `docs/testing-tiers.md`.
 
 ## Key Paths
 
