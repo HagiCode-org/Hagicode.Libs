@@ -151,10 +151,15 @@ jobs:
       contents: write
     steps:
       - name: Publish GitHub release
-        uses: release-drafter/release-drafter@v6
-        with:
-          publish: true
-          name: ${{ github.ref_name }}
-          tag: ${{ github.ref_name }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          draft="$(gh release list --limit 100 --json tagName,isDraft --jq '[.[] | select(.isDraft)][0].tagName // empty')"
+          if [ -n "$draft" ]; then
+            gh release edit "$draft" --tag "$TAG" --title "$TAG" --draft=false
+          else
+            gh release create "$TAG" --title "$TAG" --generate-notes --verify-tag
+          fi
