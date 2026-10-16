@@ -225,6 +225,7 @@ public sealed class AcpSessionClientTests
     }
 
     [Test]
+    [Category("CriticalRegression")]
     public async Task SetModeAsync_invokes_session_set_mode()
     {
         var transport = new ScriptedAcpTransport(request => request.Method switch

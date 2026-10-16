@@ -5,6 +5,7 @@ using Shouldly;
 
 namespace HagiCode.Libs.Core.Tests.Acp;
 
+[Category("Integration")]
 public sealed class SubprocessAcpTransportTests
 {
     [Test]

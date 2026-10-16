@@ -16,6 +16,7 @@ public sealed class AcpJsonRpcClientPermissionTests
         """;
 
     [Test]
+    [Category("CriticalRegression")]
     public async Task Without_a_handler_the_permission_request_gets_the_default_answer_after_its_notification()
     {
         var transport = new PermissionTestTransport();

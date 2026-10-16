@@ -9,6 +9,7 @@ public sealed class RuntimeEnvironmentResolverTests
     private const string AgentCliPathEnvironmentVariable = "HAGICODE_AGENT_CLI_PATH";
 
     [Test]
+    [Category("CriticalRegression")]
     public async Task ResolveAsync_returns_current_environment_when_not_on_macos()
     {
         var originalValue = System.Environment.GetEnvironmentVariable(AgentCliPathEnvironmentVariable);

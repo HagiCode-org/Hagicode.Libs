@@ -61,6 +61,7 @@ public sealed class CliExecutableResolverTests
     }
 
     [Test]
+    [Category("CriticalRegression")]
     public void ResolveFirstAvailablePath_honors_candidate_order()
     {
         using var sandbox = new DirectorySandbox();

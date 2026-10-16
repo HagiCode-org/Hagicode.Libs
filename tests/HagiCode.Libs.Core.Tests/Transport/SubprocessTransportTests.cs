@@ -7,6 +7,7 @@ using HagiCode.Libs.Core.Transport;
 
 namespace HagiCode.Libs.Core.Tests.Transport;
 
+[Category("Integration")]
 public sealed class SubprocessTransportTests
 {
     [Test]
