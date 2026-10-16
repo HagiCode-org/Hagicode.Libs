@@ -54,6 +54,12 @@ public sealed record ClaudeCodeOptions
     public string? ThinkingDisplay { get; init; }
 
     /// <summary>
+    /// Gets the images sent with the prompt, in order, as base64 image blocks of the prompt turn. Empty by default, which
+    /// keeps the prompt a plain string. Each image must be PNG, JPEG, GIF or WEBP. The bytes are used for this run only.
+    /// </summary>
+    public IReadOnlyList<ClaudeImageAttachment> Images { get; init; } = [];
+
+    /// <summary>
     /// Gets or sets the system prompt.
     /// </summary>
     public string? SystemPrompt { get; init; }

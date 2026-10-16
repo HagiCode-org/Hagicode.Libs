@@ -80,6 +80,7 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
+        ValidateImages(options.Images);
         if (options.SubagentBackgroundWorkTimeout != Timeout.InfiniteTimeSpan
             && options.SubagentBackgroundWorkTimeout <= TimeSpan.Zero)
         {
@@ -733,20 +734,74 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
         return _executableResolver.ResolveFirstAvailablePath(DefaultExecutableCandidates, runtimeEnvironment);
     }
 
+    /// <summary>
+    /// Rejects an image the Claude API cannot take before any process starts. The message names the position and the
+    /// media type only, never the bytes.
+    /// </summary>
+    private static void ValidateImages(IReadOnlyList<ClaudeImageAttachment> images)
+    {
+        ArgumentNullException.ThrowIfNull(images);
+        for (var index = 0; index < images.Count; index++)
+        {
+            var image = images[index] ?? throw new ArgumentException($"Image attachment {index + 1} is null.", "options");
+            if (!ClaudeImageAttachment.IsSupportedMediaType(image.MediaType))
+            {
+                throw new ArgumentException(
+                    $"Image attachment {index + 1} has unsupported media type '{image.MediaType}'. " +
+                    $"Supported types: {string.Join(", ", ClaudeImageAttachment.SupportedMediaTypes)}.",
+                    "options");
+            }
+
+            if (image.Data.IsEmpty)
+            {
+                throw new ArgumentException($"Image attachment {index + 1} has no data.", "options");
+            }
+        }
+    }
+
     private static CliMessage CreatePromptMessage(string prompt, ClaudeCodeOptions options)
     {
+        // Without images the content stays the plain prompt string, so the wire line is the same as before.
+        object content = options.Images.Count == 0
+            ? prompt
+            : CreateContentBlocks(prompt, options.Images);
+
         var payload = JsonSerializer.SerializeToElement(new Dictionary<string, object?>
         {
             ["type"] = "user",
             ["message"] = new Dictionary<string, object?>
             {
                 ["role"] = "user",
-                ["content"] = prompt
+                ["content"] = content
             },
             ["session_id"] = options.SessionId
         });
 
         return new CliMessage("user", payload);
+    }
+
+    private static List<Dictionary<string, object?>> CreateContentBlocks(string prompt, IReadOnlyList<ClaudeImageAttachment> images)
+    {
+        var blocks = new List<Dictionary<string, object?>>(images.Count + 1)
+        {
+            new() { ["type"] = "text", ["text"] = prompt }
+        };
+
+        foreach (var image in images)
+        {
+            blocks.Add(new Dictionary<string, object?>
+            {
+                ["type"] = "image",
+                ["source"] = new Dictionary<string, object?>
+                {
+                    ["type"] = "base64",
+                    ["media_type"] = image.MediaType.ToLowerInvariant(),
+                    ["data"] = Convert.ToBase64String(image.Data.Span)
+                }
+            });
+        }
+
+        return blocks;
     }
 
     private static ClaudeCodeDebugContext CreateDebugContext(
