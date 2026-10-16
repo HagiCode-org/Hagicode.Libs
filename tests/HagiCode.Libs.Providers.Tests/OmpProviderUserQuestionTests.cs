@@ -857,7 +857,8 @@ public sealed class OmpProviderUserQuestionTests
     public async Task Foreign_dialogs_are_cancelled_fire_and_forget_requests_get_no_response_and_the_question_is_still_asked()
     {
         var process = new ScriptedOmpProcess();
-        Scenario.From(Fixture("foreign-dialogs")).Attach(process);
+        // The foreign dialogs are answered before the ask, so only the answer to the ask lets the run go on.
+        Scenario.From(Fixture("foreign-dialogs")).Attach(process, emitAfterWhen: static command => command.Id == "15a577e68c6cbc2f");
         var requests = new List<OmpUserInputRequest>();
 
         var messages = await CollectAsync(
@@ -1594,9 +1595,11 @@ public sealed class OmpProviderUserQuestionTests
 
         /// <summary>
         /// Makes the process play the capture: the startup frames when it starts, each reply when the host writes its command,
-        /// and the rest of the run on the host's answer (or on <paramref name="emitAfterOn" />).
+        /// and the rest of the run on the host's answer (or on <paramref name="emitAfterOn" />). When
+        /// <paramref name="emitAfterWhen" /> is given, only a written command it accepts releases the rest of the run, which a
+        /// capture needs when other requests are answered before the ask.
         /// </summary>
-        public void Attach(ScriptedOmpProcess process, string emitAfterOn = "extension_ui_response")
+        public void Attach(ScriptedOmpProcess process, string emitAfterOn = "extension_ui_response", Func<ScriptedOmpProcess.Command, bool>? emitAfterWhen = null)
         {
             var emittedAfter = 0;
             process.OnStart = omp => omp.Emit(Startup);
@@ -1614,7 +1617,7 @@ public sealed class OmpProviderUserQuestionTests
                 {
                     omp.Emit(UntilDialog);
                 }
-                else if (command.Type == emitAfterOn && Interlocked.Exchange(ref emittedAfter, 1) == 0)
+                else if (command.Type == emitAfterOn && (emitAfterWhen?.Invoke(command) ?? true) && Interlocked.Exchange(ref emittedAfter, 1) == 0)
                 {
                     omp.Emit(AfterDialog);
                 }
