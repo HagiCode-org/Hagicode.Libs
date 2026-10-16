@@ -23,4 +23,15 @@ public sealed record CliInstallDescriptor(
     /// Gets the full npm package string with pinned version (e.g., "@anthropic-ai/claude-code@2.1.79").
     /// </summary>
     public string FullPackageSpecifier => $"{NpmPackage}@{PinnedVersion}";
+
+    /// <summary>
+    /// Gets the argument sets used to read the installed version, tried in order.
+    /// Defaults to a single <c>--version</c> set.
+    /// </summary>
+    public IReadOnlyList<IReadOnlyList<string>> VersionArgumentSets { get; init; } = [["--version"]];
+
+    /// <summary>
+    /// Gets the known install routes for this CLI. Empty when only path-based discovery applies.
+    /// </summary>
+    public IReadOnlyList<CliInstallStrategy> InstallStrategies { get; init; } = [];
 }

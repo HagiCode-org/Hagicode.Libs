@@ -1,9 +1,10 @@
+using System.Text.RegularExpressions;
 using HagiCode.Libs.Core.Discovery;
 using Shouldly;
 
 namespace HagiCode.Libs.Core.Tests.Discovery;
 
-public sealed class CliInstallRegistryTests
+public sealed partial class CliInstallRegistryTests
 {
     [Test]
     public void Descriptors_include_copilot_with_public_install_metadata()
@@ -132,5 +133,85 @@ public sealed class CliInstallRegistryTests
         CliInstallRegistry.PubliclyInstallable
             .Select(static descriptor => descriptor.ProviderName)
             .ShouldBe(["ClaudeCode", "Copilot", "Codex", "OpenCode"], ignoreOrder: true);
+    }
+
+    [Test]
+    public void README_registry_table_matches_the_registry()
+    {
+        var rows = ParseRegistryTable(File.ReadAllText(FindReadme()));
+
+        rows.Count.ShouldBeGreaterThan(0);
+        foreach (var row in rows)
+        {
+            var descriptor = CliInstallRegistry.Descriptors.SingleOrDefault(candidate =>
+                string.Equals(candidate.ProviderName, row.Provider.Replace(" ", string.Empty), StringComparison.OrdinalIgnoreCase));
+            descriptor.ShouldNotBeNull($"README lists provider '{row.Provider}' that the registry does not declare.");
+
+            var expectedPackage = BacktickedPackage().Match(row.Package) is { Success: true } packageMatch
+                ? packageMatch.Groups[1].Value
+                : string.Empty;
+            descriptor.NpmPackage.ShouldBe(expectedPackage, $"npm package for {row.Provider} in README");
+
+            var expectedVersion = row.PinnedVersion is "—" or "-" or "" ? string.Empty : row.PinnedVersion;
+            descriptor.PinnedVersion.ShouldBe(expectedVersion, $"pinned version for {row.Provider} in README");
+        }
+    }
+
+    private sealed record RegistryRow(string Provider, string Package, string PinnedVersion);
+
+    [GeneratedRegex("`([^`]+)`")]
+    private static partial Regex BacktickedPackage();
+
+    private static IReadOnlyList<RegistryRow> ParseRegistryTable(string readme)
+    {
+        const string heading = "### CLI install registry";
+        var start = readme.IndexOf(heading, StringComparison.Ordinal);
+        start.ShouldBeGreaterThanOrEqualTo(0, "README has no '### CLI install registry' section.");
+
+        var lines = readme[start..].Split('\n');
+        var rows = new List<RegistryRow>();
+        var inTable = false;
+        foreach (var rawLine in lines.Skip(1))
+        {
+            var line = rawLine.Trim();
+            if (line.StartsWith("### ", StringComparison.Ordinal) || line.StartsWith("## ", StringComparison.Ordinal))
+            {
+                break;
+            }
+
+            if (!line.StartsWith('|'))
+            {
+                if (inTable)
+                {
+                    break;
+                }
+
+                continue;
+            }
+
+            var cells = line.Trim('|').Split('|').Select(static cell => cell.Trim()).ToArray();
+            if (cells.Length < 3 || cells[0] == "Provider" || cells[0].StartsWith("---", StringComparison.Ordinal))
+            {
+                inTable = true;
+                continue;
+            }
+
+            inTable = true;
+            rows.Add(new RegistryRow(cells[0], cells[1], cells[2]));
+        }
+
+        return rows;
+    }
+
+    private static string FindReadme()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "HagiCode.Libs.slnx")))
+        {
+            directory = directory.Parent;
+        }
+
+        directory.ShouldNotBeNull("Could not locate the HagiCode.Libs solution root from the test assembly.");
+        return Path.Combine(directory.FullName, "README.md");
     }
 }

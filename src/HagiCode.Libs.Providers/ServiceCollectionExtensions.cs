@@ -42,6 +42,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<CliExecutableResolver>();
         services.AddSingleton<CliOwnedProcessRegistry>();
         services.AddSingleton<CliProcessManager>();
+        services.AddSingleton<CliDiscoveryService>();
         services.AddSingleton<IShellCommandRunner, ProcessShellCommandRunner>();
         services.AddSingleton<IRuntimeEnvironmentResolver, RuntimeEnvironmentResolver>();
         services.AddSingleton<ICliExecutionPolicy, AllowAllCliExecutionPolicy>();

@@ -18,6 +18,7 @@ public sealed class TestTierGuardTests
         TestTiers.RealOnlineApi,
         TestTiers.RealCliInvocationContract,
         TestTiers.RealCliWindowsZhCnWhitespaceShim,
+        TestTiers.RealCliDiscovery,
         TestTiers.WindowsOnly,
     };
 

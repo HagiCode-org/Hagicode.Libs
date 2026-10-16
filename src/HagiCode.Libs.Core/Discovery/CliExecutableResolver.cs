@@ -116,6 +116,55 @@ public class CliExecutableResolver
         return ResolveExecutablePath(executableName, environmentVariables) is not null;
     }
 
+    /// <summary>
+    /// Resolves an executable name inside the supplied directories only, in order.
+    /// Unlike <see cref="ResolveExecutablePaths" />, this does not consult the process directory, the working directory,
+    /// <c>HAGICODE_AGENT_CLI_PATH</c>, or <c>PATH</c>. Windows extensions follow the same rules.
+    /// </summary>
+    /// <param name="executableName">The bare executable name.</param>
+    /// <param name="directories">The directories to probe, in order. Missing directories are skipped.</param>
+    /// <param name="environmentVariables">Optional environment supplying <c>PATHEXT</c> on Windows.</param>
+    /// <returns>The distinct resolved absolute paths in probe order.</returns>
+    internal IReadOnlyList<string> ResolveExecutablePathsInDirectories(
+        string executableName,
+        IEnumerable<string> directories,
+        IReadOnlyDictionary<string, string?>? environmentVariables)
+    {
+        ArgumentNullException.ThrowIfNull(directories);
+        if (string.IsNullOrWhiteSpace(executableName))
+        {
+            return [];
+        }
+
+        var resolvedPaths = new List<string>();
+        var comparer = _isWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var seen = new HashSet<string>(comparer);
+
+        foreach (var directory in directories)
+        {
+            if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+            {
+                continue;
+            }
+
+            foreach (var candidate in EnumerateCandidates(Path.Combine(directory, executableName), environmentVariables))
+            {
+                if (!File.Exists(candidate))
+                {
+                    continue;
+                }
+
+                var fullPath = Path.GetFullPath(candidate);
+                if (seen.Add(fullPath))
+                {
+                    resolvedPaths.Add(fullPath);
+                }
+            }
+        }
+
+        return resolvedPaths;
+    }
+
     private bool ShouldResolveDirectly(string executableName)
     {
         if (!_isWindows())

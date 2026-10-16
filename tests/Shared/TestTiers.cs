@@ -17,6 +17,7 @@ public static class TestTiers
     public const string RealOnlineApi = "RealOnlineApi";
     public const string RealCliInvocationContract = "RealCliInvocationContract";
     public const string RealCliWindowsZhCnWhitespaceShim = "RealCliWindowsZhCnWhitespaceShim";
+    public const string RealCliDiscovery = "RealCliDiscovery";
     public const string WindowsOnly = "WindowsOnly";
 }
 

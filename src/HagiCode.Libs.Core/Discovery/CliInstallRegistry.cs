@@ -17,21 +17,47 @@ public static class CliInstallRegistry
             NpmPackage: "@anthropic-ai/claude-code",
             PinnedVersion: "2.1.168",
             ExecutableCandidates: ["claude", "claude-code"],
-            IsPubliclyInstallable: true),
+            IsPubliclyInstallable: true)
+        {
+            InstallStrategies =
+            [
+                // npm global bin is supplied by PATH on Unix; on Windows the shim lives in %APPDATA%\npm.
+                NpmStrategy(),
+
+                // ~ is HOME on Unix and USERPROFILE on Windows, so one template covers both (~/.local/bin).
+                // The installer accepts a version argument (bash -s <version>, or the PowerShell scriptblock argument).
+                new CliInstallStrategy(CliInstallKind.NativeInstaller, CliPlatform.All, ["~/.local/bin"], SupportsVersionPin: true),
+
+                // Cask claude-code has no documented version pin; /usr/local/bin is the Intel prefix and is unconfirmed.
+                new CliInstallStrategy(CliInstallKind.Homebrew, CliPlatform.MacOS, ["/opt/homebrew/bin", "/usr/local/bin"], SupportsVersionPin: false),
+
+                // winget install --version <X> is documented. The Links directory is unconfirmed (third-party sources only).
+                new CliInstallStrategy(CliInstallKind.WinGet, CliPlatform.Windows, ["%LOCALAPPDATA%\\Microsoft\\WinGet\\Links"], SupportsVersionPin: true),
+
+                new CliInstallStrategy(CliInstallKind.LegacyLocal, CliPlatform.All, ["~/.claude/local"], SupportsVersionPin: false),
+            ],
+        },
 
         new CliInstallDescriptor(
             ProviderName: "Copilot",
             NpmPackage: "@github/copilot",
             PinnedVersion: "1.0.60",
             ExecutableCandidates: ["copilot"],
-            IsPubliclyInstallable: true),
+            IsPubliclyInstallable: true)
+        {
+            VersionArgumentSets = CliVersionProbe.GetCopilotVersionArgumentSets(),
+            InstallStrategies = [NpmStrategy()],
+        },
 
         new CliInstallDescriptor(
             ProviderName: "Codex",
             NpmPackage: "@openai/codex",
             PinnedVersion: "0.115.0",
             ExecutableCandidates: ["codex", "codex-cli"],
-            IsPubliclyInstallable: true),
+            IsPubliclyInstallable: true)
+        {
+            InstallStrategies = [NpmStrategy()],
+        },
 
         new CliInstallDescriptor(
             ProviderName: "DeepAgents",
@@ -120,6 +146,12 @@ public static class CliInstallRegistry
             ExecutableCandidates: ["reasonix"],
             IsPubliclyInstallable: false),
     ];
+
+    /// <summary>
+    /// The npm global install route shared by every npm-distributed CLI. Its Windows shim lives in <c>%APPDATA%\npm</c>.
+    /// </summary>
+    private static CliInstallStrategy NpmStrategy() =>
+        new(CliInstallKind.Npm, CliPlatform.All, ["%APPDATA%\\npm"], SupportsVersionPin: true);
 
     /// <summary>
     /// Descriptors for CLIs that can be installed on public CI runners.

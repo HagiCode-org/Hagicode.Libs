@@ -1,5 +1,6 @@
 using Shouldly;
 using HagiCode.Libs.Core.Acp;
+using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Execution;
 using HagiCode.Libs.Providers;
 using HagiCode.Libs.Providers.ClaudeCode;
@@ -161,5 +162,19 @@ public sealed class DependencyInjectionTests
         registry.GetProvider<QoderCliOptions>("qodercli").ShouldBeOfType<QoderCliProvider>();
         registry.GetProvider<ReasonixOptions>("reasonix").ShouldBeOfType<ReasonixProvider>();
         registry.GetAllProviders().Select(static provider => provider.Name).ShouldBe(["claude-code", "codebuddy", "copilot", "codex", "deepagents", "gemini", "junie", "dsh", "hermes", "kimi", "kiro-cli", "opencode", "pi", "omp", "qodercli", "reasonix"], ignoreOrder: true);
+    }
+
+    [Test]
+    public void AddHagiCodeLibs_registers_a_singleton_cli_discovery_service()
+    {
+        var services = new ServiceCollection();
+        services.AddHagiCodeLibs();
+
+        using var serviceProvider = services.BuildServiceProvider();
+        var first = serviceProvider.GetRequiredService<CliDiscoveryService>();
+        var second = serviceProvider.GetRequiredService<CliDiscoveryService>();
+
+        first.ShouldNotBeNull();
+        second.ShouldBeSameAs(first);
     }
 }
