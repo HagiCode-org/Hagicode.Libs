@@ -79,6 +79,7 @@ public class AtomicFileAndErrorMappingTests
     }
 
     [Test]
+    [Category("CriticalRegression")]
     public void Engine_encode_failure_maps_to_encode_failed()
     {
         ErrorMapper.Map(new EngineEncodeException("encode failed"), ConversionStage.Encode).ErrorCode.ShouldBe(AvifErrorCode.EncodeFailed);

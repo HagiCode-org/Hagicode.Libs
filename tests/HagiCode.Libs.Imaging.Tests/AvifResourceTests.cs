@@ -49,6 +49,7 @@ public class AvifResourceTests
     }
 
     [Test, NativeAvifGate]
+    [Category("Slow")]
     public async Task Several_hundred_conversions_and_failure_paths_stay_within_the_memory_bound()
     {
         NativeRuntime.Require();

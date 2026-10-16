@@ -106,6 +106,7 @@ public class AvifOptionsAndFormatTests
     [TestCase("#12345")]
     [TestCase("#zzzzzz")]
     [TestCase("64748b")]
+    [Category("CriticalRegression")]
     public void Flatten_color_must_be_hex_rrggbb(string color)
     {
         var error = Should.Throw<AvifConversionException>(() =>
