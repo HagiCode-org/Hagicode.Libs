@@ -44,6 +44,7 @@ public sealed class ProviderConsoleCommandDispatcherTests
     }
 
     [Test]
+    [Category("CriticalRegression")]
     public async Task DispatchAsync_rejects_foreign_provider_names()
     {
         var runner = new RecordingRunner();

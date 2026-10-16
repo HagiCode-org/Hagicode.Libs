@@ -17,137 +17,11 @@ public sealed class CodexConsoleIntegrationTests
     private const string RealCliTestsEnvironmentVariable = "HAGICODE_REAL_CLI_TESTS";
 
     [Test]
-    public async Task DispatchAsync_runs_codex_default_suite_with_fake_provider()
-    {
-        var provider = new FakeCodexProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new CodexConsoleRunner(CodexConsoleDefinition.Instance, provider, formatter);
-
-        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync([], CodexConsoleDefinition.Instance, runner, output);
-
-        exitCode.ShouldBe(0);
-        var rendered = output.ToString();
-        rendered.ShouldContain("[PASS] codex / Ping");
-        rendered.ShouldContain("[PASS] codex / Simple Prompt");
-        rendered.ShouldContain("[PASS] codex / Complex Prompt");
-        rendered.ShouldContain("[PASS] codex / Session Resume");
-        rendered.ShouldContain("Summary: 4/4 passed");
-    }
-
-    [Test]
-    public async Task DispatchAsync_shows_provider_specific_help_text()
-    {
-        var provider = new FakeCodexProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new CodexConsoleRunner(CodexConsoleDefinition.Instance, provider, formatter);
-
-        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(["--help"], CodexConsoleDefinition.Instance, runner, output);
-
-        exitCode.ShouldBe(0);
-        var rendered = output.ToString();
-        rendered.ShouldContain("--test-provider");
-        rendered.ShouldContain("--test-provider-full");
-        rendered.ShouldContain("--test-all");
-        rendered.ShouldContain("--sandbox <mode>");
-        rendered.ShouldContain("--approval-policy <mode>");
-    }
-
-    [Test]
-    public async Task DispatchAsync_normalizes_codex_aliases_for_provider_commands()
-    {
-        var provider = new FakeCodexProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new CodexConsoleRunner(CodexConsoleDefinition.Instance, provider, formatter);
-
-        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(["--test-provider", "codex-cli"], CodexConsoleDefinition.Instance, runner, output);
-
-        exitCode.ShouldBe(0);
-        output.ToString().ShouldContain("[PASS] codex / Ping");
-    }
-
-    [Test]
-    public async Task DispatchAsync_rejects_foreign_provider_names()
-    {
-        var provider = new FakeCodexProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new CodexConsoleRunner(CodexConsoleDefinition.Instance, provider, formatter);
-
-        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(["--test-provider", "claude-code"], CodexConsoleDefinition.Instance, runner, output);
-
-        exitCode.ShouldBe(1);
-        output.ToString().ShouldContain("dedicated provider console");
-    }
-
-    [Test]
-    public async Task DispatchAsync_reports_configuration_failures_for_invalid_codex_options()
-    {
-        var provider = new FakeCodexProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new CodexConsoleRunner(CodexConsoleDefinition.Instance, provider, formatter);
-
-        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(
-            ["--test-provider-full", "--sandbox", "unsupported"],
-            CodexConsoleDefinition.Instance,
-            runner,
-            output);
-
-        exitCode.ShouldBe(1);
-        output.ToString().ShouldContain("Unsupported sandbox mode");
-    }
-
-    [Test]
-    public async Task DispatchAsync_passes_codex_specific_runtime_options_to_scenarios()
-    {
-        var provider = new FakeCodexProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new CodexConsoleRunner(CodexConsoleDefinition.Instance, provider, formatter);
-        var repositoryPath = Path.Combine(Path.GetTempPath(), $"codex-console-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(repositoryPath);
-
-        try
-        {
-            var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(
-                [
-                    "--test-provider-full",
-                    "--model", "gpt-5-codex",
-                    "--sandbox", "workspace-write",
-                    "--approval-policy", "never",
-                    "--repo", repositoryPath
-                ],
-                CodexConsoleDefinition.Instance,
-                runner,
-                output);
-
-            exitCode.ShouldBe(0);
-            provider.ReceivedOptions.Count.ShouldBe(5);
-            provider.ReceivedOptions[0].ThreadOptions.Model.ShouldBe("gpt-5-codex");
-            provider.ReceivedOptions[0].ThreadOptions.SandboxMode.ShouldBe(SandboxMode.WorkspaceWrite);
-            provider.ReceivedOptions[0].ThreadOptions.ApprovalPolicy.ShouldBe(ApprovalMode.Never);
-            provider.ReceivedOptions[3].ThreadId.ShouldNotBeNullOrWhiteSpace();
-            provider.ReceivedOptions[4].ThreadOptions.WorkingDirectory.ShouldBe(repositoryPath);
-            provider.ReceivedOptions[4].ThreadOptions.AdditionalDirectories.ShouldBe([repositoryPath]);
-            output.ToString().ShouldContain("[PASS] codex / Repository Analysis");
-        }
-        finally
-        {
-            Directory.Delete(repositoryPath, recursive: true);
-        }
-    }
-
-    [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task ProgramMain_can_ping_the_real_codex_cli_when_opted_in()
     {
-        if (!IsRealCliTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealCliTestsEnvironmentVariable);
 
         using var output = new StringWriter();
         var originalOut = Console.Out;
@@ -163,11 +37,56 @@ public sealed class CodexConsoleIntegrationTests
         }
     }
 
-    private static bool IsRealCliTestsEnabled()
+    /// <summary>The shared dispatch contract row for the Codex console (see ProviderConsoleDispatchContractTests).</summary>
+    internal static ProviderConsoleDispatchRow CreateDispatchRow() => new CodexDispatchRow();
+
+    private sealed class CodexDispatchRow : ProviderConsoleDispatchRow
     {
-        var value = Environment.GetEnvironmentVariable(RealCliTestsEnvironmentVariable);
-        return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
+        private FakeCodexProvider _provider = new();
+
+        public override ProviderConsoleDefinition Definition => CodexConsoleDefinition.Instance;
+
+        public override IReadOnlyList<string> DefaultSuiteScenarioNames { get; } = ["Ping", "Simple Prompt", "Complex Prompt", "Session Resume"];
+
+        public override IReadOnlyList<string> ExpectedHelpText { get; } =
+        [
+            "--sandbox <mode>",
+            "--approval-policy <mode>"
+        ];
+
+        public override IReadOnlyList<string> InvalidOptionArguments => ["--test-provider-full", "--sandbox", "unsupported"];
+
+        public override string InvalidOptionMessage => "Unsupported sandbox mode";
+
+        public override IProviderConsoleRunner CreateRunner(TextWriter output)
+        {
+            _provider = new FakeCodexProvider();
+            return new CodexConsoleRunner(Definition, _provider, new ProviderConsoleOutputFormatter(output));
+        }
+
+        public override IReadOnlyList<string> RuntimeOptionArguments(string repositoryPath)
+        {
+            return ["--test-provider-full", "--model", "gpt-5-codex", "--sandbox", "workspace-write", "--approval-policy", "never", "--repo", repositoryPath];
+        }
+
+        public override void AssertRuntimeOptions(string repositoryPath, string renderedOutput)
+        {
+            _provider.ReceivedOptions.Count.ShouldBe(5);
+            _provider.ReceivedOptions[0].ThreadOptions.Model.ShouldBe("gpt-5-codex");
+            _provider.ReceivedOptions[0].ThreadOptions.SandboxMode.ShouldBe(SandboxMode.WorkspaceWrite);
+            _provider.ReceivedOptions[0].ThreadOptions.ApprovalPolicy.ShouldBe(ApprovalMode.Never);
+            _provider.ReceivedOptions[3].ThreadId.ShouldNotBeNullOrWhiteSpace();
+            _provider.ReceivedOptions[4].ThreadOptions.WorkingDirectory.ShouldBe(repositoryPath);
+            _provider.ReceivedOptions[4].ThreadOptions.AdditionalDirectories.ShouldBe([repositoryPath]);
+            renderedOutput.ShouldContain("[PASS] codex / Repository Analysis");
+        }
+
+        public override IReadOnlyList<string> ExplicitOptionArguments { get; } = ["--test-provider-full", "--model", "gpt-5-codex-mini"];
+
+        public override void AssertExplicitOptions()
+        {
+            _provider.ReceivedOptions[0].ThreadOptions.Model.ShouldBe("gpt-5-codex-mini");
+        }
     }
 
     private sealed class FakeCodexProvider : ICodexProvider

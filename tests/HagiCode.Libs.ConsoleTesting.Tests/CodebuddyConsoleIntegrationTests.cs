@@ -13,143 +13,56 @@ public sealed class CodebuddyConsoleIntegrationTests
 {
     private const string RealCliTestsEnvironmentVariable = "HAGICODE_REAL_CLI_TESTS";
 
-    [Test]
-    public async Task DispatchAsync_runs_codebuddy_default_suite_with_fake_provider()
+    /// <summary>The shared dispatch contract row for the Codebuddy console (see ProviderConsoleDispatchContractTests).</summary>
+    internal static ProviderConsoleDispatchRow CreateDispatchRow() => new CodebuddyDispatchRow();
+
+    private sealed class CodebuddyDispatchRow : ProviderConsoleDispatchRow
     {
-        var provider = new FakeCodebuddyProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new CodebuddyConsoleRunner(CodebuddyConsoleDefinition.Instance, provider, formatter);
+        private FakeCodebuddyProvider _provider = new();
 
-        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync([], CodebuddyConsoleDefinition.Instance, runner, output);
+        public override ProviderConsoleDefinition Definition => CodebuddyConsoleDefinition.Instance;
 
-        exitCode.ShouldBe(0);
-        var rendered = output.ToString();
-        rendered.ShouldContain("[PASS] codebuddy / Ping");
-        rendered.ShouldContain("[PASS] codebuddy / Simple Prompt");
-        rendered.ShouldContain("[PASS] codebuddy / Complex Prompt");
-        rendered.ShouldContain("[PASS] codebuddy / Session Resume");
-        rendered.ShouldContain("Summary: 4/4 passed");
-    }
+        public override IReadOnlyList<string> DefaultSuiteScenarioNames { get; } = ["Ping", "Simple Prompt", "Complex Prompt", "Session Resume"];
 
-    [Test]
-    public async Task DispatchAsync_shows_provider_specific_help_text()
-    {
-        var provider = new FakeCodebuddyProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new CodebuddyConsoleRunner(CodebuddyConsoleDefinition.Instance, provider, formatter);
+        public override IReadOnlyList<string> ExpectedHelpText { get; } =
+        [
+            "--model <model>",
+            "--repo <path>"
+        ];
 
-        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(["--help"], CodebuddyConsoleDefinition.Instance, runner, output);
+        public override string MissingValueOption => "--model";
 
-        exitCode.ShouldBe(0);
-        var rendered = output.ToString();
-        rendered.ShouldContain("--test-provider");
-        rendered.ShouldContain("--test-provider-full");
-        rendered.ShouldContain("--test-all");
-        rendered.ShouldContain("--model <model>");
-        rendered.ShouldContain("--repo <path>");
-    }
-
-    [Test]
-    public async Task DispatchAsync_normalizes_codebuddy_aliases_for_provider_commands()
-    {
-        var provider = new FakeCodebuddyProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new CodebuddyConsoleRunner(CodebuddyConsoleDefinition.Instance, provider, formatter);
-
-        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(["--test-provider", "codebuddy-cli"], CodebuddyConsoleDefinition.Instance, runner, output);
-
-        exitCode.ShouldBe(0);
-        output.ToString().ShouldContain("[PASS] codebuddy / Ping");
-    }
-
-    [Test]
-    public async Task DispatchAsync_rejects_foreign_provider_names()
-    {
-        var provider = new FakeCodebuddyProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new CodebuddyConsoleRunner(CodebuddyConsoleDefinition.Instance, provider, formatter);
-
-        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(["--test-provider", "codex"], CodebuddyConsoleDefinition.Instance, runner, output);
-
-        exitCode.ShouldBe(1);
-        output.ToString().ShouldContain("dedicated provider console");
-    }
-
-    [Test]
-    public async Task DispatchAsync_reports_configuration_failures_for_invalid_codebuddy_options()
-    {
-        var provider = new FakeCodebuddyProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new CodebuddyConsoleRunner(CodebuddyConsoleDefinition.Instance, provider, formatter);
-
-        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(
-            ["--test-provider-full", "--model"],
-            CodebuddyConsoleDefinition.Instance,
-            runner,
-            output);
-
-        exitCode.ShouldBe(1);
-        output.ToString().ShouldContain("--model requires a value");
-    }
-
-    [Test]
-    public async Task DispatchAsync_passes_default_and_explicit_runtime_options_to_scenarios()
-    {
-        var provider = new FakeCodebuddyProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new CodebuddyConsoleRunner(CodebuddyConsoleDefinition.Instance, provider, formatter);
-        var repositoryPath = Path.Combine(Path.GetTempPath(), $"codebuddy-console-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(repositoryPath);
-
-        try
+        public override IProviderConsoleRunner CreateRunner(TextWriter output)
         {
-            var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(
-                ["--test-provider-full", "--repo", repositoryPath],
-                CodebuddyConsoleDefinition.Instance,
-                runner,
-                output);
-
-            exitCode.ShouldBe(0);
-            provider.ReceivedOptions.Count.ShouldBe(5);
-            provider.ReceivedOptions[0].Model.ShouldBe(CodebuddyConsoleExecutionOptions.DefaultModel);
-            provider.ReceivedOptions[3].SessionId.ShouldNotBeNullOrWhiteSpace();
-            provider.ReceivedOptions[4].WorkingDirectory.ShouldBe(repositoryPath);
-            output.ToString().ShouldContain("[PASS] codebuddy / Repository Summary");
-        }
-        finally
-        {
-            Directory.Delete(repositoryPath, recursive: true);
+            _provider = new FakeCodebuddyProvider();
+            return new CodebuddyConsoleRunner(Definition, _provider, new ProviderConsoleOutputFormatter(output));
         }
 
-        provider = new FakeCodebuddyProvider();
-        using var explicitOutput = new StringWriter();
-        formatter = new ProviderConsoleOutputFormatter(explicitOutput);
-        runner = new CodebuddyConsoleRunner(CodebuddyConsoleDefinition.Instance, provider, formatter);
+        public override IReadOnlyList<string> RuntimeOptionArguments(string repositoryPath) => ["--test-provider-full", "--repo", repositoryPath];
 
-        var explicitExitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(
-            ["--test-provider-full", "--model", "glm-5-plus"],
-            CodebuddyConsoleDefinition.Instance,
-            runner,
-            explicitOutput);
+        public override void AssertRuntimeOptions(string repositoryPath, string renderedOutput)
+        {
+            _provider.ReceivedOptions.Count.ShouldBe(5);
+            _provider.ReceivedOptions[0].Model.ShouldBe(CodebuddyConsoleExecutionOptions.DefaultModel);
+            _provider.ReceivedOptions[3].SessionId.ShouldNotBeNullOrWhiteSpace();
+            _provider.ReceivedOptions[4].WorkingDirectory.ShouldBe(repositoryPath);
+            renderedOutput.ShouldContain("[PASS] codebuddy / Repository Summary");
+        }
 
-        explicitExitCode.ShouldBe(0);
-        provider.ReceivedOptions[0].Model.ShouldBe("glm-5-plus");
+        public override IReadOnlyList<string> ExplicitOptionArguments { get; } = ["--test-provider-full", "--model", "glm-5-plus"];
+
+        public override void AssertExplicitOptions()
+        {
+            _provider.ReceivedOptions[0].Model.ShouldBe("glm-5-plus");
+        }
     }
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task ProgramMain_can_ping_the_real_codebuddy_cli_when_opted_in()
     {
-        if (!IsRealCliTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealCliTestsEnvironmentVariable);
 
         using var output = new StringWriter();
         var originalOut = Console.Out;
@@ -163,13 +76,6 @@ public sealed class CodebuddyConsoleIntegrationTests
         {
             Console.SetOut(originalOut);
         }
-    }
-
-    private static bool IsRealCliTestsEnabled()
-    {
-        var value = Environment.GetEnvironmentVariable(RealCliTestsEnvironmentVariable);
-        return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed class FakeCodebuddyProvider : ICliProvider<CodebuddyOptions>

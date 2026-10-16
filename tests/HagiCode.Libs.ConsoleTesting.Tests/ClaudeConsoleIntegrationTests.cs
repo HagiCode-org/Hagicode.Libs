@@ -14,26 +14,6 @@ public sealed class ClaudeConsoleIntegrationTests
     private const string RealCliTestsEnvironmentVariable = "HAGICODE_REAL_CLI_TESTS";
 
     [Test]
-    public async Task DispatchAsync_runs_claude_default_suite_with_fake_provider()
-    {
-        var provider = new FakeClaudeProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new ClaudeConsoleRunner(ClaudeConsoleDefinition.Instance, provider, formatter);
-
-        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync([], ClaudeConsoleDefinition.Instance, runner, output);
-
-        exitCode.ShouldBe(0);
-        var rendered = output.ToString();
-        rendered.ShouldContain("[PASS] claude-code / Ping");
-        rendered.ShouldContain("[PASS] claude-code / Simple Prompt");
-        rendered.ShouldContain("[PASS] claude-code / Complex Prompt");
-        rendered.ShouldContain("[PASS] claude-code / Session Restore (Session Id)");
-        rendered.ShouldContain("[PASS] claude-code / Session Restore (Resume Id)");
-        rendered.ShouldContain("Summary: 5/5 passed");
-    }
-
-    [Test]
     public async Task DispatchAsync_restores_conversations_by_explicit_session_id_and_by_reported_resume_id()
     {
         var provider = new FakeClaudeProvider();
@@ -100,31 +80,11 @@ public sealed class ClaudeConsoleIntegrationTests
     }
 
     [Test]
-    public async Task DispatchAsync_shows_provider_specific_help_text()
-    {
-        var provider = new FakeClaudeProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new ClaudeConsoleRunner(ClaudeConsoleDefinition.Instance, provider, formatter);
-
-        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(["--help"], ClaudeConsoleDefinition.Instance, runner, output);
-
-        exitCode.ShouldBe(0);
-        var rendered = output.ToString();
-        rendered.ShouldContain("--test-provider");
-        rendered.ShouldContain("--test-provider-full");
-        rendered.ShouldContain("--test-all");
-        rendered.ShouldContain("--repo <path>");
-    }
-
-    [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task ProgramMain_can_ping_the_real_claude_cli_when_opted_in()
     {
-        if (!IsRealCliTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealCliTestsEnvironmentVariable);
 
         using var output = new StringWriter();
         var originalOut = Console.Out;
@@ -142,12 +102,10 @@ public sealed class ClaudeConsoleIntegrationTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task ProgramMain_can_run_the_full_default_suite_when_opted_in()
     {
-        if (!IsRealCliTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealCliTestsEnvironmentVariable);
 
         using var output = new StringWriter();
         var originalOut = Console.Out;
@@ -165,12 +123,10 @@ public sealed class ClaudeConsoleIntegrationTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task Real_claude_cli_restores_two_sessions_in_one_working_directory_by_resume_id_when_opted_in()
     {
-        if (!IsRealCliTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealCliTestsEnvironmentVariable);
 
         var workingDirectory = Path.Combine(Path.GetTempPath(), $"hagicode-libs-resume-{Guid.NewGuid():N}");
         Directory.CreateDirectory(workingDirectory);
@@ -244,11 +200,47 @@ public sealed class ClaudeConsoleIntegrationTests
         return combined;
     }
 
-    private static bool IsRealCliTestsEnabled()
+    /// <summary>The shared dispatch contract row for the Claude console (see ProviderConsoleDispatchContractTests).</summary>
+    internal static ProviderConsoleDispatchRow CreateDispatchRow() => new ClaudeDispatchRow();
+
+    private sealed class ClaudeDispatchRow : ProviderConsoleDispatchRow
     {
-        var value = Environment.GetEnvironmentVariable(RealCliTestsEnvironmentVariable);
-        return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
+        private FakeClaudeProvider _provider = new();
+
+        public override ProviderConsoleDefinition Definition => ClaudeConsoleDefinition.Instance;
+
+        public override IReadOnlyList<string> DefaultSuiteScenarioNames { get; } = ["Ping", "Simple Prompt", "Complex Prompt", "Session Restore (Session Id)", "Session Restore (Resume Id)"];
+
+        public override IReadOnlyList<string> ExpectedHelpText { get; } =
+        [
+            "--repo <path>"
+        ];
+
+        public override string MissingValueOption => "--model";
+
+        public override IProviderConsoleRunner CreateRunner(TextWriter output)
+        {
+            _provider = new FakeClaudeProvider();
+            return new ClaudeConsoleRunner(Definition, _provider, new ProviderConsoleOutputFormatter(output));
+        }
+
+        public override IReadOnlyList<string> RuntimeOptionArguments(string repositoryPath)
+        {
+            return ["--test-provider-full", "--repo", repositoryPath];
+        }
+
+        public override void AssertRuntimeOptions(string repositoryPath, string renderedOutput)
+        {
+            _provider.Calls.Any(call => call.Options.WorkingDirectory == repositoryPath).ShouldBeTrue();
+            renderedOutput.ShouldContain("[PASS] claude-code / Repository Analysis");
+        }
+
+        public override IReadOnlyList<string> ExplicitOptionArguments { get; } = ["--test-provider-full", "--model", "claude-haiku-5-5"];
+
+        public override void AssertExplicitOptions()
+        {
+            _provider.Calls.Any(call => call.Options.Model == "claude-haiku-5-5").ShouldBeTrue();
+        }
     }
 
     private sealed class FakeClaudeProvider : ICliProvider<ClaudeCodeOptions>

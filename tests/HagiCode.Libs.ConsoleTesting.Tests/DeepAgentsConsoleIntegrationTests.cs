@@ -12,145 +12,6 @@ namespace HagiCode.Libs.ConsoleTesting.Tests;
 public sealed class DeepAgentsConsoleIntegrationTests
 {
     [Test]
-    public async Task DispatchAsync_runs_deepagents_default_suite_with_fake_provider()
-    {
-        var provider = new FakeDeepAgentsProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new DeepAgentsConsoleRunner(DeepAgentsConsoleDefinition.Instance, provider, formatter);
-
-        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync([], DeepAgentsConsoleDefinition.Instance, runner, output);
-
-        exitCode.ShouldBe(0);
-        var rendered = output.ToString();
-        rendered.ShouldContain("[PASS] deepagents / Ping");
-        rendered.ShouldContain("[PASS] deepagents / Simple Prompt");
-        rendered.ShouldContain("[PASS] deepagents / Complex Prompt");
-        rendered.ShouldContain("[PASS] deepagents / Session Resume");
-        rendered.ShouldContain("Summary: 4/4 passed");
-    }
-
-    [Test]
-    public async Task DispatchAsync_shows_provider_specific_help_text()
-    {
-        var provider = new FakeDeepAgentsProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new DeepAgentsConsoleRunner(DeepAgentsConsoleDefinition.Instance, provider, formatter);
-
-        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(["--help"], DeepAgentsConsoleDefinition.Instance, runner, output);
-
-        exitCode.ShouldBe(0);
-        var rendered = output.ToString();
-        rendered.ShouldContain("--test-provider");
-        rendered.ShouldContain("--test-provider-full");
-        rendered.ShouldContain("--test-all");
-        rendered.ShouldContain("--workspace <path>");
-        rendered.ShouldContain("--toolcall");
-        rendered.ShouldContain("--toolcall-case <name>");
-        rendered.ShouldContain("deepagents-acp");
-    }
-
-    [Test]
-    public async Task DispatchAsync_normalizes_the_deepagents_acp_alias()
-    {
-        var provider = new FakeDeepAgentsProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new DeepAgentsConsoleRunner(DeepAgentsConsoleDefinition.Instance, provider, formatter);
-
-        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(["--test-provider", "deepagents-acp"], DeepAgentsConsoleDefinition.Instance, runner, output);
-
-        exitCode.ShouldBe(0);
-        output.ToString().ShouldContain("[PASS] deepagents / Ping");
-    }
-
-    [Test]
-    public async Task DispatchAsync_rejects_foreign_provider_names()
-    {
-        var provider = new FakeDeepAgentsProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new DeepAgentsConsoleRunner(DeepAgentsConsoleDefinition.Instance, provider, formatter);
-
-        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(["--test-provider", "codex"], DeepAgentsConsoleDefinition.Instance, runner, output);
-
-        exitCode.ShouldBe(1);
-        output.ToString().ShouldContain("dedicated provider console");
-    }
-
-    [Test]
-    public async Task DispatchAsync_reports_configuration_failures_for_unknown_deepagents_options()
-    {
-        var provider = new FakeDeepAgentsProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new DeepAgentsConsoleRunner(DeepAgentsConsoleDefinition.Instance, provider, formatter);
-
-        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(
-            ["--test-provider-full", "--unknown-option"],
-            DeepAgentsConsoleDefinition.Instance,
-            runner,
-            output);
-
-        exitCode.ShouldBe(1);
-        output.ToString().ShouldContain("Unknown option: --unknown-option");
-    }
-
-    [Test]
-    public async Task DispatchAsync_passes_runtime_options_to_scenarios()
-    {
-        var provider = new FakeDeepAgentsProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new DeepAgentsConsoleRunner(DeepAgentsConsoleDefinition.Instance, provider, formatter);
-        var workspacePath = Path.Combine(Path.GetTempPath(), $"deepagents-console-workspace-{Guid.NewGuid():N}");
-        var repositoryPath = Path.Combine(Path.GetTempPath(), $"deepagents-console-repo-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(workspacePath);
-        Directory.CreateDirectory(repositoryPath);
-
-        try
-        {
-            var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(
-                [
-                    "--test-provider-full",
-                    "--workspace", workspacePath,
-                    "--repo", repositoryPath,
-                    "--model", "glm-5.1",
-                    "--name", "deepagents-bot",
-                    "--description", "DeepAgents test bot",
-                    "--skill", "./skills",
-                    "--memory", "./AGENTS.md",
-                    "--executable", "/tmp/deepagents",
-                    "--arg", "--debug"
-                ],
-                DeepAgentsConsoleDefinition.Instance,
-                runner,
-                output);
-
-            exitCode.ShouldBe(0);
-            provider.ReceivedOptions.Count.ShouldBe(5);
-            provider.ReceivedOptions[0].Model.ShouldBe("glm-5.1");
-            provider.ReceivedOptions[0].WorkingDirectory.ShouldBe(workspacePath);
-            provider.ReceivedOptions[0].WorkspaceRoot.ShouldBe(workspacePath);
-            provider.ReceivedOptions[0].AgentName.ShouldBe("deepagents-bot");
-            provider.ReceivedOptions[0].AgentDescription.ShouldBe("DeepAgents test bot");
-            provider.ReceivedOptions[0].SkillsDirectories.ShouldBe(["./skills"]);
-            provider.ReceivedOptions[0].MemoryFiles.ShouldBe(["./AGENTS.md"]);
-            provider.ReceivedOptions[0].ExecutablePath.ShouldBe("/tmp/deepagents");
-            provider.ReceivedOptions[0].ExtraArguments.ShouldBe(["--debug"]);
-            provider.ReceivedOptions[3].SessionId.ShouldNotBeNullOrWhiteSpace();
-            provider.ReceivedOptions[4].WorkspaceRoot.ShouldBe(repositoryPath);
-            output.ToString().ShouldContain("[PASS] deepagents / Repository Summary");
-        }
-        finally
-        {
-            Directory.Delete(workspacePath, recursive: true);
-            Directory.Delete(repositoryPath, recursive: true);
-        }
-    }
-
-    [Test]
     public async Task DispatchAsync_includes_bypass_network_scenario_when_mode_id_requests_bypass()
     {
         var provider = new FakeDeepAgentsProvider();
@@ -281,6 +142,69 @@ public sealed class DeepAgentsConsoleIntegrationTests
         rendered.ShouldContain("Tool[1]: stage=tool.call, name=bash, id=tool-parse-1");
         rendered.ShouldContain("Tool[2]: stage=tool.permission, name=bash, id=tool-parse-1");
         rendered.ShouldContain("Tool[4]: stage=tool.completed, name=bash, id=tool-parse-1");
+    }
+
+    /// <summary>The shared dispatch contract row for the DeepAgents console (see ProviderConsoleDispatchContractTests).</summary>
+    internal static ProviderConsoleDispatchRow CreateDispatchRow() => new DeepAgentsDispatchRow();
+
+    private sealed class DeepAgentsDispatchRow : ProviderConsoleDispatchRow
+    {
+        private FakeDeepAgentsProvider _provider = new();
+
+        public override ProviderConsoleDefinition Definition => DeepAgentsConsoleDefinition.Instance;
+
+        public override IReadOnlyList<string> DefaultSuiteScenarioNames { get; } = ["Ping", "Simple Prompt", "Complex Prompt", "Session Resume"];
+
+        public override IReadOnlyList<string> ExpectedHelpText { get; } =
+        [
+            "--workspace <path>",
+            "--toolcall",
+            "--toolcall-case <name>",
+            "deepagents-acp"
+        ];
+
+        public override IReadOnlyList<string> InvalidOptionArguments => ["--test-provider-full", "--unknown-option"];
+
+        public override string InvalidOptionMessage => "Unknown option: --unknown-option";
+
+        public override IProviderConsoleRunner CreateRunner(TextWriter output)
+        {
+            _provider = new FakeDeepAgentsProvider();
+            return new DeepAgentsConsoleRunner(Definition, _provider, new ProviderConsoleOutputFormatter(output));
+        }
+
+        private string _workspacePath = string.Empty;
+
+        public override IReadOnlyList<string> RuntimeOptionArguments(string repositoryPath)
+        {
+            _workspacePath = Path.Combine(repositoryPath, "workspace");
+            Directory.CreateDirectory(_workspacePath);
+            return ["--test-provider-full", "--workspace", _workspacePath, "--repo", repositoryPath, "--model", "glm-5.1", "--name", "deepagents-bot", "--description", "DeepAgents test bot", "--skill", "./skills", "--memory", "./AGENTS.md", "--executable", "/tmp/deepagents", "--arg", "--debug"];
+        }
+
+        public override void AssertRuntimeOptions(string repositoryPath, string renderedOutput)
+        {
+            _provider.ReceivedOptions.Count.ShouldBe(5);
+            _provider.ReceivedOptions[0].Model.ShouldBe("glm-5.1");
+            _provider.ReceivedOptions[0].WorkingDirectory.ShouldBe(_workspacePath);
+            _provider.ReceivedOptions[0].WorkspaceRoot.ShouldBe(_workspacePath);
+            _provider.ReceivedOptions[0].AgentName.ShouldBe("deepagents-bot");
+            _provider.ReceivedOptions[0].AgentDescription.ShouldBe("DeepAgents test bot");
+            _provider.ReceivedOptions[0].SkillsDirectories.ShouldBe(["./skills"]);
+            _provider.ReceivedOptions[0].MemoryFiles.ShouldBe(["./AGENTS.md"]);
+            _provider.ReceivedOptions[0].ExecutablePath.ShouldBe("/tmp/deepagents");
+            _provider.ReceivedOptions[0].ExtraArguments.ShouldBe(["--debug"]);
+            _provider.ReceivedOptions[3].SessionId.ShouldNotBeNullOrWhiteSpace();
+            _provider.ReceivedOptions[4].WorkspaceRoot.ShouldBe(repositoryPath);
+            renderedOutput.ShouldContain("[PASS] deepagents / Repository Summary");
+        }
+
+        public override IReadOnlyList<string> ExplicitOptionArguments { get; } = ["--test-provider-full", "--model", "glm-5.1-explicit"];
+
+        public override void AssertExplicitOptions()
+        {
+            _provider.ReceivedOptions[0].Model.ShouldBe("glm-5.1-explicit");
+        }
     }
 
     private sealed class FakeDeepAgentsProvider : ICliProvider<DeepAgentsOptions>

@@ -15,76 +15,6 @@ public sealed class DshConsoleIntegrationTests
     private const string TestProvider = "omniroute";
     private const string TestModel = "claude/claude-haiku-5-5";
 
-    [Test]
-    public async Task DispatchAsync_runs_dsh_default_suite_with_fake_provider()
-    {
-        var provider = new FakeDshProvider();
-        using var output = new StringWriter();
-        var runner = new DshConsoleRunner(DshConsoleDefinition.Instance, provider, new ProviderConsoleOutputFormatter(output));
-
-        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync([], DshConsoleDefinition.Instance, runner, output);
-
-        exitCode.ShouldBe(0);
-        var rendered = output.ToString();
-        rendered.ShouldContain("[PASS] dsh / Ping");
-        rendered.ShouldContain("[PASS] dsh / Simple Prompt");
-        rendered.ShouldContain("[PASS] dsh / Complex Prompt");
-        rendered.ShouldContain("[PASS] dsh / Session Resume");
-        rendered.ShouldContain("[PASS] dsh / Tool Call");
-        rendered.ShouldContain("Summary: 5/5 passed");
-        rendered.ShouldNotContain("Model:");
-    }
-
-    [Test]
-    public async Task DispatchAsync_shows_provider_specific_help_text()
-    {
-        var provider = new FakeDshProvider();
-        using var output = new StringWriter();
-        var runner = new DshConsoleRunner(DshConsoleDefinition.Instance, provider, new ProviderConsoleOutputFormatter(output));
-
-        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(["--help"], DshConsoleDefinition.Instance, runner, output);
-
-        exitCode.ShouldBe(0);
-        var rendered = output.ToString();
-        rendered.ShouldContain("--test-provider");
-        rendered.ShouldContain("--test-provider-full");
-        rendered.ShouldContain("--test-all");
-        rendered.ShouldContain("--executable <path>");
-        rendered.ShouldContain("--provider <id>");
-        rendered.ShouldContain("--model <model>");
-        rendered.ShouldContain("--arg <value>");
-        rendered.ShouldContain("--workspace <path>");
-        rendered.ShouldContain("--dsh-home <path>");
-        rendered.ShouldContain("--verbose");
-    }
-
-    [Test]
-    public async Task DispatchAsync_accepts_the_dsh_cli_alias()
-    {
-        var provider = new FakeDshProvider();
-        using var output = new StringWriter();
-        var runner = new DshConsoleRunner(DshConsoleDefinition.Instance, provider, new ProviderConsoleOutputFormatter(output));
-
-        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(["--test-provider", "dsh-cli"], DshConsoleDefinition.Instance, runner, output);
-
-        exitCode.ShouldBe(0);
-        output.ToString().ShouldContain("[PASS] dsh / Ping");
-    }
-
-    [Test]
-    public async Task DispatchAsync_rejects_foreign_provider_names()
-    {
-        var provider = new FakeDshProvider();
-        using var output = new StringWriter();
-        var runner = new DshConsoleRunner(DshConsoleDefinition.Instance, provider, new ProviderConsoleOutputFormatter(output));
-
-        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(["--test-provider", "codex"], DshConsoleDefinition.Instance, runner, output);
-
-        exitCode.ShouldBe(1);
-        output.ToString().ShouldContain("dedicated provider console");
-    }
-
-    [TestCase("--executable", "--executable requires a value")]
     [TestCase("--bogus", "Unknown option: --bogus")]
     public async Task DispatchAsync_reports_configuration_failures_for_invalid_dsh_options(string option, string expectedMessage)
     {
@@ -257,12 +187,10 @@ public sealed class DshConsoleIntegrationTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task ProgramMain_can_ping_the_real_dsh_cli_when_opted_in()
     {
-        if (!IsRealCliTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealCliTestsEnvironmentVariable);
 
         using var output = new StringWriter();
         var originalOut = Console.Out;
@@ -281,12 +209,10 @@ public sealed class DshConsoleIntegrationTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task ProgramMain_can_run_the_full_default_suite_when_opted_in()
     {
-        if (!IsRealCliTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealCliTestsEnvironmentVariable);
 
         using var output = new StringWriter();
         var originalOut = Console.Out;
@@ -306,19 +232,80 @@ public sealed class DshConsoleIntegrationTests
         }
     }
 
-    private static bool IsRealCliTestsEnabled()
-    {
-        var value = Environment.GetEnvironmentVariable(RealCliTestsEnvironmentVariable);
-        return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
-    }
-
     public enum FakeToolBehavior
     {
         Completed,
         NoToolCall,
         Unfinished,
         Failed,
+    }
+
+    [Test]
+    public async Task DispatchAsync_default_suite_prints_no_model_line()
+    {
+        var provider = new FakeDshProvider();
+        using var output = new StringWriter();
+        var formatter = new ProviderConsoleOutputFormatter(output);
+        var runner = new DshConsoleRunner(DshConsoleDefinition.Instance, provider, formatter);
+
+        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync([], DshConsoleDefinition.Instance, runner, output);
+
+        exitCode.ShouldBe(0);
+        output.ToString().ShouldNotContain("Model:");
+    }
+
+    /// <summary>The shared dispatch contract row for the Dsh console (see ProviderConsoleDispatchContractTests).</summary>
+    internal static ProviderConsoleDispatchRow CreateDispatchRow() => new DshDispatchRow();
+
+    private sealed class DshDispatchRow : ProviderConsoleDispatchRow
+    {
+        private FakeDshProvider _provider = new();
+
+        public override ProviderConsoleDefinition Definition => DshConsoleDefinition.Instance;
+
+        public override IReadOnlyList<string> DefaultSuiteScenarioNames { get; } = ["Ping", "Simple Prompt", "Complex Prompt", "Session Resume", "Tool Call"];
+
+        public override IReadOnlyList<string> ExpectedHelpText { get; } =
+        [
+            "--executable <path>",
+            "--provider <id>",
+            "--model <model>",
+            "--arg <value>",
+            "--workspace <path>",
+            "--dsh-home <path>",
+            "--verbose"
+        ];
+
+        public override IProviderConsoleRunner CreateRunner(TextWriter output)
+        {
+            _provider = new FakeDshProvider();
+            return new DshConsoleRunner(Definition, _provider, new ProviderConsoleOutputFormatter(output));
+        }
+
+        private string _workspacePath = string.Empty;
+
+        public override IReadOnlyList<string> RuntimeOptionArguments(string repositoryPath)
+        {
+            _workspacePath = Path.Combine(repositoryPath, "workspace");
+            Directory.CreateDirectory(_workspacePath);
+            return ["--test-provider-full", "--provider", TestProvider, "--model", TestModel, "--workspace", _workspacePath];
+        }
+
+        public override void AssertRuntimeOptions(string repositoryPath, string renderedOutput)
+        {
+            _provider.ReceivedOptions.Count.ShouldBe(5);
+            _provider.ReceivedOptions[0].Provider.ShouldBe(TestProvider);
+            _provider.ReceivedOptions[0].Model.ShouldBe(TestModel);
+            _provider.ReceivedOptions[0].WorkingDirectory.ShouldBe(_workspacePath);
+        }
+
+        public override IReadOnlyList<string> ExplicitOptionArguments { get; } = ["--test-provider-full", "--executable", "/tmp/dsh", "--arg", "--trace"];
+
+        public override void AssertExplicitOptions()
+        {
+            _provider.ReceivedOptions[0].ExecutablePath.ShouldBe("/tmp/dsh");
+            _provider.ReceivedOptions[0].ExtraArguments.ShouldBe(["--trace"]);
+        }
     }
 
     private sealed class FakeDshProvider(

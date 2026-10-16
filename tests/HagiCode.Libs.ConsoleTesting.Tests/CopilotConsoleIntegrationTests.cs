@@ -14,135 +14,11 @@ public sealed class CopilotConsoleIntegrationTests
     private const string RealCliTestsEnvironmentVariable = "HAGICODE_REAL_CLI_TESTS";
 
     [Test]
-    public async Task DispatchAsync_runs_copilot_default_suite_with_fake_provider()
-    {
-        var provider = new FakeCopilotProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new CopilotConsoleRunner(CopilotConsoleDefinition.Instance, provider, formatter);
-
-        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync([], CopilotConsoleDefinition.Instance, runner, output);
-
-        exitCode.ShouldBe(0);
-        var rendered = output.ToString();
-        rendered.ShouldContain("[PASS] copilot / Ping");
-        rendered.ShouldContain("[PASS] copilot / Simple Prompt");
-        rendered.ShouldContain("[PASS] copilot / Complex Prompt");
-        rendered.ShouldContain("Summary: 3/3 passed");
-    }
-
-    [Test]
-    public async Task DispatchAsync_shows_provider_specific_help_text()
-    {
-        var provider = new FakeCopilotProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new CopilotConsoleRunner(CopilotConsoleDefinition.Instance, provider, formatter);
-
-        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(["--help"], CopilotConsoleDefinition.Instance, runner, output);
-
-        exitCode.ShouldBe(0);
-        var rendered = output.ToString();
-        rendered.ShouldContain("--test-provider");
-        rendered.ShouldContain("--config-dir <path>");
-        rendered.ShouldContain("--auth-source <mode>");
-    }
-
-    [Test]
-    public async Task DispatchAsync_normalizes_copilot_aliases_for_provider_commands()
-    {
-        var provider = new FakeCopilotProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new CopilotConsoleRunner(CopilotConsoleDefinition.Instance, provider, formatter);
-
-        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(["--test-provider", "github-copilot"], CopilotConsoleDefinition.Instance, runner, output);
-
-        exitCode.ShouldBe(0);
-        output.ToString().ShouldContain("[PASS] copilot / Ping");
-    }
-
-    [Test]
-    public async Task DispatchAsync_rejects_foreign_provider_names()
-    {
-        var provider = new FakeCopilotProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new CopilotConsoleRunner(CopilotConsoleDefinition.Instance, provider, formatter);
-
-        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(["--test-provider", "codex"], CopilotConsoleDefinition.Instance, runner, output);
-
-        exitCode.ShouldBe(1);
-        output.ToString().ShouldContain("dedicated provider console");
-    }
-
-    [Test]
-    public async Task DispatchAsync_reports_configuration_failures_for_invalid_copilot_options()
-    {
-        var provider = new FakeCopilotProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new CopilotConsoleRunner(CopilotConsoleDefinition.Instance, provider, formatter);
-
-        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(
-            ["--test-provider-full", "--auth-source", "unsupported"],
-            CopilotConsoleDefinition.Instance,
-            runner,
-            output);
-
-        exitCode.ShouldBe(1);
-        output.ToString().ShouldContain("Unsupported auth source");
-    }
-
-    [Test]
-    public async Task DispatchAsync_passes_copilot_specific_runtime_options_to_scenarios()
-    {
-        var provider = new FakeCopilotProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new CopilotConsoleRunner(CopilotConsoleDefinition.Instance, provider, formatter);
-        var repositoryPath = Path.Combine(Path.GetTempPath(), $"copilot-console-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(repositoryPath);
-
-        try
-        {
-            var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(
-                [
-                    "--test-provider-full",
-                    "--model", "claude-sonnet-4.5",
-                    "--auth-source", "token",
-                    "--github-token", "ghu_test",
-                    "--config-dir", ".copilot",
-                    "--repo", repositoryPath
-                ],
-                CopilotConsoleDefinition.Instance,
-                runner,
-                output);
-
-            exitCode.ShouldBe(0);
-            provider.ReceivedOptions.Count.ShouldBe(3);
-            provider.ReceivedOptions[0].Model.ShouldBe("claude-sonnet-4.5");
-            provider.ReceivedOptions[0].AuthSource.ShouldBe(CopilotAuthSource.GitHubToken);
-            provider.ReceivedOptions[0].GitHubToken.ShouldBe("ghu_test");
-            provider.ReceivedOptions[0].AdditionalArgs.ShouldContain("--config-dir");
-            provider.ReceivedOptions[2].WorkingDirectory.ShouldBe(repositoryPath);
-            provider.ReceivedOptions[2].AdditionalArgs.ShouldContain("--add-dir");
-            output.ToString().ShouldContain("[PASS] copilot / Repository Analysis");
-        }
-        finally
-        {
-            Directory.Delete(repositoryPath, recursive: true);
-        }
-    }
-
-    [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task ProgramMain_can_ping_the_real_copilot_cli_when_opted_in()
     {
-        if (!IsRealCliTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealCliTestsEnvironmentVariable);
 
         using var output = new StringWriter();
         var originalOut = Console.Out;
@@ -158,11 +34,56 @@ public sealed class CopilotConsoleIntegrationTests
         }
     }
 
-    private static bool IsRealCliTestsEnabled()
+    /// <summary>The shared dispatch contract row for the Copilot console (see ProviderConsoleDispatchContractTests).</summary>
+    internal static ProviderConsoleDispatchRow CreateDispatchRow() => new CopilotDispatchRow();
+
+    private sealed class CopilotDispatchRow : ProviderConsoleDispatchRow
     {
-        var value = Environment.GetEnvironmentVariable(RealCliTestsEnvironmentVariable);
-        return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
+        private FakeCopilotProvider _provider = new();
+
+        public override ProviderConsoleDefinition Definition => CopilotConsoleDefinition.Instance;
+
+        public override IReadOnlyList<string> DefaultSuiteScenarioNames { get; } = ["Ping", "Simple Prompt", "Complex Prompt"];
+
+        public override IReadOnlyList<string> ExpectedHelpText { get; } =
+        [
+            "--config-dir <path>",
+            "--auth-source <mode>"
+        ];
+
+        public override IReadOnlyList<string> InvalidOptionArguments => ["--test-provider-full", "--auth-source", "unsupported"];
+
+        public override string InvalidOptionMessage => "Unsupported auth source";
+
+        public override IProviderConsoleRunner CreateRunner(TextWriter output)
+        {
+            _provider = new FakeCopilotProvider();
+            return new CopilotConsoleRunner(Definition, _provider, new ProviderConsoleOutputFormatter(output));
+        }
+
+        public override IReadOnlyList<string> RuntimeOptionArguments(string repositoryPath)
+        {
+            return ["--test-provider-full", "--model", "claude-sonnet-4.5", "--auth-source", "token", "--github-token", "ghu_test", "--config-dir", ".copilot", "--repo", repositoryPath];
+        }
+
+        public override void AssertRuntimeOptions(string repositoryPath, string renderedOutput)
+        {
+            _provider.ReceivedOptions.Count.ShouldBe(3);
+            _provider.ReceivedOptions[0].Model.ShouldBe("claude-sonnet-4.5");
+            _provider.ReceivedOptions[0].AuthSource.ShouldBe(CopilotAuthSource.GitHubToken);
+            _provider.ReceivedOptions[0].GitHubToken.ShouldBe("ghu_test");
+            _provider.ReceivedOptions[0].AdditionalArgs.ShouldContain("--config-dir");
+            _provider.ReceivedOptions[2].WorkingDirectory.ShouldBe(repositoryPath);
+            _provider.ReceivedOptions[2].AdditionalArgs.ShouldContain("--add-dir");
+            renderedOutput.ShouldContain("[PASS] copilot / Repository Analysis");
+        }
+
+        public override IReadOnlyList<string> ExplicitOptionArguments { get; } = ["--test-provider-full", "--model", "gpt-5"];
+
+        public override void AssertExplicitOptions()
+        {
+            _provider.ReceivedOptions[0].Model.ShouldBe("gpt-5");
+        }
     }
 
     private sealed class FakeCopilotProvider : ICliProvider<CopilotOptions>

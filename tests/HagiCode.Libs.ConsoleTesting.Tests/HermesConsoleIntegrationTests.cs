@@ -14,136 +14,11 @@ public sealed class HermesConsoleIntegrationTests
     private const string RealCliTestsEnvironmentVariable = "HAGICODE_REAL_CLI_TESTS";
 
     [Test]
-    public async Task DispatchAsync_runs_hermes_default_suite_with_fake_provider()
-    {
-        var provider = new FakeHermesProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new HermesConsoleRunner(HermesConsoleDefinition.Instance, provider, formatter);
-
-        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync([], HermesConsoleDefinition.Instance, runner, output);
-
-        exitCode.ShouldBe(0);
-        var rendered = output.ToString();
-        rendered.ShouldContain("[PASS] hermes / Ping");
-        rendered.ShouldContain("[PASS] hermes / Simple Prompt");
-        rendered.ShouldContain("[PASS] hermes / Complex Prompt");
-        rendered.ShouldContain("[PASS] hermes / Memory Reuse");
-        rendered.ShouldContain("Summary: 4/4 passed");
-    }
-
-    [Test]
-    public async Task DispatchAsync_shows_provider_specific_help_text()
-    {
-        var provider = new FakeHermesProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new HermesConsoleRunner(HermesConsoleDefinition.Instance, provider, formatter);
-
-        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(["--help"], HermesConsoleDefinition.Instance, runner, output);
-
-        exitCode.ShouldBe(0);
-        var rendered = output.ToString();
-        rendered.ShouldContain("--test-provider");
-        rendered.ShouldContain("--test-provider-full");
-        rendered.ShouldContain("--test-all");
-        rendered.ShouldContain("--model <model>");
-        rendered.ShouldContain("--arguments <value>");
-    }
-
-    [Test]
-    public async Task DispatchAsync_normalizes_hermes_aliases_for_provider_commands()
-    {
-        var provider = new FakeHermesProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new HermesConsoleRunner(HermesConsoleDefinition.Instance, provider, formatter);
-
-        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(["--test-provider", "hermes-cli"], HermesConsoleDefinition.Instance, runner, output);
-
-        exitCode.ShouldBe(0);
-        output.ToString().ShouldContain("[PASS] hermes / Ping");
-    }
-
-    [Test]
-    public async Task DispatchAsync_rejects_foreign_provider_names()
-    {
-        var provider = new FakeHermesProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new HermesConsoleRunner(HermesConsoleDefinition.Instance, provider, formatter);
-
-        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(["--test-provider", "codex"], HermesConsoleDefinition.Instance, runner, output);
-
-        exitCode.ShouldBe(1);
-        output.ToString().ShouldContain("dedicated provider console");
-    }
-
-    [Test]
-    public async Task DispatchAsync_reports_configuration_failures_for_invalid_hermes_options()
-    {
-        var provider = new FakeHermesProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new HermesConsoleRunner(HermesConsoleDefinition.Instance, provider, formatter);
-
-        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(
-            ["--test-provider-full", "--arguments", "\"unterminated"],
-            HermesConsoleDefinition.Instance,
-            runner,
-            output);
-
-        exitCode.ShouldBe(1);
-        output.ToString().ShouldContain("unterminated quoted value");
-    }
-
-    [Test]
-    public async Task DispatchAsync_passes_hermes_specific_runtime_options_to_scenarios()
-    {
-        var provider = new FakeHermesProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new HermesConsoleRunner(HermesConsoleDefinition.Instance, provider, formatter);
-        var repositoryPath = Path.Combine(Path.GetTempPath(), $"hermes-console-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(repositoryPath);
-
-        try
-        {
-            var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(
-                [
-                    "--test-provider-full",
-                    "--model", "hermes/default",
-                    "--executable", "/custom/hermes",
-                    "--arguments", "acp --profile smoke",
-                    "--repo", repositoryPath
-                ],
-                HermesConsoleDefinition.Instance,
-                runner,
-                output);
-
-            exitCode.ShouldBe(0);
-            provider.ReceivedOptions.Count.ShouldBe(5);
-            provider.ReceivedOptions[0].Model.ShouldBe("hermes/default");
-            provider.ReceivedOptions[0].ExecutablePath.ShouldBe("/custom/hermes");
-            provider.ReceivedOptions[0].Arguments.ShouldBe(["acp", "--profile", "smoke"]);
-            provider.ReceivedOptions[3].SessionId.ShouldNotBeNullOrWhiteSpace();
-            provider.ReceivedOptions[4].WorkingDirectory.ShouldBe(repositoryPath);
-            output.ToString().ShouldContain("[PASS] hermes / Repository Summary");
-        }
-        finally
-        {
-            Directory.Delete(repositoryPath, recursive: true);
-        }
-    }
-
-    [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task ProgramMain_can_ping_the_real_hermes_cli_when_opted_in()
     {
-        if (!IsRealCliTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealCliTestsEnvironmentVariable);
 
         using var output = new StringWriter();
         var originalOut = Console.Out;
@@ -159,11 +34,55 @@ public sealed class HermesConsoleIntegrationTests
         }
     }
 
-    private static bool IsRealCliTestsEnabled()
+    /// <summary>The shared dispatch contract row for the Hermes console (see ProviderConsoleDispatchContractTests).</summary>
+    internal static ProviderConsoleDispatchRow CreateDispatchRow() => new HermesDispatchRow();
+
+    private sealed class HermesDispatchRow : ProviderConsoleDispatchRow
     {
-        var value = Environment.GetEnvironmentVariable(RealCliTestsEnvironmentVariable);
-        return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
+        private FakeHermesProvider _provider = new();
+
+        public override ProviderConsoleDefinition Definition => HermesConsoleDefinition.Instance;
+
+        public override IReadOnlyList<string> DefaultSuiteScenarioNames { get; } = ["Ping", "Simple Prompt", "Complex Prompt", "Memory Reuse"];
+
+        public override IReadOnlyList<string> ExpectedHelpText { get; } =
+        [
+            "--model <model>",
+            "--arguments <value>"
+        ];
+
+        public override IReadOnlyList<string> InvalidOptionArguments => ["--test-provider-full", "--arguments", "\"unterminated"];
+
+        public override string InvalidOptionMessage => "unterminated quoted value";
+
+        public override IProviderConsoleRunner CreateRunner(TextWriter output)
+        {
+            _provider = new FakeHermesProvider();
+            return new HermesConsoleRunner(Definition, _provider, new ProviderConsoleOutputFormatter(output));
+        }
+
+        public override IReadOnlyList<string> RuntimeOptionArguments(string repositoryPath)
+        {
+            return ["--test-provider-full", "--model", "hermes/default", "--executable", "/custom/hermes", "--arguments", "acp --profile smoke", "--repo", repositoryPath];
+        }
+
+        public override void AssertRuntimeOptions(string repositoryPath, string renderedOutput)
+        {
+            _provider.ReceivedOptions.Count.ShouldBe(5);
+            _provider.ReceivedOptions[0].Model.ShouldBe("hermes/default");
+            _provider.ReceivedOptions[0].ExecutablePath.ShouldBe("/custom/hermes");
+            _provider.ReceivedOptions[0].Arguments.ShouldBe(["acp", "--profile", "smoke"]);
+            _provider.ReceivedOptions[3].SessionId.ShouldNotBeNullOrWhiteSpace();
+            _provider.ReceivedOptions[4].WorkingDirectory.ShouldBe(repositoryPath);
+            renderedOutput.ShouldContain("[PASS] hermes / Repository Summary");
+        }
+
+        public override IReadOnlyList<string> ExplicitOptionArguments { get; } = ["--test-provider-full", "--model", "hermes/explicit"];
+
+        public override void AssertExplicitOptions()
+        {
+            _provider.ReceivedOptions[0].Model.ShouldBe("hermes/explicit");
+        }
     }
 
     private sealed class FakeHermesProvider : ICliProvider<HermesOptions>

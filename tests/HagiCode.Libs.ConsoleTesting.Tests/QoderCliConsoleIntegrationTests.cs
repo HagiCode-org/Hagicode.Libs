@@ -13,143 +13,56 @@ public sealed class QoderCliConsoleIntegrationTests
 {
     private const string RealCliTestsEnvironmentVariable = "HAGICODE_REAL_CLI_TESTS";
 
-    [Test]
-    public async Task DispatchAsync_runs_qodercli_default_suite_with_fake_provider()
+    /// <summary>The shared dispatch contract row for the QoderCli console (see ProviderConsoleDispatchContractTests).</summary>
+    internal static ProviderConsoleDispatchRow CreateDispatchRow() => new QoderCliDispatchRow();
+
+    private sealed class QoderCliDispatchRow : ProviderConsoleDispatchRow
     {
-        var provider = new FakeQoderCliProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new QoderCliConsoleRunner(QoderCliConsoleDefinition.Instance, provider, formatter);
+        private FakeQoderCliProvider _provider = new();
 
-        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync([], QoderCliConsoleDefinition.Instance, runner, output);
+        public override ProviderConsoleDefinition Definition => QoderCliConsoleDefinition.Instance;
 
-        exitCode.ShouldBe(0);
-        var rendered = output.ToString();
-        rendered.ShouldContain("[PASS] qodercli / Ping");
-        rendered.ShouldContain("[PASS] qodercli / Simple Prompt");
-        rendered.ShouldContain("[PASS] qodercli / Complex Prompt");
-        rendered.ShouldContain("[PASS] qodercli / Session Resume");
-        rendered.ShouldContain("Summary: 4/4 passed");
-    }
+        public override IReadOnlyList<string> DefaultSuiteScenarioNames { get; } = ["Ping", "Simple Prompt", "Complex Prompt", "Session Resume"];
 
-    [Test]
-    public async Task DispatchAsync_shows_provider_specific_help_text()
-    {
-        var provider = new FakeQoderCliProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new QoderCliConsoleRunner(QoderCliConsoleDefinition.Instance, provider, formatter);
+        public override IReadOnlyList<string> ExpectedHelpText { get; } =
+        [
+            "--model <model>",
+            "--repo <path>"
+        ];
 
-        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(["--help"], QoderCliConsoleDefinition.Instance, runner, output);
+        public override string MissingValueOption => "--model";
 
-        exitCode.ShouldBe(0);
-        var rendered = output.ToString();
-        rendered.ShouldContain("--test-provider");
-        rendered.ShouldContain("--test-provider-full");
-        rendered.ShouldContain("--test-all");
-        rendered.ShouldContain("--model <model>");
-        rendered.ShouldContain("--repo <path>");
-    }
-
-    [Test]
-    public async Task DispatchAsync_accepts_the_primary_qodercli_provider_name()
-    {
-        var provider = new FakeQoderCliProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new QoderCliConsoleRunner(QoderCliConsoleDefinition.Instance, provider, formatter);
-
-        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(["--test-provider", "qodercli"], QoderCliConsoleDefinition.Instance, runner, output);
-
-        exitCode.ShouldBe(0);
-        output.ToString().ShouldContain("[PASS] qodercli / Ping");
-    }
-
-    [Test]
-    public async Task DispatchAsync_rejects_foreign_provider_names()
-    {
-        var provider = new FakeQoderCliProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new QoderCliConsoleRunner(QoderCliConsoleDefinition.Instance, provider, formatter);
-
-        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(["--test-provider", "codex"], QoderCliConsoleDefinition.Instance, runner, output);
-
-        exitCode.ShouldBe(1);
-        output.ToString().ShouldContain("dedicated provider console");
-    }
-
-    [Test]
-    public async Task DispatchAsync_reports_configuration_failures_for_invalid_qodercli_options()
-    {
-        var provider = new FakeQoderCliProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new QoderCliConsoleRunner(QoderCliConsoleDefinition.Instance, provider, formatter);
-
-        var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(
-            ["--test-provider-full", "--model"],
-            QoderCliConsoleDefinition.Instance,
-            runner,
-            output);
-
-        exitCode.ShouldBe(1);
-        output.ToString().ShouldContain("--model requires a value");
-    }
-
-    [Test]
-    public async Task DispatchAsync_passes_default_and_explicit_runtime_options_to_scenarios()
-    {
-        var provider = new FakeQoderCliProvider();
-        using var output = new StringWriter();
-        var formatter = new ProviderConsoleOutputFormatter(output);
-        var runner = new QoderCliConsoleRunner(QoderCliConsoleDefinition.Instance, provider, formatter);
-        var repositoryPath = Path.Combine(Path.GetTempPath(), $"qodercli-console-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(repositoryPath);
-
-        try
+        public override IProviderConsoleRunner CreateRunner(TextWriter output)
         {
-            var exitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(
-                ["--test-provider-full", "--repo", repositoryPath],
-                QoderCliConsoleDefinition.Instance,
-                runner,
-                output);
-
-            exitCode.ShouldBe(0);
-            provider.ReceivedOptions.Count.ShouldBe(5);
-            provider.ReceivedOptions[0].Model.ShouldBeNull();
-            provider.ReceivedOptions[3].SessionId.ShouldNotBeNullOrWhiteSpace();
-            provider.ReceivedOptions[4].WorkingDirectory.ShouldBe(repositoryPath);
-            output.ToString().ShouldContain("[PASS] qodercli / Repository Summary");
-        }
-        finally
-        {
-            Directory.Delete(repositoryPath, recursive: true);
+            _provider = new FakeQoderCliProvider();
+            return new QoderCliConsoleRunner(Definition, _provider, new ProviderConsoleOutputFormatter(output));
         }
 
-        provider = new FakeQoderCliProvider();
-        using var explicitOutput = new StringWriter();
-        formatter = new ProviderConsoleOutputFormatter(explicitOutput);
-        runner = new QoderCliConsoleRunner(QoderCliConsoleDefinition.Instance, provider, formatter);
+        public override IReadOnlyList<string> RuntimeOptionArguments(string repositoryPath) => ["--test-provider-full", "--repo", repositoryPath];
 
-        var explicitExitCode = await ProviderConsoleCommandDispatcher.DispatchAsync(
-            ["--test-provider-full", "--model", "qoder-max"],
-            QoderCliConsoleDefinition.Instance,
-            runner,
-            explicitOutput);
+        public override void AssertRuntimeOptions(string repositoryPath, string renderedOutput)
+        {
+            _provider.ReceivedOptions.Count.ShouldBe(5);
+            _provider.ReceivedOptions[0].Model.ShouldBeNull();
+            _provider.ReceivedOptions[3].SessionId.ShouldNotBeNullOrWhiteSpace();
+            _provider.ReceivedOptions[4].WorkingDirectory.ShouldBe(repositoryPath);
+            renderedOutput.ShouldContain("[PASS] qodercli / Repository Summary");
+        }
 
-        explicitExitCode.ShouldBe(0);
-        provider.ReceivedOptions[0].Model.ShouldBe("qoder-max");
+        public override IReadOnlyList<string> ExplicitOptionArguments { get; } = ["--test-provider-full", "--model", "qoder-max"];
+
+        public override void AssertExplicitOptions()
+        {
+            _provider.ReceivedOptions[0].Model.ShouldBe("qoder-max");
+        }
     }
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task ProgramMain_can_ping_the_real_qodercli_cli_when_opted_in()
     {
-        if (!IsRealCliTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealCliTestsEnvironmentVariable);
 
         using var output = new StringWriter();
         var originalOut = Console.Out;
@@ -163,13 +76,6 @@ public sealed class QoderCliConsoleIntegrationTests
         {
             Console.SetOut(originalOut);
         }
-    }
-
-    private static bool IsRealCliTestsEnabled()
-    {
-        var value = Environment.GetEnvironmentVariable(RealCliTestsEnvironmentVariable);
-        return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed class FakeQoderCliProvider : ICliProvider<QoderCliOptions>

@@ -13,6 +13,7 @@ public sealed class ProviderConsoleRunnerTests
         helpDescription: "Shared harness test console.");
 
     [Test]
+    [Category("CriticalRegression")]
     public async Task RunProviderFullSuiteAsync_formats_scenario_results_and_summary()
     {
         var provider = new StubProvider(successfulPing: true);
