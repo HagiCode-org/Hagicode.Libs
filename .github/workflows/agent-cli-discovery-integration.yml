@@ -1,0 +1,233 @@
+name: Agent CLI Discovery Integration
+
+# Installs each supported CLI through one install strategy, then checks discovery with the install
+# directory on PATH and (when the strategy has a well-known location) with it removed.
+# Lanes whose installer has not yet passed on a public runner are non-blocking (continue-on-error).
+# Promote a lane to blocking after it passes on every operating system it targets, and record the change in
+# docs/agent-cli-discovery-guide.md.
+
+on:
+  push:
+    paths:
+      - '.github/workflows/agent-cli-discovery-integration.yml'
+      - 'src/HagiCode.Libs.Core/Discovery/**'
+      - 'src/HagiCode.Libs.Core/Process/**'
+      - 'src/HagiCode.Libs.Core/Environment/**'
+      - 'src/HagiCode.Libs.CiSetup.Console/**'
+      - 'tests/HagiCode.Libs.Core.Tests/Discovery/**'
+      - 'tests/HagiCode.Libs.CiSetup.Tests/**'
+      - 'tests/Shared/**'
+      - 'Directory.Build.props'
+      - 'Directory.Packages.props'
+      - 'global.json'
+      - '*.slnx'
+  pull_request:
+    paths:
+      - '.github/workflows/agent-cli-discovery-integration.yml'
+      - 'src/HagiCode.Libs.Core/Discovery/**'
+      - 'src/HagiCode.Libs.Core/Process/**'
+      - 'src/HagiCode.Libs.Core/Environment/**'
+      - 'src/HagiCode.Libs.CiSetup.Console/**'
+      - 'tests/HagiCode.Libs.Core.Tests/Discovery/**'
+      - 'tests/HagiCode.Libs.CiSetup.Tests/**'
+      - 'tests/Shared/**'
+      - 'Directory.Build.props'
+      - 'Directory.Packages.props'
+      - 'global.json'
+      - '*.slnx'
+  workflow_dispatch:
+  schedule:
+    # Weekly, against the latest installer output, to catch upstream layout or version-output drift.
+    - cron: '23 4 * * 1'
+
+env:
+  DISABLE_AUTOUPDATER: '1'
+
+jobs:
+  discovery:
+    name: '${{ matrix.lane }} (${{ matrix.os }})'
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ !matrix.blocking }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Claude Code, npm (blocking; the existing npm route).
+          - lane: claude-npm
+            os: ubuntu-latest
+            provider: ClaudeCode
+            install_strategy: npm
+            kind: Npm
+            blocking: true
+            install_dir: ''
+            off_path: false
+          - lane: claude-npm
+            os: macos-latest
+            provider: ClaudeCode
+            install_strategy: npm
+            kind: Npm
+            blocking: true
+            install_dir: ''
+            off_path: false
+          - lane: claude-npm
+            os: windows-latest
+            provider: ClaudeCode
+            install_strategy: npm
+            kind: Npm
+            blocking: true
+            install_dir: ''
+            off_path: false
+
+          # Claude Code, native installer. Non-blocking until a green run on each OS promotes it.
+          - lane: claude-native
+            os: ubuntu-latest
+            provider: ClaudeCode
+            install_strategy: native
+            kind: NativeInstaller
+            blocking: false
+            install_dir: home-local-bin
+            off_path: true
+          - lane: claude-native
+            os: macos-latest
+            provider: ClaudeCode
+            install_strategy: native
+            kind: NativeInstaller
+            blocking: false
+            install_dir: home-local-bin
+            off_path: true
+          - lane: claude-native
+            os: windows-latest
+            provider: ClaudeCode
+            install_strategy: native
+            kind: NativeInstaller
+            blocking: false
+            install_dir: home-local-bin
+            off_path: true
+
+          # Claude Code, package managers. Non-blocking: the cask has no documented pin, and the WinGet Links directory is unconfirmed.
+          - lane: claude-homebrew
+            os: macos-latest
+            provider: ClaudeCode
+            install_strategy: homebrew
+            kind: Homebrew
+            blocking: false
+            install_dir: homebrew-bin
+            off_path: true
+          - lane: claude-winget
+            os: windows-latest
+            provider: ClaudeCode
+            install_strategy: winget
+            kind: WinGet
+            blocking: false
+            install_dir: winget-links
+            off_path: true
+
+          # Copilot and Codex, npm at their pinned versions (blocking).
+          - lane: copilot-npm
+            os: ubuntu-latest
+            provider: Copilot
+            install_strategy: npm
+            kind: Npm
+            blocking: true
+            install_dir: ''
+            off_path: false
+          - lane: copilot-npm
+            os: macos-latest
+            provider: Copilot
+            install_strategy: npm
+            kind: Npm
+            blocking: true
+            install_dir: ''
+            off_path: false
+          - lane: copilot-npm
+            os: windows-latest
+            provider: Copilot
+            install_strategy: npm
+            kind: Npm
+            blocking: true
+            install_dir: ''
+            off_path: false
+          - lane: codex-npm
+            os: ubuntu-latest
+            provider: Codex
+            install_strategy: npm
+            kind: Npm
+            blocking: true
+            install_dir: ''
+            off_path: false
+          - lane: codex-npm
+            os: macos-latest
+            provider: Codex
+            install_strategy: npm
+            kind: Npm
+            blocking: true
+            install_dir: ''
+            off_path: false
+          - lane: codex-npm
+            os: windows-latest
+            provider: Codex
+            install_strategy: npm
+            kind: Npm
+            blocking: true
+            install_dir: ''
+            off_path: false
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install ${{ matrix.provider }} through ${{ matrix.install_strategy }}
+        run: |
+          dotnet run --project src/HagiCode.Libs.CiSetup.Console -- \
+            --install --provider "${{ matrix.provider }}" --strategy "${{ matrix.install_strategy }}"
+
+      - name: Put the install directory on PATH
+        if: matrix.install_dir != ''
+        run: |
+          case "${{ matrix.install_dir }}" in
+            home-local-bin) dir="$HOME/.local/bin" ;;
+            homebrew-bin) dir="/opt/homebrew/bin" ;;
+            winget-links) dir="$LOCALAPPDATA/Microsoft/WinGet/Links" ;;
+            *) echo "Unknown install_dir '${{ matrix.install_dir }}'"; exit 1 ;;
+          esac
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            dir="$(cygpath -w "$dir")"
+          fi
+          echo "Adding $dir to PATH for the following steps"
+          echo "$dir" >> "$GITHUB_PATH"
+
+      - name: Verify discovery with the install directory on PATH
+        run: |
+          dotnet run --project src/HagiCode.Libs.CiSetup.Console -- \
+            --verify-discovery --provider "${{ matrix.provider }}" --strategy "${{ matrix.install_strategy }}" \
+            --expect-install-kind "${{ matrix.kind }}"
+
+      - name: Verify discovery without the install directory on PATH
+        if: matrix.off_path
+        run: |
+          dotnet run --project src/HagiCode.Libs.CiSetup.Console -- \
+            --verify-discovery --provider "${{ matrix.provider }}" --strategy "${{ matrix.install_strategy }}" \
+            --expect-install-kind "${{ matrix.kind }}" --without-install-dir-on-path
+
+      - name: Run real-CLI discovery tests
+        env:
+          HAGICODE_REAL_CLI_TESTS: '1'
+          HAGICODE_REAL_CLI_PROVIDER: ${{ matrix.provider }}
+          HAGICODE_REAL_CLI_STRATEGY: ${{ matrix.install_strategy }}
+        run: |
+          dotnet test tests/HagiCode.Libs.Core.Tests/HagiCode.Libs.Core.Tests.csproj \
+            --filter "TestCategory=RealCliDiscovery"
