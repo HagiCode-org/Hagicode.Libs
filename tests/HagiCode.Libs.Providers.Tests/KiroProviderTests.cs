@@ -222,56 +222,6 @@ public sealed class KiroProviderTests
     }
 
     [Test]
-    public async Task ExecuteAsync_falls_back_to_prompt_result_when_notification_loop_ends_via_internal_cancellation()
-    {
-        var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(emitNotifications: false, promptStopReason: "fallback"));
-        var messages = new List<CliMessage>();
-
-        await foreach (var message in provider.ExecuteAsync(new KiroOptions(), "hello"))
-        {
-            messages.Add(message);
-        }
-
-        messages.Select(static message => message.Type).ShouldBe(["session.started", "assistant", "terminal.completed"]);
-        messages[1].Content.GetProperty("text").GetString().ShouldBe("pong");
-    }
-
-    [Test]
-    public async Task ExecuteAsync_falls_back_to_multiline_prompt_result_without_flattening_line_breaks()
-    {
-        const string multilineResult = "Paragraph one.\n\n- item one\n- item two\n\n```md\ncode fence\n```";
-        var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(
-            emitNotifications: false,
-            promptStopReason: "fallback",
-            promptOutputText: multilineResult));
-        var messages = new List<CliMessage>();
-
-        await foreach (var message in provider.ExecuteAsync(new KiroOptions(), "hello"))
-        {
-            messages.Add(message);
-        }
-
-        messages.Select(static message => message.Type).ShouldBe(["session.started", "assistant", "terminal.completed"]);
-        messages[1].Content.GetProperty("text").GetString().ShouldBe(multilineResult);
-        messages[2].Content.GetProperty("text").GetString().ShouldBe(multilineResult);
-    }
-
-    [Test]
-    public async Task PingAsync_reports_initialize_details_when_bootstrap_succeeds()
-    {
-        var provider = CreateProvider();
-
-        var result = await provider.PingAsync();
-
-        result.Success.ShouldBeTrue();
-        result.Version.ShouldNotBeNullOrWhiteSpace();
-        result.Version.ShouldContain("kiro");
-        result.Version.ShouldContain("Kiro ACP bootstrap");
-        provider.SessionClient!.InitializeCalls.ShouldBe(1);
-        provider.SessionClient.BootstrapCalls.ShouldBeEmpty();
-    }
-
-    [Test]
     public async Task PingAsync_skips_bootstrap_for_informational_kiro_login_auth_method()
     {
         var provider = CreateProvider(sessionClient: new FakeAcpSessionClient(
@@ -288,18 +238,6 @@ public sealed class KiroProviderTests
 
         result.Success.ShouldBeTrue();
         provider.SessionClient!.BootstrapCalls.ShouldBeEmpty();
-    }
-
-    [Test]
-    public async Task PingAsync_returns_failure_when_executable_is_missing()
-    {
-        var provider = CreateProvider(executableResolver: new MissingExecutableResolver());
-
-        var result = await provider.PingAsync();
-
-        result.Success.ShouldBeFalse();
-        result.ErrorMessage.ShouldNotBeNullOrWhiteSpace();
-        result.ErrorMessage.ShouldContain("not found");
     }
 
     [Test]
@@ -525,12 +463,10 @@ public sealed class KiroProviderTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task PingAsync_can_validate_installed_kiro_cli_when_opted_in()
     {
-        if (!IsRealCliTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealCliTestsEnvironmentVariable);
 
         var resolver = new CliExecutableResolver();
         var executablePath = resolver.ResolveFirstAvailablePath(KiroExecutableCandidates);
@@ -555,6 +491,54 @@ public sealed class KiroProviderTests
         result.ErrorMessage.ShouldBeNullOrWhiteSpace();
     }
 
+    /// <summary>The shared ACP contract row for kiro-cli (see AcpProviderContractTests).</summary>
+    internal static AcpProviderContractRow CreateContractRow() => new KiroAcpContractRow();
+
+    private sealed class KiroAcpContractRow : AcpProviderContractRow
+    {
+        public override string ProviderId => "kiro-cli";
+
+        public override Type ProviderType => typeof(KiroProvider);
+
+        public override string VersionFragment => "kiro";
+
+        public override IReadOnlyList<string> ExtraVersionFragments { get; } = ["Kiro ACP bootstrap"];
+
+        public override string MultilineFallbackText => "Paragraph one.\n\n- item one\n- item two\n\n```md\ncode fence\n```";
+
+        public override async Task<AcpPingObservation> PingWithMissingExecutableAsync()
+        {
+            var provider = CreateProvider(executableResolver: new MissingExecutableResolver());
+            var result = await provider.PingAsync();
+            return new AcpPingObservation(result.Success, result.ErrorMessage, result.Version, 0);
+        }
+
+        public override async Task<AcpPingObservation> PingAsync()
+        {
+            var provider = CreateProvider();
+            var result = await provider.PingAsync();
+            return new AcpPingObservation(result.Success, result.ErrorMessage, result.Version, provider.SessionClient!.InitializeCalls);
+        }
+
+        public override Task<AcpExecutionObservation> ExecuteWithoutNotificationsAsync(string? promptOutputText)
+        {
+            var provider = promptOutputText is null
+                ? CreateProvider(sessionClient: new FakeAcpSessionClient(emitNotifications: false, promptStopReason: "fallback"))
+                : CreateProvider(sessionClient: new FakeAcpSessionClient(emitNotifications: false, promptStopReason: "fallback", promptOutputText: promptOutputText));
+            return AcpExecutionObservation.CollectAsync(provider.ExecuteAsync(new KiroOptions(), "hello"));
+        }
+    }
+
+    [Test]
+    public async Task PingAsync_runs_no_bootstrap_call_after_initialize()
+    {
+        var provider = CreateProvider();
+
+        await provider.PingAsync();
+
+        provider.SessionClient!.BootstrapCalls.ShouldBeEmpty();
+    }
+
     private static TestKiroProvider CreateProvider(
         CliExecutableResolver? executableResolver = null,
         FakeAcpSessionClient? sessionClient = null)
@@ -564,13 +548,6 @@ public sealed class KiroProviderTests
             new CliProcessManager(),
             new StubRuntimeEnvironmentResolver(),
             sessionClient ?? new FakeAcpSessionClient());
-    }
-
-    private static bool IsRealCliTestsEnabled()
-    {
-        var value = Environment.GetEnvironmentVariable(RealCliTestsEnvironmentVariable);
-        return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed class TestKiroProvider(

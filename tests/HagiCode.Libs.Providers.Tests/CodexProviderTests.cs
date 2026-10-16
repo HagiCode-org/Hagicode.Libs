@@ -61,6 +61,7 @@ public sealed class CodexProviderTests
     }
 
     [Test]
+    [Category("CriticalRegression")]
     public async Task CreateSessionAsync_throws_when_executable_cannot_be_resolved()
     {
         var provider = new CodexProvider(new RecordingCliExecutableResolver(null), logger: NullLogger<CodexProvider>.Instance);

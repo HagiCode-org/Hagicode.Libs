@@ -676,12 +676,10 @@ public sealed class OmpProviderTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task ExecuteAsync_real_cli_trip_prompt_returns_assistant_output_or_actionable_failure_when_opted_in()
     {
-        if (!IsRealCliTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealCliTestsEnvironmentVariable);
 
         var resolver = new CliExecutableResolver();
         var executablePath = resolver.ResolveFirstAvailablePath(OmpExecutableCandidates);
@@ -1387,13 +1385,6 @@ public sealed class OmpProviderTests
             default:
                 yield break;
         }
-    }
-
-    private static bool IsRealCliTestsEnabled()
-    {
-        var value = Environment.GetEnvironmentVariable(RealCliTestsEnvironmentVariable);
-        return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed class StubExecutableResolver : CliExecutableResolver

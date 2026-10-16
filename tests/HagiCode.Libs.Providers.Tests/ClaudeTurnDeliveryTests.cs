@@ -39,6 +39,7 @@ public sealed class ClaudeTurnDeliveryTests
     }
 
     [Test]
+    [Category("CriticalRegression")]
     public void Accept_delivers_a_non_turn_message_while_a_prompt_is_awaited()
     {
         var delivery = new ClaudeTurnDelivery();

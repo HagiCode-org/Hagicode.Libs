@@ -357,6 +357,7 @@ public sealed class CopilotProviderTests
     }
 
     [Test]
+    [Category("CriticalRegression")]
     public async Task ExecuteAsync_preserves_whitespace_only_sdk_deltas()
     {
         var provider = CreateProvider(gateway: new StubCopilotSdkGateway(
@@ -598,6 +599,7 @@ public sealed class CopilotProviderTests
     }
 
     [Test]
+    [Category("Slow")]
     public async Task CreateRuntime_falls_back_to_fresh_session_on_non_auth_resume_failure_without_token()
     {
         var gateway = new GitHubCopilotSdkGateway(
@@ -1099,12 +1101,10 @@ public sealed class CopilotProviderTests
     [Test]
     [Category("RealCli")]
     [Category("RealCliInvocationContract")]
+    [Category("External")]
     public async Task ExecuteAsync_real_cli_returns_actionable_authentication_failure_when_credentials_are_absent()
     {
-        if (!IsRealCliTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealCliTestsEnvironmentVariable);
 
         using var sandbox = new RealCliInvocationSandbox();
         await using var provider = new CopilotProvider(new CliExecutableResolver(), new CliProcessManager(), sandbox);
@@ -1126,12 +1126,11 @@ public sealed class CopilotProviderTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task ExecuteAsync_real_cli_can_resume_provider_native_session_when_opted_in()
     {
-        if (!IsRealCliTestsEnabled() || !IsRealCopilotSessionTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealCliTestsEnvironmentVariable);
+        ExternalGate.Require(RealCopilotSessionTestsEnvironmentVariable);
 
         var resolver = new CliExecutableResolver();
         var executablePath = resolver.ResolveFirstAvailablePath(CopilotExecutableCandidates);
@@ -1175,12 +1174,11 @@ public sealed class CopilotProviderTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task ExecuteAsync_real_cli_can_complete_a_read_tool_turn_when_opted_in()
     {
-        if (!IsRealCliTestsEnabled() || !IsRealCopilotSessionTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealCliTestsEnvironmentVariable);
+        ExternalGate.Require(RealCopilotSessionTestsEnvironmentVariable);
 
         var resolver = new CliExecutableResolver();
         var executablePath = resolver.ResolveFirstAvailablePath(CopilotExecutableCandidates);
@@ -1235,20 +1233,6 @@ public sealed class CopilotProviderTests
             processManager ?? new StubCliProcessManager(),
             gateway ?? new StubCopilotSdkGateway([]),
             new StubRuntimeEnvironmentResolver());
-    }
-
-    private static bool IsRealCliTestsEnabled()
-    {
-        var value = Environment.GetEnvironmentVariable(RealCliTestsEnvironmentVariable);
-        return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool IsRealCopilotSessionTestsEnabled()
-    {
-        var value = Environment.GetEnvironmentVariable(RealCopilotSessionTestsEnvironmentVariable);
-        return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
     }
 
     private static async Task<(string AssistantText, string? SessionId)> ReadExecutionResultAsync(

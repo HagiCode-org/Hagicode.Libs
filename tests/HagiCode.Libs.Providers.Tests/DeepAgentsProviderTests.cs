@@ -634,14 +634,12 @@ public sealed class DeepAgentsProviderTests
         terminalMessage.ShouldContain("permission denied");
     }
 
-    [Test, Ignore("DeepAgents real CLI validation is excluded by default because CI does not guarantee a deepagents binary on PATH.")]
+    [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task PingAsync_can_validate_installed_deepagents_cli_when_opted_in()
     {
-        if (!IsRealCliTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealCliTestsEnvironmentVariable);
 
         var descriptor = CliInstallRegistry.Descriptors.Single(static d => d.ProviderName == "DeepAgents");
         var resolver = new CliExecutableResolver();
@@ -671,13 +669,6 @@ public sealed class DeepAgentsProviderTests
             new CliProcessManager(),
             new StubRuntimeEnvironmentResolver(),
             _ => sessionClient ?? new FakeAcpSessionClient());
-    }
-
-    private static bool IsRealCliTestsEnabled()
-    {
-        var value = Environment.GetEnvironmentVariable(RealCliTestsEnvironmentVariable);
-        return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
     }
 
     private static AcpNotification CreateNotification(string sessionId, object update)

@@ -13,6 +13,7 @@ namespace HagiCode.Libs.Providers.Tests;
 // Copilot requests rewrite process-wide environment variables (including PATH), so classes that
 // spawn child processes must not run alongside them.
 [NonParallelizable]
+[Category("Integration")]
 public sealed class OpenCodeProviderTests
 {
     private const string RealCliTestsEnvironmentVariable = "HAGICODE_REAL_CLI_TESTS";
@@ -275,12 +276,10 @@ public sealed class OpenCodeProviderTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task PingAsync_can_probe_the_real_opencode_cli_when_opted_in()
     {
-        if (!IsRealCliTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealCliTestsEnvironmentVariable);
 
         await using var provider = CreateProvider();
         var result = await provider.PingAsync();
@@ -315,13 +314,6 @@ public sealed class OpenCodeProviderTests
         }
 
         return path;
-    }
-
-    private static bool IsRealCliTestsEnabled()
-    {
-        var value = Environment.GetEnvironmentVariable(RealCliTestsEnvironmentVariable);
-        return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed class TestOpenCodeProvider : OpenCodeProvider

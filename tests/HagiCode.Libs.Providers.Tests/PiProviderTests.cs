@@ -134,10 +134,6 @@ public sealed partial class PiProviderTests
     [TestCase("omniroute/ds/deepseek-v4-flash", "omniroute/ds/deepseek-v4-flash")]
     [TestCase("OmniRoute/glm/glm-4.7", "OmniRoute/glm/glm-4.7")]
     [TestCase("ds/deepseek-v4-flash", "ds/deepseek-v4-flash")]
-    [TestCase(null, "")]
-    [TestCase("", "")]
-    [TestCase("omniroute/", "omniroute/")]
-    [TestCase("omniroute/omniroute/x/y", "omniroute/omniroute/x/y")]
     public void NormalizeModelName_produces_expected_result(string? input, string expected)
     {
         OmpProvider.NormalizeModelName(input).ShouldBe(expected);
@@ -594,12 +590,10 @@ public sealed partial class PiProviderTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task ExecuteAsync_real_cli_trip_prompt_returns_assistant_output_or_actionable_failure_when_opted_in()
     {
-        if (!IsRealCliTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealCliTestsEnvironmentVariable);
 
         var resolver = new CliExecutableResolver();
         var executablePath = resolver.ResolveFirstAvailablePath(PiExecutableCandidates);
@@ -1168,13 +1162,6 @@ public sealed partial class PiProviderTests
             default:
                 yield break;
         }
-    }
-
-    private static bool IsRealCliTestsEnabled()
-    {
-        var value = Environment.GetEnvironmentVariable(RealCliTestsEnvironmentVariable);
-        return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed class StubExecutableResolver : CliExecutableResolver

@@ -17,6 +17,7 @@ namespace HagiCode.Libs.Providers.Tests;
 /// working directory is a scratch directory; Reasonix reads its providers from the user's Reasonix home. Verified against
 /// Reasonix v2.41.0. A failure message names the Reasonix behavior that changed.
 /// </summary>
+[Category("Integration")]
 public sealed class ReasonixProviderRealCliUserQuestionTests
 {
     private const string SwitchVariable = "HAGICODE_REAL_CLI_TESTS";
@@ -28,12 +29,10 @@ public sealed class ReasonixProviderRealCliUserQuestionTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task A_question_is_asked_answered_with_a_label_and_the_agent_continues_with_the_answer()
     {
-        if (!IsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(SwitchVariable);
 
         var requests = new List<ReasonixUserInputRequest>();
         var run = await RunAsync(new ReasonixOptions
@@ -60,12 +59,10 @@ public sealed class ReasonixProviderRealCliUserQuestionTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task An_unanswered_question_times_out_and_the_run_ends_as_a_completion_without_a_provider_error()
     {
-        if (!IsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(SwitchVariable);
 
         CancellationToken handlerToken = default;
         var run = await RunAsync(new ReasonixOptions
@@ -136,13 +133,6 @@ public sealed class ReasonixProviderRealCliUserQuestionTests
         var version = await process.StandardOutput.ReadToEndAsync();
         await process.WaitForExitAsync();
         return (version + await standardError).Trim();
-    }
-
-    private static bool IsEnabled()
-    {
-        var value = Environment.GetEnvironmentVariable(SwitchVariable);
-        return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool ProcessIsRunning(int processId)

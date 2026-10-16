@@ -15,6 +15,7 @@ namespace HagiCode.Libs.Providers.Tests;
 /// is checked; otherwise <c>claude</c> is resolved from <c>PATH</c>. The CLI version is written to the test output.
 /// Every run uses a scratch working directory and the <c>haiku</c> model.
 /// </summary>
+[Category("Integration")]
 public sealed class ClaudeCodeProviderRealCliUserQuestionTests
 {
     private const string SwitchVariable = "HAGICODE_LIBS_REAL_CLI_USER_QUESTION";
@@ -23,12 +24,10 @@ public sealed class ClaudeCodeProviderRealCliUserQuestionTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task A_question_is_asked_answered_and_the_turn_continues_with_the_answer()
     {
-        if (!IsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(SwitchVariable);
 
         using var workspace = new ScratchDirectory();
         var executable = ResolveExecutable();
@@ -65,12 +64,10 @@ public sealed class ClaudeCodeProviderRealCliUserQuestionTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task A_tool_permission_request_gets_the_fixed_deny_without_asking_the_handler()
     {
-        if (!IsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(SwitchVariable);
 
         using var workspace = new ScratchDirectory();
         var executable = ResolveExecutable();
@@ -161,13 +158,6 @@ public sealed class ClaudeCodeProviderRealCliUserQuestionTests
         var version = await process.StandardOutput.ReadToEndAsync();
         await process.WaitForExitAsync();
         return version.Trim();
-    }
-
-    private static bool IsEnabled()
-    {
-        var value = Environment.GetEnvironmentVariable(SwitchVariable);
-        return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed class ScratchDirectory : IDisposable

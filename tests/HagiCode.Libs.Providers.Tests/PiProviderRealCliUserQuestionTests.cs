@@ -21,6 +21,7 @@ namespace HagiCode.Libs.Providers.Tests;
 /// settings files, so the runs never touch the user's extensions or sessions: no session is persisted and the working
 /// directory is a scratch directory.
 /// </summary>
+[Category("Integration")]
 public sealed class PiProviderRealCliUserQuestionTests
 {
     private const string SwitchVariable = "HAGICODE_LIBS_REAL_CLI_PI_USER_QUESTION";
@@ -30,12 +31,10 @@ public sealed class PiProviderRealCliUserQuestionTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task A_multi_select_question_is_asked_answered_and_the_agent_receives_the_comma_joined_answer()
     {
-        if (!IsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(SwitchVariable);
 
         using var home = new IsolatedPiHome();
         var requests = new List<PiUserInputRequest>();
@@ -78,12 +77,10 @@ public sealed class PiProviderRealCliUserQuestionTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task A_question_answered_after_more_than_sixty_seconds_continues_the_run()
     {
-        if (!IsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(SwitchVariable);
 
         using var home = new IsolatedPiHome();
         var asked = Stopwatch.StartNew();
@@ -113,12 +110,10 @@ public sealed class PiProviderRealCliUserQuestionTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task Cancelling_while_a_question_is_pending_ends_the_run_and_leaves_no_pi_process()
     {
-        if (!IsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(SwitchVariable);
 
         using var home = new IsolatedPiHome();
         var handlerStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -169,12 +164,10 @@ public sealed class PiProviderRealCliUserQuestionTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task A_user_extension_in_the_pi_home_still_works_its_dialogs_are_cancelled_and_questions_are_still_asked()
     {
-        if (!IsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(SwitchVariable);
 
         using var home = new IsolatedPiHome();
         home.WriteExtension("user-dialogs.ts", UserDialogsExtension);
@@ -207,12 +200,10 @@ public sealed class PiProviderRealCliUserQuestionTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task A_user_extension_that_registers_the_question_tool_makes_the_run_fall_back_to_print_mode()
     {
-        if (!IsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(SwitchVariable);
 
         using var home = new IsolatedPiHome();
         home.WriteExtension("duplicate-question-tool.ts", DuplicateQuestionToolExtension);
@@ -240,12 +231,10 @@ public sealed class PiProviderRealCliUserQuestionTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task A_large_question_payload_and_a_large_answer_travel_through_the_dialog()
     {
-        if (!IsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(SwitchVariable);
 
         const int PayloadChars = 400_000;
         const int AnswerChars = 200_000;
@@ -348,13 +337,6 @@ public sealed class PiProviderRealCliUserQuestionTests
         var version = await process.StandardOutput.ReadToEndAsync();
         await process.WaitForExitAsync();
         return (version + await standardError).Trim();
-    }
-
-    private static bool IsEnabled()
-    {
-        var value = Environment.GetEnvironmentVariable(SwitchVariable);
-        return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool PiProcessIsRunning(int processId)

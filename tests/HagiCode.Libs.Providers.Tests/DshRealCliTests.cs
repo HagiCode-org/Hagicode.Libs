@@ -19,12 +19,10 @@ public sealed class DshRealCliTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task PingAsync_real_cli_validates_dsh_identity_when_opted_in()
     {
-        if (!IsRealCliTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealCliTestsEnvironmentVariable);
 
         await using var provider = new DshProvider(new CliExecutableResolver(), new CliProcessManager());
 
@@ -36,12 +34,10 @@ public sealed class DshRealCliTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task ExecuteAsync_real_cli_prompt_returns_assistant_output_or_actionable_failure_when_opted_in()
     {
-        if (!IsRealCliTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealCliTestsEnvironmentVariable);
 
         var resolver = new CliExecutableResolver();
         if (resolver.ResolveFirstAvailablePath([DshExecutableCandidate, "dsh-cli"]) is null)
@@ -94,12 +90,10 @@ public sealed class DshRealCliTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task ExecuteAsync_real_cli_resumed_session_recalls_prior_secret_when_opted_in()
     {
-        if (!IsRealCliTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealCliTestsEnvironmentVariable);
 
         var resolver = new CliExecutableResolver();
         RequireDshOnPath(resolver);
@@ -138,12 +132,10 @@ public sealed class DshRealCliTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task ExecuteAsync_real_cli_fresh_session_does_not_recall_prior_secret_when_opted_in()
     {
-        if (!IsRealCliTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealCliTestsEnvironmentVariable);
 
         var resolver = new CliExecutableResolver();
         RequireDshOnPath(resolver);
@@ -181,12 +173,10 @@ public sealed class DshRealCliTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task ExecuteAsync_real_cli_tool_call_streams_started_and_completed_updates_when_opted_in()
     {
-        if (!IsRealCliTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealCliTestsEnvironmentVariable);
 
         var resolver = new CliExecutableResolver();
         RequireDshOnPath(resolver);
@@ -312,10 +302,4 @@ public sealed class DshRealCliTests
         return string.Join(Environment.NewLine, messages.Select(static message => $"{message.Type}: {message.Content.GetRawText()}"));
     }
 
-    private static bool IsRealCliTestsEnabled()
-    {
-        var value = Environment.GetEnvironmentVariable(RealCliTestsEnvironmentVariable);
-        return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
-    }
 }

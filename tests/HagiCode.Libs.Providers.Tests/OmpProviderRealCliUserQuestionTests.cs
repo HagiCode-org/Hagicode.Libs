@@ -19,6 +19,7 @@ namespace HagiCode.Libs.Providers.Tests;
 /// (<c>PI_CODING_AGENT_DIR</c>, or <c>~/.omp/agent</c>), so the runs never touch the user's extensions, sessions or logs: no
 /// session is persisted and the working directory is a scratch directory. Verified against omp 18.10.4.
 /// </summary>
+[Category("Integration")]
 public sealed class OmpProviderRealCliUserQuestionTests
 {
     private const string SwitchVariable = "HAGICODE_LIBS_REAL_CLI_OMP_USER_QUESTION";
@@ -28,12 +29,10 @@ public sealed class OmpProviderRealCliUserQuestionTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task Two_questions_one_of_them_multi_select_are_asked_answered_and_the_agent_receives_the_answers()
     {
-        if (!IsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(SwitchVariable);
 
         using var home = new IsolatedOmpHome();
         var requests = new List<OmpUserInputRequest>();
@@ -77,12 +76,10 @@ public sealed class OmpProviderRealCliUserQuestionTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task A_question_answered_after_more_than_sixty_seconds_continues_the_run()
     {
-        if (!IsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(SwitchVariable);
 
         using var home = new IsolatedOmpHome();
         var asked = Stopwatch.StartNew();
@@ -112,12 +109,10 @@ public sealed class OmpProviderRealCliUserQuestionTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task Single_multi_and_free_text_answers_and_a_label_with_a_comma_reach_the_model_without_a_tool_error()
     {
-        if (!IsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(SwitchVariable);
 
         using var home = new IsolatedOmpHome();
         var requests = new List<OmpUserInputRequest>();
@@ -152,12 +147,10 @@ public sealed class OmpProviderRealCliUserQuestionTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task A_declined_question_ends_the_run_as_aborted_without_an_error()
     {
-        if (!IsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(SwitchVariable);
 
         using var home = new IsolatedOmpHome();
         var handlerCalls = 0;
@@ -184,12 +177,10 @@ public sealed class OmpProviderRealCliUserQuestionTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task Cancelling_while_a_question_is_pending_ends_the_run_and_leaves_no_omp_process()
     {
-        if (!IsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(SwitchVariable);
 
         using var home = new IsolatedOmpHome();
         var handlerStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -240,12 +231,10 @@ public sealed class OmpProviderRealCliUserQuestionTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task A_user_extension_in_the_omp_home_still_works_its_dialogs_are_cancelled_and_questions_are_still_asked()
     {
-        if (!IsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(SwitchVariable);
 
         using var home = new IsolatedOmpHome();
         home.WriteExtension("user-dialogs.ts", UserDialogsExtension);
@@ -341,13 +330,6 @@ public sealed class OmpProviderRealCliUserQuestionTests
         var version = await process.StandardOutput.ReadToEndAsync();
         await process.WaitForExitAsync();
         return (version + await standardError).Trim();
-    }
-
-    private static bool IsEnabled()
-    {
-        var value = Environment.GetEnvironmentVariable(SwitchVariable);
-        return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool ProcessIsRunning(int processId)

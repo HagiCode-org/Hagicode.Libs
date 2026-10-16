@@ -272,12 +272,10 @@ public sealed class ReasonixProviderTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task PingAsync_can_validate_installed_reasonix_cli_when_opted_in()
     {
-        if (!IsRealCliTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealCliTestsEnvironmentVariable);
 
         var resolver = new CliExecutableResolver();
         var executablePath = resolver.ResolveFirstAvailablePath(ReasonixExecutableCandidates);
@@ -300,12 +298,10 @@ public sealed class ReasonixProviderTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task ExecuteAsync_can_stream_real_reasonix_cli_when_opted_in()
     {
-        if (!IsRealCliTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealCliTestsEnvironmentVariable);
         var modelRef = GetRealCliModelRef();
         if (modelRef is null)
         {
@@ -353,12 +349,10 @@ public sealed class ReasonixProviderTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task ExecuteAsync_real_resumed_session_does_not_replay_previous_turn_output_when_opted_in()
     {
-        if (!IsRealCliTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealCliTestsEnvironmentVariable);
         var modelRef = GetRealCliModelRef();
         if (modelRef is null)
         {
@@ -768,12 +762,10 @@ public sealed class ReasonixProviderTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task ExecuteAsync_real_resume_skips_replay_and_keeps_the_resumed_model_when_opted_in()
     {
-        if (!IsRealCliTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealCliTestsEnvironmentVariable);
 
         var modelRef = GetRealCliModelRef();
         if (modelRef is null)
@@ -832,12 +824,10 @@ public sealed class ReasonixProviderTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task ExecuteAsync_real_unknown_model_yields_a_readable_terminal_failure_when_opted_in()
     {
-        if (!IsRealCliTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealCliTestsEnvironmentVariable);
 
         var resolver = new CliExecutableResolver();
         using var workspace = new TemporaryDirectory();
@@ -861,12 +851,10 @@ public sealed class ReasonixProviderTests
 
     [Test]
     [Category("RealCli")]
+    [Category("External")]
     public async Task ExecuteAsync_real_enable_yolo_sets_tool_approval_and_runs_without_permission_prompts_when_opted_in()
     {
-        if (!IsRealCliTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealCliTestsEnvironmentVariable);
 
         var modelRef = GetRealCliModelRef();
         if (modelRef is null)
@@ -966,13 +954,6 @@ public sealed class ReasonixProviderTests
         public Task DisconnectAsync(CancellationToken cancellationToken = default) => inner.DisconnectAsync(cancellationToken);
 
         public ValueTask DisposeAsync() => inner.DisposeAsync();
-    }
-
-    private static bool IsRealCliTestsEnabled()
-    {
-        var value = Environment.GetEnvironmentVariable(RealCliTestsEnvironmentVariable);
-        return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed class TestReasonixProvider(

@@ -37,6 +37,7 @@ public sealed class DshAcpMessageMapperTests
     }
 
     [Test]
+    [Category("CriticalRegression")]
     public void NormalizeNotification_maps_error_update_to_terminal_failure()
     {
         var messages = DshAcpMessageMapper.NormalizeNotification(SessionUpdate(new

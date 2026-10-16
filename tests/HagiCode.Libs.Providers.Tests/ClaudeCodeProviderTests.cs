@@ -13,6 +13,7 @@ using HagiCode.Libs.Providers.ClaudeCode;
 
 namespace HagiCode.Libs.Providers.Tests;
 
+[Category("Integration")]
 public sealed partial class ClaudeCodeProviderTests
 {
     private const string RealCliTestsEnvironmentVariable = "HAGICODE_REAL_CLI_TESTS";
@@ -2090,12 +2091,10 @@ public sealed partial class ClaudeCodeProviderTests
     [Test]
     [Category("RealCli")]
     [Category("RealCliInvocationContract")]
+    [Category("External")]
     public async Task ExecuteAsync_real_cli_returns_actionable_authentication_failure_when_credentials_are_absent()
     {
-        if (!IsRealCliTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealCliTestsEnvironmentVariable);
 
         using var sandbox = new RealCliInvocationSandbox();
         await using var provider = new ClaudeCodeProvider(new CliExecutableResolver(), new CliProcessManager(), sandbox);
@@ -2117,12 +2116,10 @@ public sealed partial class ClaudeCodeProviderTests
     [Test]
     [Category("RealCli")]
     [Category("RealCliInvocationContract")]
+    [Category("External")]
     public async Task ExecuteAsync_real_cli_accepts_effort_flag_without_syntax_error()
     {
-        if (!IsRealCliTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealCliTestsEnvironmentVariable);
 
         using var sandbox = new RealCliInvocationSandbox();
         await using var provider = new ClaudeCodeProvider(new CliExecutableResolver(), new CliProcessManager(), sandbox);
@@ -2145,12 +2142,10 @@ public sealed partial class ClaudeCodeProviderTests
     [Test]
     [Category("RealCli")]
     [Category("RealCliInvocationContract")]
+    [Category("External")]
     public async Task ExecuteAsync_real_cli_can_resolve_from_hagicode_agent_cli_path_when_path_does_not_include_cli()
     {
-        if (!IsRealCliTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealCliTestsEnvironmentVariable);
 
         var executableResolver = new CliExecutableResolver();
         var realClaudePath = executableResolver.ResolveFirstAvailablePath(ClaudeExecutableCandidates);
@@ -2194,10 +2189,11 @@ public sealed partial class ClaudeCodeProviderTests
     [Category("RealCli")]
     [Category("RealCliInvocationContract")]
     [Category("RealCliWindowsZhCnWhitespaceShim")]
+    [Category("External")]
     public async Task ExecuteAsync_real_cli_windows_zh_cn_whitespace_cmd_shim_surfaces_actionable_failure_without_mojibake()
     {
-        if (!IsRealCliTestsEnabled()
-            || !OperatingSystem.IsWindows()
+        ExternalGate.Require(RealCliTestsEnvironmentVariable);
+        if (!OperatingSystem.IsWindows()
             || !string.Equals(Environment.GetEnvironmentVariable(WindowsTestLocaleEnvironmentVariable), "zh-CN", StringComparison.OrdinalIgnoreCase))
         {
             return;
@@ -2988,12 +2984,5 @@ public sealed partial class ClaudeCodeProviderTests
 
             return ValueTask.CompletedTask;
         }
-    }
-
-    private static bool IsRealCliTestsEnabled()
-    {
-        var value = Environment.GetEnvironmentVariable(RealCliTestsEnvironmentVariable);
-        return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
     }
 }
