@@ -29,6 +29,7 @@ public sealed class FilePromptCatalogTests
     }
 
     [Test]
+    [Category("CriticalRegression")]
     public void Resolve_falls_back_to_default_locale_when_exact_match_is_missing()
     {
         using var workspace = new PromptTestWorkspace();
