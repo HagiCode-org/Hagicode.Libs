@@ -1,7 +1,10 @@
 # HagiCode.Libs.Imaging
 
-In-process AVIF conversion for .NET hosts. It converts PNG, JPEG, WebP, GIF (first frame) and AVIF sources to still
-AVIF images using native libvips libraries bundled in the package.
+In-process image work for .NET hosts, using native libvips libraries bundled in the package:
+
+- AVIF conversion (`IAvifConverter`): PNG, JPEG, WebP and GIF (first frame) sources to still AVIF images.
+- Model image preparation (`IModelImagePreparer`): turns an uploaded image into one a model accepts (PNG, JPEG, GIF or
+  WEBP within 5 MiB and 8000 pixels per side), in memory. See [Model image preparation](#model-image-preparation).
 
 - No `ffmpeg`, `avifenc` or other command-line tool is needed, or looked up on `PATH`.
 - The package never starts a child process.
@@ -46,6 +49,64 @@ Check the runtime at start-up if you need a health signal:
 var status = AvifRuntime.Probe(); // cached; never throws
 if (!status.IsAvailable) { /* log status.UnavailableReason and fall back */ }
 ```
+
+## Model image preparation
+
+`IModelImagePreparer` prepares an image for a model that accepts only PNG, JPEG, GIF or WEBP within a size and pixel
+limit. The stored file is never changed, and nothing is written to disk.
+
+```csharp
+services.AddHagiCodeImaging(); // registers IAvifConverter and IModelImagePreparer as singletons
+
+var prepared = await preparer.PrepareAsync(path, ModelImageLimits.Default, cancellationToken);
+if (prepared.IsUsable)
+{
+    // prepared.MediaType and prepared.Bytes (ReadOnlyMemory<byte>) go to the model.
+}
+else
+{
+    // prepared.Reason says why; the image is skipped. Image bytes are never in Reason or ToString.
+}
+```
+
+Format is decided from the content, never from the file name. Each image gets one outcome:
+
+| Outcome | What happened |
+| --- | --- |
+| `PassedThrough` | A PNG, JPEG, GIF or WEBP within the limits. The bytes are returned unchanged. A GIF keeps its frames. |
+| `Rasterized` | An SVG was rendered to PNG from its buffer. Its longest edge is at most 2048 pixels. |
+| `Reduced` | The image was downscaled and re-encoded. JPEG for opaque images (quality 85, 75, 65, then 55), PNG for images with alpha. An animated GIF becomes its first frame. EXIF orientation is applied, so the result is upright. |
+| `NotPreparable` | The image cannot be sent. Bytes are empty and `Reason` gives a short phrase. |
+
+`ModelImageLimits` (per call, defaults are the Claude limits):
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `MaxBytes` | 5 MiB | Largest encoded size of a prepared image. |
+| `MaxDimension` | 8000 | Largest width and height of a prepared image, in pixels. |
+| `MaxDecodePixels` | 64,000,000 | Largest width times height that may be decoded. Checked from the header first, so an oversized declared size is refused before any pixel is decoded. |
+| `MaxSourceBytes` | 64 MiB | Largest source file read into memory. |
+
+Reduction makes at most 6 encode attempts. If none fits, the result is `NotPreparable`. The preparer never throws for bad
+input: a corrupt, truncated, unsupported or malformed image is a `NotPreparable` result. Only cancellation is thrown, as
+`OperationCanceledException`.
+
+SVG handling is bounded. The document is loaded from its buffer with no base path, so relative references cannot
+resolve. Entity declarations (`<!ENTITY`) are refused before rendering. A declared size is never rendered at full size:
+the render scale keeps the longest edge within 2048 pixels.
+
+### SVG and untrusted-operation blocking
+
+Probe result (task 1.4a, libvips bundled in NetVips.Native 8.18.7, Linux x64):
+
+- With `NetVips.BlockUntrusted = true`, libvips refuses the SVG loader for every input (`unable to call svgload_buffer`).
+  `AvifConverter` sets that flag for the process by default (`ConfigureProcessWideEngineSettings`). While the flag is on,
+  the preparer reports an SVG as `NotPreparable` with reason "could not be rasterized".
+- With the flag off, SVG rasterization works. A `file://` reference, an absolute-path reference and an `http://`
+  reference are not fetched. A local canary image was not drawn, and no HTTP request reached a local listener.
+
+The blocking flag is process-wide and the converter does not use generic or untrusted loaders, so the flag adds no
+protection to AVIF conversion. Choosing between the two is an open decision; see the change design notes.
 
 ## Options
 
@@ -104,6 +165,11 @@ Cancellation ends as `OperationCanceledException`, not as an `AvifConversionExce
 The Linux build needs the standard C++ runtime (`libstdc++`) that glibc distributions provide. Other platforms, including
 `linux-musl-x64`, `linux-arm64` and `win-arm64`, report `NativeRuntimeUnavailable`. Signature detection (`AvifFormat.IsAvif`)
 keeps working on every platform.
+
+Model image preparation on an unsupported platform, or when `AvifRuntime.Probe()` is unavailable: an image within the
+limits still passes through unchanged (its size and pixels are read from the header in managed code, and no decode is
+run). Anything that needs conversion (over a limit, SVG, or a dimension above the limit) is `NotPreparable` with a reason
+that names the runtime.
 
 ## Limits and behavior
 
