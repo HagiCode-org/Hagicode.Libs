@@ -8,6 +8,22 @@
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
   </PropertyGroup>
 
+  <!--
+    Run profiles (tasks 2.1 and 2.4). Default: regression. An explicit test filter passed on the command line replaces these.
+    critical: CriticalRegression only. unit: no Integration, External or Slow. regression: no External or Slow. full: no filter.
+  -->
+  <PropertyGroup>
+    <TestProfile Condition="'$(TestProfile)' == ''">regression</TestProfile>
+    <VSTestTestCaseFilter Condition="'$(VSTestTestCaseFilter)' == '' and '$(TestProfile)' == 'critical'">TestCategory=CriticalRegression</VSTestTestCaseFilter>
+    <VSTestTestCaseFilter Condition="'$(VSTestTestCaseFilter)' == '' and '$(TestProfile)' == 'unit'">TestCategory!=Integration&amp;TestCategory!=External&amp;TestCategory!=Slow</VSTestTestCaseFilter>
+    <VSTestTestCaseFilter Condition="'$(VSTestTestCaseFilter)' == '' and '$(TestProfile)' == 'regression'">TestCategory!=External&amp;TestCategory!=Slow</VSTestTestCaseFilter>
+  </PropertyGroup>
+
+  <Target Name="ValidateTestProfile" BeforeTargets="Build">
+    <Error Condition="'$(TestProfile)' != 'critical' and '$(TestProfile)' != 'unit' and '$(TestProfile)' != 'regression' and '$(TestProfile)' != 'full'"
+           Text="Unknown TestProfile '$(TestProfile)'. Use critical, unit, regression or full." />
+  </Target>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="NUnit" />
@@ -22,5 +38,11 @@
   <ItemGroup>
     <Using Include="NUnit.Framework" />
     <Using Include="Shouldly" />
+    <Using Include="HagiCode.Libs.Tests.Shared" />
+  </ItemGroup>
+
+  <!-- Shared tier infrastructure is compiled into every Libs test project (tests/Shared). -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)Shared\*.cs" Link="Shared\%(Filename)%(Extension)" />
   </ItemGroup>
 </Project>
