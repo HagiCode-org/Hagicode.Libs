@@ -9,6 +9,7 @@ namespace HagiCode.Libs.Skills.Tests;
 public sealed class DependencyInjectionTests
 {
     [Test]
+    [Category("CriticalRegression")]
     public async Task AddHagiCodeSkills_registers_default_online_api_services()
     {
         var services = new ServiceCollection();

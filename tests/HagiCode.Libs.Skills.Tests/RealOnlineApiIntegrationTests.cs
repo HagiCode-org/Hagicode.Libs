@@ -12,12 +12,10 @@ public sealed class RealOnlineApiIntegrationTests
 
     [Test]
     [Category("RealOnlineApi")]
+    [Category("External")]
     public async Task SearchAsync_can_query_the_real_search_api_when_opted_in()
     {
-        if (!IsRealOnlineApiTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealOnlineApiTestsEnvironmentVariable);
 
         using var serviceProvider = CreateServiceProvider();
         var client = serviceProvider.GetRequiredService<IOnlineApiClient>();
@@ -36,12 +34,10 @@ public sealed class RealOnlineApiIntegrationTests
 
     [Test]
     [Category("RealOnlineApi")]
+    [Category("External")]
     public async Task DiscoverWellKnownAsync_can_fallback_to_the_real_root_index_when_opted_in()
     {
-        if (!IsRealOnlineApiTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealOnlineApiTestsEnvironmentVariable);
 
         using var serviceProvider = CreateServiceProvider();
         var client = serviceProvider.GetRequiredService<IOnlineApiClient>();
@@ -59,12 +55,10 @@ public sealed class RealOnlineApiIntegrationTests
 
     [Test]
     [Category("RealOnlineApi")]
+    [Category("External")]
     public async Task GetAuditMetadataAsync_can_call_the_real_audit_api_when_opted_in()
     {
-        if (!IsRealOnlineApiTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealOnlineApiTestsEnvironmentVariable);
 
         using var serviceProvider = CreateServiceProvider();
         var client = serviceProvider.GetRequiredService<IOnlineApiClient>();
@@ -81,12 +75,10 @@ public sealed class RealOnlineApiIntegrationTests
 
     [Test]
     [Category("RealOnlineApi")]
+    [Category("External")]
     public async Task TrackTelemetryAsync_can_reach_the_real_telemetry_endpoint_when_opted_in()
     {
-        if (!IsRealOnlineApiTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealOnlineApiTestsEnvironmentVariable);
 
         using var serviceProvider = CreateServiceProvider();
         var client = serviceProvider.GetRequiredService<IOnlineApiClient>();
@@ -102,12 +94,10 @@ public sealed class RealOnlineApiIntegrationTests
 
     [Test]
     [Category("RealOnlineApi")]
+    [Category("External")]
     public async Task GitHub_operations_can_query_the_real_github_api_when_opted_in()
     {
-        if (!IsRealOnlineApiTestsEnabled())
-        {
-            return;
-        }
+        ExternalGate.Require(RealOnlineApiTestsEnvironmentVariable);
 
         using var serviceProvider = CreateServiceProvider();
         var client = serviceProvider.GetRequiredService<IOnlineApiClient>();
@@ -128,13 +118,6 @@ public sealed class RealOnlineApiIntegrationTests
         repository.Private.ShouldBeFalse();
         tree.Sha.ShouldNotBeNullOrWhiteSpace();
         tree.Tree.Count.ShouldBeGreaterThan(0);
-    }
-
-    private static bool IsRealOnlineApiTestsEnabled()
-    {
-        var value = Environment.GetEnvironmentVariable(RealOnlineApiTestsEnvironmentVariable);
-        return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
     }
 
     private static ServiceProvider CreateServiceProvider()
