@@ -31,6 +31,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/HagiCode.Libs.ConsoleTesting.Tests/HagiCode.Libs.ConsoleTesting.Tests.csproj" />
+    <Project Path="tests/HagiCode.Libs.CiSetup.Tests/HagiCode.Libs.CiSetup.Tests.csproj" />
     <Project Path="tests/HagiCode.Libs.Core.Tests/HagiCode.Libs.Core.Tests.csproj" />
     <Project Path="tests/HagiCode.Libs.Imaging.Tests/HagiCode.Libs.Imaging.Tests.csproj" />
     <Project Path="tests/HagiCode.Libs.Prompts.Tests/HagiCode.Libs.Prompts.Tests.csproj" />

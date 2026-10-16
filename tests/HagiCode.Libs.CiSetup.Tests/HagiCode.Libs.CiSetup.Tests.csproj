@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\HagiCode.Libs.CiSetup.Console\HagiCode.Libs.CiSetup.Console.csproj" />
+  </ItemGroup>
+</Project>
