@@ -602,16 +602,21 @@ If you omit `Model`, the provider forwards no model override so qodercli can use
 
 ## Cross-platform CLI discovery validation
 
-`repos/Hagicode.Libs/.github/workflows/cli-discovery-cross-platform.yml` runs real CLI discovery on `ubuntu-latest`, `macos-latest`, and `windows-latest`. The workflow uses `CiSetup.Console` to install all publicly available CLI tools and verify their availability on `PATH`, then runs provider-specific discovery tests for the installed CLIs.
+Two GitHub Actions workflows cover CLI discovery. They are kept separate on purpose: the first checks invocation errors, the second checks discovery.
+
+| Workflow | What it runs | Lanes |
+|----------|--------------|-------|
+| `.github/workflows/cli-discovery-cross-platform.yml` | `TestCategory=RealCliInvocationContract`, the invocation error contracts of the installed CLIs. It installs with `CiSetup.Console --install` (npm). | 4 (Linux, macOS, Windows, and a Windows zh-CN lane) |
+| `.github/workflows/agent-cli-discovery-integration.yml` | Installs each CLI through one install strategy, checks discovery with the install directory on `PATH` and, when the strategy has a well-known location, with it removed, then runs `TestCategory=RealCliDiscovery`. Runs on path-filtered push and pull request, on `workflow_dispatch`, and weekly. | 14 |
 
 ### CLI install registry
 
-All CLI metadata is centralized in `HagiCode.Libs.Core.Discovery.CliInstallRegistry`. Each `CliInstallDescriptor` records the provider name, npm package, pinned version, executable candidates, and whether the CLI is publicly installable. This registry is the single source of truth — updating it automatically affects CI install/verify behavior.
+All CLI metadata is centralized in `HagiCode.Libs.Core.Discovery.CliInstallRegistry`. Each `CliInstallDescriptor` records the provider name, npm package, pinned version, executable candidates, and whether the CLI is publicly installable. Descriptors may also declare version argument sets and install strategies. This registry is the single source of truth: CI install and verify, discovery, and this table all read it. A repository test (`CliInstallRegistryTests`) fails when a package or pinned version in this table differs from the registry.
 
 | Provider | npm Package | Pinned Version | CI-Covered |
 |----------|-------------|----------------|------------|
-| Claude Code | `@anthropic-ai/claude-code` | 2.1.79 | Yes |
-| Copilot | `@github/copilot` | 1.0.10 | Yes |
+| Claude Code | `@anthropic-ai/claude-code` | 2.1.168 | Yes |
+| Copilot | `@github/copilot` | 1.0.60 | Yes |
 | Codex | `@openai/codex` | 0.115.0 | Yes |
 | CodeBuddy | (private) | — | No |
 | Gemini | (local / explicit validation) | — | No |
@@ -624,15 +629,47 @@ All CLI metadata is centralized in `HagiCode.Libs.Core.Discovery.CliInstallRegis
 
 CLIs with `IsPubliclyInstallable = true` are automatically installed and tested in CI. Today that public set is Claude Code, Copilot, and Codex. CLIs marked as not publicly installable (CodeBuddy, Gemini, Hermes, Kimi, Pi, QoderCLI) are skipped during CI setup and require local installation for validation.
 
+### Install strategies (Claude Code)
+
+Discovery reads each strategy's operating systems, well-known directories, and pin support from the registry. `~` expands to `HOME` on Unix and to `USERPROFILE` on Windows. `%NAME%` expands from the supplied environment. A directory whose variable is missing is skipped.
+
+| Strategy (`--strategy`) | Operating systems | Well-known directories | Can pin a version | Lane status |
+|-------------------------|-------------------|------------------------|-------------------|-------------|
+| `npm` | Linux, macOS, Windows | `%APPDATA%\npm` (Windows only; Unix finds npm's bin on `PATH`) | Yes (`@<version>`) | Blocking |
+| `native` (`NativeInstaller`) | Linux, macOS, Windows | `~/.local/bin` (the launcher may be a symlink into `~/.local/share/claude/versions`) | Yes (`bash -s <version>`; PowerShell scriptblock argument) | Non-blocking until green |
+| `homebrew` (`Homebrew`) | macOS | `/opt/homebrew/bin`, `/usr/local/bin` | No (cask `claude-code`) | Non-blocking |
+| `winget` (`WinGet`) | Windows | `%LOCALAPPDATA%\Microsoft\WinGet\Links` | Yes (`--version`) | Non-blocking |
+| legacy (`LegacyLocal`) | Linux, macOS, Windows | `~/.claude/local` | No | Not in CI (fake-directory unit tests only) |
+
+Copilot and Codex declare an `npm` strategy and their pinned version. Their lanes are blocking.
+
+Discovery also reports the install kind (`Npm`, `NativeInstaller`, `Homebrew`, `WinGet`, `LegacyLocal`, or `Unknown`). This is best-effort attribution from the strategy directories, the symlink target, and a `node_modules/<package>` directory. It is reported separately from the source (`Configured`, `AgentCliPath`, `Path`, or `WellKnownLocation`).
+
+### Lane status and promotion
+
+A lane is blocking only after its installer has passed on every operating system it targets. The blocking lanes today are the `npm` lanes for Claude Code, Copilot, and Codex on all three operating systems. The native, Homebrew, and WinGet lanes are non-blocking. Their workflow jobs carry `continue-on-error`, so a failure still appears in that lane's status and logs. Each lane's status and the installer contracts it depends on are recorded in `docs/agent-cli-discovery-guide.md`. Promote a lane by changing `blocking` in the workflow matrix and updating that document in the same change.
+
 ### Local reproduction
 
-To reproduce the same real-CLI validation locally from the `repos/Hagicode.Libs` directory:
+Run these from the `repos/Hagicode.Libs` directory.
 
 ```bash
-# Install and verify all publicly available CLIs
+# Install all publicly available CLIs through npm (the default), then check that they are on PATH
 dotnet run --project src/HagiCode.Libs.CiSetup.Console -- --install --verify
 
-# Run CI-targeted discovery tests (Claude Code + Copilot + Codex)
+# Install one provider through one strategy. npm is the default strategy.
+dotnet run --project src/HagiCode.Libs.CiSetup.Console -- --install --provider ClaudeCode --strategy native
+
+# Verify discovery: prints the path, source, install kind, and version; exits 3 (not found), 4 (version unavailable), 5 (version mismatch), or 6 (install kind mismatch)
+dotnet run --project src/HagiCode.Libs.CiSetup.Console -- --verify-discovery --provider ClaudeCode --strategy native --expect-install-kind NativeInstaller
+
+# Verify that the well-known location alone resolves the CLI (removes the strategy directory from PATH)
+dotnet run --project src/HagiCode.Libs.CiSetup.Console -- --verify-discovery --provider ClaudeCode --strategy native --without-install-dir-on-path
+
+# Run the real-install discovery tests. Without HAGICODE_REAL_CLI_TESTS=1 they skip and start no CLI.
+HAGICODE_REAL_CLI_TESTS=1 HAGICODE_REAL_CLI_PROVIDER=ClaudeCode HAGICODE_REAL_CLI_STRATEGY=native dotnet test tests/HagiCode.Libs.Core.Tests/HagiCode.Libs.Core.Tests.csproj --filter "TestCategory=RealCliDiscovery"
+
+# Run the provider-level real-CLI validation (Claude Code + Copilot + Codex)
 HAGICODE_REAL_CLI_TESTS=1 dotnet test tests/HagiCode.Libs.Providers.Tests/HagiCode.Libs.Providers.Tests.csproj --filter "FullyQualifiedName~ClaudeCodeProviderTests|FullyQualifiedName~CopilotProviderTests|FullyQualifiedName~CodexProviderTests" --logger "console;verbosity=normal"
 ```
 

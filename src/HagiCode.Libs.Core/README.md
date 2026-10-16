@@ -4,7 +4,7 @@
 
 ## What is included
 
-- CLI executable discovery for local tools and custom paths
+- CLI executable discovery for local tools and custom paths, with structured results, version verification, and install-route attribution
 - Runtime environment resolution, including the macOS shell-aware fallback
 - Process management helpers for launching and monitoring CLI subprocesses
 - A shared CLI execution facade with buffered and streaming result envelopes
@@ -61,6 +61,23 @@ Console.WriteLine(result.StandardOutput);
 For long-running or interactive commands, call `ExecuteStreamingAsync()` to receive stdout and stderr events followed by a terminal `CliExecutionResult` envelope.
 
 Redirected stdin, stdout, and stderr default to UTF-8 unless the caller explicitly overrides `CliExecutionRequest.InputEncoding` or `OutputEncoding`. This is the shared contract used by providers such as Codex so Windows prompt delivery keeps non-ASCII input valid without provider-local code-page workarounds.
+
+## Structured discovery
+
+`CliDiscoveryService` returns one typed result per provider: the resolved path, how it was found (`Source`), a best-effort install kind, the verified version, and any shadowed installs. It starts the CLI only to read its version, and only when `VerifyVersion` is true (the default). Set `VerifyVersion` to `false` to resolve the path without starting anything.
+
+```csharp
+using HagiCode.Libs.Core.Discovery;
+using HagiCode.Libs.Core.Process;
+
+var service = new CliDiscoveryService(new CliExecutableResolver(), new CliProcessManager());
+var descriptor = CliInstallRegistry.Descriptors.Single(d => d.ProviderName == "ClaudeCode");
+var result = await service.DiscoverAsync(descriptor);
+
+Console.WriteLine(result.IsFound ? $"{result.ResolvedPath} {result.Version}" : "Claude Code not found.");
+```
+
+The [discovery guide](https://github.com/HagiCode-org/Hagicode.Libs/blob/main/docs/agent-cli-discovery-guide.md) covers the resolution order, install-kind attribution, and the mapping from the backend's discovery symbols.
 
 ## Adoption boundaries
 

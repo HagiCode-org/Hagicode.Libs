@@ -42,7 +42,7 @@ Categories are NUnit `[Category]` attributes, so the filter property is `TestCat
 | `External` | The test needs a real CLI or online API. It reports Skipped with a reason that names its switch unless the switch is set. |
 | `Slow` | The test takes more than 5 seconds in a `full` run. |
 
-Existing categories stay and keep their meaning: `RealCli`, `RealOnlineApi`, `RealCliInvocationContract`, `RealCliWindowsZhCnWhitespaceShim` and `WindowsOnly`. Every `RealCli` and `RealOnlineApi` test also carries `External`.
+Existing categories stay and keep their meaning: `RealCli`, `RealOnlineApi`, `RealCliInvocationContract`, `RealCliWindowsZhCnWhitespaceShim`, `RealCliDiscovery` (real-install discovery, `HAGICODE_REAL_CLI_TESTS`, see `docs/agent-cli-discovery-guide.md`) and `WindowsOnly`. Every `RealCli` and `RealOnlineApi` test also carries `External`.
 
 ## Switch variables
 
@@ -50,7 +50,7 @@ A switch is on when its value is `1` or `true` (case-insensitive).
 
 | Variable | Gates |
 | --- | --- |
-| `HAGICODE_REAL_CLI_TESTS` | Real-CLI tests in ConsoleTesting and Providers, and the `RealCliInvocationContract` tests |
+| `HAGICODE_REAL_CLI_TESTS` | Real-CLI tests in ConsoleTesting and Providers, the `RealCliInvocationContract` tests, and the `RealCliDiscovery` tests in Core |
 | `HAGICODE_REAL_CLI_COPILOT_SESSION_TESTS` | Copilot session tests (also needs `HAGICODE_REAL_CLI_TESTS`) |
 | `HAGICODE_LIBS_REAL_CLI_USER_QUESTION` | Real-CLI user-question test for Claude Code |
 | `HAGICODE_LIBS_REAL_CLI_PI_USER_QUESTION` | Real-CLI user-question test for Pi |
