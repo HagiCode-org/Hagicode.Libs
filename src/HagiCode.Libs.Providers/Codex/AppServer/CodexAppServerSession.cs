@@ -32,6 +32,7 @@ internal sealed class CodexAppServerSession : IAsyncDisposable
     private const string CodexApiKeyEnvironmentName = "CODEX_API_KEY";
     private const string ConfigFeaturesKey = "features";
     private const string TextInputType = "text";
+    private const string ImageInputType = "image";
 
     private readonly CodexAppServerProcess _process;
     private readonly CodexAppServerClient _client;
@@ -95,14 +96,31 @@ internal sealed class CodexAppServerSession : IAsyncDisposable
     /// otherwise, which carries the conversation of a stored exec thread into the app-server (gate G2).
     /// </summary>
     /// <returns>The thread events. The first event is always <see cref="ThreadStartedEvent"/>, so the caller binds the id.</returns>
+    public IAsyncEnumerable<ThreadEvent> RunTurnAsync(
+        string? threadId,
+        string prompt,
+        JsonObject threadParameters,
+        JsonObject turnParameters,
+        CancellationToken cancellationToken = default)
+    {
+        return RunTurnAsync(threadId, prompt, [], threadParameters, turnParameters, cancellationToken);
+    }
+
+    /// <summary>
+    /// Runs one prompt with image attachments on the run's thread. The text block comes first, then one image block per
+    /// attachment in the supplied order. Image bytes are encoded into the turn input only and are not kept afterwards.
+    /// </summary>
+    /// <inheritdoc cref="RunTurnAsync(string?, string, JsonObject, JsonObject, CancellationToken)"/>
     public async IAsyncEnumerable<ThreadEvent> RunTurnAsync(
         string? threadId,
         string prompt,
+        IReadOnlyList<CodexImageAttachment> imageAttachments,
         JsonObject threadParameters,
         JsonObject turnParameters,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(prompt);
+        ArgumentNullException.ThrowIfNull(imageAttachments);
         ArgumentNullException.ThrowIfNull(threadParameters);
         ArgumentNullException.ThrowIfNull(turnParameters);
 
@@ -123,6 +141,32 @@ internal sealed class CodexAppServerSession : IAsyncDisposable
         _loadedThreadId = activeThreadId;
         yield return new ThreadStartedEvent(activeThreadId);
 
+        if (imageAttachments.Count > 0)
+        {
+            _logger.LogDebug(
+                "Codex app-server turn carries {ImageCount} image attachment(s): {Images}",
+                imageAttachments.Count,
+                string.Join(", ", imageAttachments));
+        }
+
+        var input = BuildTurnInput(prompt, imageAttachments);
+
+        await foreach (var threadEvent in _client.RunTurnAsync(activeThreadId, input, turnParameters, cancellationToken)
+                           .ConfigureAwait(false))
+        {
+            yield return threadEvent;
+        }
+    }
+
+    /// <summary>
+    /// Builds the <c>turn/start</c> input: the text block, then one <c>image</c> block per attachment as a base64 data URL.
+    /// With no attachments the result is the text block alone, exactly as before image support existed.
+    /// </summary>
+    internal static JsonArray BuildTurnInput(string prompt, IReadOnlyList<CodexImageAttachment> imageAttachments)
+    {
+        ArgumentNullException.ThrowIfNull(prompt);
+        ArgumentNullException.ThrowIfNull(imageAttachments);
+
         var input = new JsonArray
         {
             new JsonObject
@@ -133,11 +177,23 @@ internal sealed class CodexAppServerSession : IAsyncDisposable
             }
         };
 
-        await foreach (var threadEvent in _client.RunTurnAsync(activeThreadId, input, turnParameters, cancellationToken)
-                           .ConfigureAwait(false))
+        foreach (var attachment in imageAttachments)
         {
-            yield return threadEvent;
+            input.Add(new JsonObject
+            {
+                ["type"] = ImageInputType,
+                ["url"] = BuildDataUrl(attachment)
+            });
         }
+
+        return input;
+    }
+
+    /// <summary>Encodes one attachment as a <c>data:</c> URL. The result is built per turn and is never stored.</summary>
+    internal static string BuildDataUrl(CodexImageAttachment attachment)
+    {
+        ArgumentNullException.ThrowIfNull(attachment);
+        return $"data:{attachment.MediaType};base64,{Convert.ToBase64String(attachment.Data.Span)}";
     }
 
     /// <summary>

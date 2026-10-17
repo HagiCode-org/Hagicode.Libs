@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
+using HagiCode.Libs.Providers.Codex;
 using HagiCode.Libs.Providers.Codex.AppServer;
 using ManagedCode.CodexSharpSDK.Configuration;
 using ManagedCode.CodexSharpSDK.Exceptions;
@@ -55,7 +56,7 @@ public sealed class CodexThread
     {
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(input);
-        var normalizedInput = new NormalizedInput(input, []);
+        var normalizedInput = new NormalizedInput(input, [], []);
         var resolvedTurnOptions = turnOptions ?? new TurnOptions();
         return Task.FromResult(new RunStreamedResult(RunStreamedWithTurnGateAsync(normalizedInput, resolvedTurnOptions)));
     }
@@ -68,11 +69,31 @@ public sealed class CodexThread
         return Task.FromResult(new RunStreamedResult(RunStreamedWithTurnGateAsync(normalizedInput, resolvedTurnOptions)));
     }
 
+    /// <summary>
+    /// Runs a streamed turn whose prompt carries in-memory image attachments. The attachments follow the prompt in the
+    /// supplied order on both transports. They are held for this turn only and are not stored on the thread or the options.
+    /// </summary>
+    /// <exception cref="ArgumentException">An attachment has a media type that Codex CLI does not accept. Nothing is started.</exception>
+    public Task<RunStreamedResult> RunStreamedAsync(
+        string input,
+        IReadOnlyList<CodexImageAttachment> imageAttachments,
+        TurnOptions? turnOptions = null)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(imageAttachments);
+        ValidateImageAttachments(imageAttachments);
+
+        var normalizedInput = new NormalizedInput(input, [], [.. imageAttachments]);
+        var resolvedTurnOptions = turnOptions ?? new TurnOptions();
+        return Task.FromResult(new RunStreamedResult(RunStreamedWithTurnGateAsync(normalizedInput, resolvedTurnOptions)));
+    }
+
     public Task<RunResult> RunAsync(string input, TurnOptions? turnOptions = null)
     {
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(input);
-        var normalizedInput = new NormalizedInput(input, []);
+        var normalizedInput = new NormalizedInput(input, [], []);
         return RunInternalAsync(normalizedInput, turnOptions ?? new TurnOptions());
     }
 
@@ -90,7 +111,7 @@ public sealed class CodexThread
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(input);
         var runOptions = EnsureTypedRunOptions(turnOptions);
-        var normalizedInput = new NormalizedInput(input, []);
+        var normalizedInput = new NormalizedInput(input, [], []);
         return await RunTypedInternalWithReflectionAsync<TResponse>(normalizedInput, runOptions).ConfigureAwait(false);
     }
 
@@ -103,7 +124,7 @@ public sealed class CodexThread
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(jsonTypeInfo);
         var runOptions = EnsureTypedRunOptions(turnOptions);
-        var normalizedInput = new NormalizedInput(input, []);
+        var normalizedInput = new NormalizedInput(input, [], []);
         return await RunTypedInternalAsync(normalizedInput, runOptions, jsonTypeInfo).ConfigureAwait(false);
     }
 
@@ -139,7 +160,7 @@ public sealed class CodexThread
     {
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(input);
-        var normalizedInput = new NormalizedInput(input, []);
+        var normalizedInput = new NormalizedInput(input, [], []);
         var runOptions = CreateTypedTurnOptions(outputSchema, cancellationToken);
         return RunTypedInternalWithReflectionAsync<TResponse>(normalizedInput, runOptions);
     }
@@ -153,7 +174,7 @@ public sealed class CodexThread
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(jsonTypeInfo);
-        var normalizedInput = new NormalizedInput(input, []);
+        var normalizedInput = new NormalizedInput(input, [], []);
         var runOptions = CreateTypedTurnOptions(outputSchema, cancellationToken);
         return RunTypedInternalAsync(normalizedInput, runOptions, jsonTypeInfo);
     }
@@ -281,15 +302,23 @@ public sealed class CodexThread
                 throw new NotSupportedException("Structured output is not supported on the interactive Codex transport.");
             }
 
+            // Path- and stream-based LocalImageInput values are exec-only. In-memory CodexImageAttachment values are carried as data URLs.
             if (normalizedInput.Images.Count > 0)
             {
-                throw new NotSupportedException("Image input is not supported on the interactive Codex transport.");
+                throw new NotSupportedException(
+                    "Local image inputs are not supported on the interactive Codex transport; pass CodexImageAttachment values instead.");
             }
 
             var threadParameters = CodexAppServerSession.BuildThreadParameters(_threadOptions, _options.Config);
             var turnParameters = CodexAppServerSession.BuildTurnParameters(_threadOptions);
             await foreach (var appServerEvent in _appServer
-                               .RunTurnAsync(Volatile.Read(ref _id), normalizedInput.Prompt, threadParameters, turnParameters, cancellationToken)
+                               .RunTurnAsync(
+                                   Volatile.Read(ref _id),
+                                   normalizedInput.Prompt,
+                                   normalizedInput.ImageAttachments,
+                                   threadParameters,
+                                   turnParameters,
+                                   cancellationToken)
                                .WithCancellation(cancellationToken)
                                .ConfigureAwait(false))
             {
@@ -305,7 +334,7 @@ public sealed class CodexThread
         }
 
         await using var resolvedImages = await ResolvedImages
-            .CreateAsync(normalizedInput.Images, _options.Logger, cancellationToken)
+            .CreateAsync(ToExecImageInputs(normalizedInput), _options.Logger, cancellationToken)
             .ConfigureAwait(false);
 
         await using var outputSchemaFile = await OutputSchemaFile
@@ -390,7 +419,7 @@ public sealed class CodexThread
             }
         }
 
-        return new NormalizedInput(string.Join("\n\n", promptParts), images);
+        return new NormalizedInput(string.Join("\n\n", promptParts), images, []);
     }
 
     private static TurnOptions EnsureTypedRunOptions(TurnOptions? turnOptions)
@@ -502,7 +531,57 @@ public sealed class CodexThread
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, nameof(CodexThread));
     }
 
-    private readonly record struct NormalizedInput(string Prompt, IReadOnlyList<LocalImageInput> Images);
+    private readonly record struct NormalizedInput(
+        string Prompt,
+        IReadOnlyList<LocalImageInput> Images,
+        IReadOnlyList<CodexImageAttachment> ImageAttachments);
+
+    private static void ValidateImageAttachments(IReadOnlyList<CodexImageAttachment> imageAttachments)
+    {
+        foreach (var attachment in imageAttachments)
+        {
+            ArgumentNullException.ThrowIfNull(attachment, nameof(imageAttachments));
+            if (!CodexImageAttachment.IsSupportedMediaType(attachment.MediaType))
+            {
+                // The message names the media type only. The bytes never appear in an exception.
+                throw new ArgumentException(
+                    $"Unsupported image media type '{attachment.MediaType}'. Supported types are PNG, JPEG, GIF and WEBP.",
+                    nameof(imageAttachments));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Converts attachments to in-memory local image inputs for the exec transport. <see cref="ResolvedImages"/> copies each one
+    /// to a temporary file outside the working directory and deletes it when the run ends.
+    /// </summary>
+    private static IReadOnlyList<LocalImageInput> ToExecImageInputs(NormalizedInput normalizedInput)
+    {
+        if (normalizedInput.ImageAttachments.Count == 0)
+        {
+            return normalizedInput.Images;
+        }
+
+        var images = new List<LocalImageInput>(normalizedInput.Images);
+        foreach (var attachment in normalizedInput.ImageAttachments)
+        {
+            images.Add(new LocalImageInput(
+                new MemoryStream(attachment.Data.ToArray(), writable: false),
+                fileName: "image" + GetImageFileExtension(attachment.MediaType),
+                leaveOpen: false));
+        }
+
+        return images;
+    }
+
+    private static string GetImageFileExtension(string mediaType) => mediaType.ToLowerInvariant() switch
+    {
+        "image/png" => ".png",
+        "image/jpeg" => ".jpg",
+        "image/gif" => ".gif",
+        "image/webp" => ".webp",
+        _ => ".img",
+    };
 
     private sealed class ResolvedImages : IAsyncDisposable
     {
