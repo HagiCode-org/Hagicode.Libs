@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <PackageId>HagiCode.Libs.Git</PackageId>
+    <Description>Provider-agnostic git wrapper for HagiCode hosts: repository inspection, status, staging, commit, push, pull, rebase, clone and repository scanning through the git CLI, returning typed results with stable failure codes.</Description>
+    <PackageTags>hagicode;git;repository;status;commit;push;pull;rebase;clone;cross-platform</PackageTags>
+    <Authors>HagiCode</Authors>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/HagiCode-org/Hagicode.Libs</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageProjectUrl>https://github.com/HagiCode-org/Hagicode.Libs</PackageProjectUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>icon.png</PackageIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\assets\nuget\icon.png" Pack="true" PackagePath="\" Link="icon.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\HagiCode.Libs.Core\HagiCode.Libs.Core.csproj" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+  </ItemGroup>
+</Project>
