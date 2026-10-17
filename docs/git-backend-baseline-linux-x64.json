@@ -1,0 +1,1381 @@
+{
+  "metadata": {
+    "subject": "hagicode-core GitService (LibGit2Sharp \u002B git CLI), pre-swap",
+    "fixture": "generated repository: 200 commits x 5 files = 1000 files in 50 folders, built with git fast-import (same generator as HagiCode.Libs.Git.Tests GeneratedRepository); remote is a local bare repository",
+    "warmUpIterations": 2,
+    "measuredIterations": 7,
+    "gitVersion": "git version 2.56.0",
+    "runtime": ".NET 10.0.12",
+    "utc": "2026-10-17T03:31:25.3923504\u002B00:00"
+  },
+  "records": [
+    {
+      "Operation": "GetRemoteUrlAsync",
+      "Scenario": "read-path",
+      "Iteration": 0,
+      "WarmUp": true,
+      "DurationMs": 11.266,
+      "Success": true
+    },
+    {
+      "Operation": "FindRepositoryRootAsync",
+      "Scenario": "read-path",
+      "Iteration": 0,
+      "WarmUp": true,
+      "DurationMs": 6.9337,
+      "Success": true
+    },
+    {
+      "Operation": "GetCurrentBranchAsync",
+      "Scenario": "read-path",
+      "Iteration": 0,
+      "WarmUp": true,
+      "DurationMs": 3.9845,
+      "Success": true
+    },
+    {
+      "Operation": "BranchExistsAsync",
+      "Scenario": "read-path",
+      "Iteration": 0,
+      "WarmUp": true,
+      "DurationMs": 2.1152,
+      "Success": true
+    },
+    {
+      "Operation": "IsBranchNameValidAsync",
+      "Scenario": "read-path",
+      "Iteration": 0,
+      "WarmUp": true,
+      "DurationMs": 0.9542,
+      "Success": true
+    },
+    {
+      "Operation": "ProbeDirtyAsync",
+      "Scenario": "read-path",
+      "Iteration": 0,
+      "WarmUp": true,
+      "DurationMs": 27.376,
+      "Success": true
+    },
+    {
+      "Operation": "ProbeDirtyAsync",
+      "Scenario": "read-path",
+      "Iteration": 0,
+      "WarmUp": true,
+      "DurationMs": 2.7673,
+      "Success": true
+    },
+    {
+      "Operation": "GetStatusAsync",
+      "Scenario": "read-path",
+      "Iteration": 0,
+      "WarmUp": true,
+      "DurationMs": 16.626,
+      "Success": true
+    },
+    {
+      "Operation": "GetStatusAsync",
+      "Scenario": "read-path",
+      "Iteration": 0,
+      "WarmUp": true,
+      "DurationMs": 2.7702,
+      "Success": true
+    },
+    {
+      "Operation": "ScanForRepositoriesAsync",
+      "Scenario": "read-path",
+      "Iteration": 0,
+      "WarmUp": true,
+      "DurationMs": 2.6576,
+      "Success": true
+    },
+    {
+      "Operation": "GetRemoteUrlAsync",
+      "Scenario": "read-path",
+      "Iteration": 1,
+      "WarmUp": true,
+      "DurationMs": 0.2857,
+      "Success": true
+    },
+    {
+      "Operation": "FindRepositoryRootAsync",
+      "Scenario": "read-path",
+      "Iteration": 1,
+      "WarmUp": true,
+      "DurationMs": 0.0263,
+      "Success": true
+    },
+    {
+      "Operation": "GetCurrentBranchAsync",
+      "Scenario": "read-path",
+      "Iteration": 1,
+      "WarmUp": true,
+      "DurationMs": 0.203,
+      "Success": true
+    },
+    {
+      "Operation": "BranchExistsAsync",
+      "Scenario": "read-path",
+      "Iteration": 1,
+      "WarmUp": true,
+      "DurationMs": 0.2142,
+      "Success": true
+    },
+    {
+      "Operation": "IsBranchNameValidAsync",
+      "Scenario": "read-path",
+      "Iteration": 1,
+      "WarmUp": true,
+      "DurationMs": 0.0823,
+      "Success": true
+    },
+    {
+      "Operation": "ProbeDirtyAsync",
+      "Scenario": "read-path",
+      "Iteration": 1,
+      "WarmUp": true,
+      "DurationMs": 16.2863,
+      "Success": true
+    },
+    {
+      "Operation": "ProbeDirtyAsync",
+      "Scenario": "read-path",
+      "Iteration": 1,
+      "WarmUp": true,
+      "DurationMs": 2.4902,
+      "Success": true
+    },
+    {
+      "Operation": "GetStatusAsync",
+      "Scenario": "read-path",
+      "Iteration": 1,
+      "WarmUp": true,
+      "DurationMs": 15.541,
+      "Success": true
+    },
+    {
+      "Operation": "GetStatusAsync",
+      "Scenario": "read-path",
+      "Iteration": 1,
+      "WarmUp": true,
+      "DurationMs": 2.836,
+      "Success": true
+    },
+    {
+      "Operation": "ScanForRepositoriesAsync",
+      "Scenario": "read-path",
+      "Iteration": 1,
+      "WarmUp": true,
+      "DurationMs": 0.0728,
+      "Success": true
+    },
+    {
+      "Operation": "GetRemoteUrlAsync",
+      "Scenario": "read-path",
+      "Iteration": 2,
+      "WarmUp": false,
+      "DurationMs": 0.3233,
+      "Success": true
+    },
+    {
+      "Operation": "FindRepositoryRootAsync",
+      "Scenario": "read-path",
+      "Iteration": 2,
+      "WarmUp": false,
+      "DurationMs": 0.0249,
+      "Success": true
+    },
+    {
+      "Operation": "GetCurrentBranchAsync",
+      "Scenario": "read-path",
+      "Iteration": 2,
+      "WarmUp": false,
+      "DurationMs": 0.2707,
+      "Success": true
+    },
+    {
+      "Operation": "BranchExistsAsync",
+      "Scenario": "read-path",
+      "Iteration": 2,
+      "WarmUp": false,
+      "DurationMs": 0.2369,
+      "Success": true
+    },
+    {
+      "Operation": "IsBranchNameValidAsync",
+      "Scenario": "read-path",
+      "Iteration": 2,
+      "WarmUp": false,
+      "DurationMs": 0.0919,
+      "Success": true
+    },
+    {
+      "Operation": "ProbeDirtyAsync",
+      "Scenario": "read-path",
+      "Iteration": 2,
+      "WarmUp": false,
+      "DurationMs": 16.8247,
+      "Success": true
+    },
+    {
+      "Operation": "ProbeDirtyAsync",
+      "Scenario": "read-path",
+      "Iteration": 2,
+      "WarmUp": false,
+      "DurationMs": 2.8311,
+      "Success": true
+    },
+    {
+      "Operation": "GetStatusAsync",
+      "Scenario": "read-path",
+      "Iteration": 2,
+      "WarmUp": false,
+      "DurationMs": 29.1624,
+      "Success": true
+    },
+    {
+      "Operation": "GetStatusAsync",
+      "Scenario": "read-path",
+      "Iteration": 2,
+      "WarmUp": false,
+      "DurationMs": 2.617,
+      "Success": true
+    },
+    {
+      "Operation": "ScanForRepositoriesAsync",
+      "Scenario": "read-path",
+      "Iteration": 2,
+      "WarmUp": false,
+      "DurationMs": 0.0625,
+      "Success": true
+    },
+    {
+      "Operation": "GetRemoteUrlAsync",
+      "Scenario": "read-path",
+      "Iteration": 3,
+      "WarmUp": false,
+      "DurationMs": 0.395,
+      "Success": true
+    },
+    {
+      "Operation": "FindRepositoryRootAsync",
+      "Scenario": "read-path",
+      "Iteration": 3,
+      "WarmUp": false,
+      "DurationMs": 0.0195,
+      "Success": true
+    },
+    {
+      "Operation": "GetCurrentBranchAsync",
+      "Scenario": "read-path",
+      "Iteration": 3,
+      "WarmUp": false,
+      "DurationMs": 0.2369,
+      "Success": true
+    },
+    {
+      "Operation": "BranchExistsAsync",
+      "Scenario": "read-path",
+      "Iteration": 3,
+      "WarmUp": false,
+      "DurationMs": 0.2254,
+      "Success": true
+    },
+    {
+      "Operation": "IsBranchNameValidAsync",
+      "Scenario": "read-path",
+      "Iteration": 3,
+      "WarmUp": false,
+      "DurationMs": 0.0929,
+      "Success": true
+    },
+    {
+      "Operation": "ProbeDirtyAsync",
+      "Scenario": "read-path",
+      "Iteration": 3,
+      "WarmUp": false,
+      "DurationMs": 15.7084,
+      "Success": true
+    },
+    {
+      "Operation": "ProbeDirtyAsync",
+      "Scenario": "read-path",
+      "Iteration": 3,
+      "WarmUp": false,
+      "DurationMs": 2.4118,
+      "Success": true
+    },
+    {
+      "Operation": "GetStatusAsync",
+      "Scenario": "read-path",
+      "Iteration": 3,
+      "WarmUp": false,
+      "DurationMs": 15.8962,
+      "Success": true
+    },
+    {
+      "Operation": "GetStatusAsync",
+      "Scenario": "read-path",
+      "Iteration": 3,
+      "WarmUp": false,
+      "DurationMs": 2.7057,
+      "Success": true
+    },
+    {
+      "Operation": "ScanForRepositoriesAsync",
+      "Scenario": "read-path",
+      "Iteration": 3,
+      "WarmUp": false,
+      "DurationMs": 0.0676,
+      "Success": true
+    },
+    {
+      "Operation": "GetRemoteUrlAsync",
+      "Scenario": "read-path",
+      "Iteration": 4,
+      "WarmUp": false,
+      "DurationMs": 0.348,
+      "Success": true
+    },
+    {
+      "Operation": "FindRepositoryRootAsync",
+      "Scenario": "read-path",
+      "Iteration": 4,
+      "WarmUp": false,
+      "DurationMs": 0.0132,
+      "Success": true
+    },
+    {
+      "Operation": "GetCurrentBranchAsync",
+      "Scenario": "read-path",
+      "Iteration": 4,
+      "WarmUp": false,
+      "DurationMs": 0.2501,
+      "Success": true
+    },
+    {
+      "Operation": "BranchExistsAsync",
+      "Scenario": "read-path",
+      "Iteration": 4,
+      "WarmUp": false,
+      "DurationMs": 0.3046,
+      "Success": true
+    },
+    {
+      "Operation": "IsBranchNameValidAsync",
+      "Scenario": "read-path",
+      "Iteration": 4,
+      "WarmUp": false,
+      "DurationMs": 0.134,
+      "Success": true
+    },
+    {
+      "Operation": "ProbeDirtyAsync",
+      "Scenario": "read-path",
+      "Iteration": 4,
+      "WarmUp": false,
+      "DurationMs": 17.5065,
+      "Success": true
+    },
+    {
+      "Operation": "ProbeDirtyAsync",
+      "Scenario": "read-path",
+      "Iteration": 4,
+      "WarmUp": false,
+      "DurationMs": 2.6434,
+      "Success": true
+    },
+    {
+      "Operation": "GetStatusAsync",
+      "Scenario": "read-path",
+      "Iteration": 4,
+      "WarmUp": false,
+      "DurationMs": 16.9991,
+      "Success": true
+    },
+    {
+      "Operation": "GetStatusAsync",
+      "Scenario": "read-path",
+      "Iteration": 4,
+      "WarmUp": false,
+      "DurationMs": 2.6818,
+      "Success": true
+    },
+    {
+      "Operation": "ScanForRepositoriesAsync",
+      "Scenario": "read-path",
+      "Iteration": 4,
+      "WarmUp": false,
+      "DurationMs": 0.0574,
+      "Success": true
+    },
+    {
+      "Operation": "GetRemoteUrlAsync",
+      "Scenario": "read-path",
+      "Iteration": 5,
+      "WarmUp": false,
+      "DurationMs": 0.2963,
+      "Success": true
+    },
+    {
+      "Operation": "FindRepositoryRootAsync",
+      "Scenario": "read-path",
+      "Iteration": 5,
+      "WarmUp": false,
+      "DurationMs": 0.0138,
+      "Success": true
+    },
+    {
+      "Operation": "GetCurrentBranchAsync",
+      "Scenario": "read-path",
+      "Iteration": 5,
+      "WarmUp": false,
+      "DurationMs": 0.2144,
+      "Success": true
+    },
+    {
+      "Operation": "BranchExistsAsync",
+      "Scenario": "read-path",
+      "Iteration": 5,
+      "WarmUp": false,
+      "DurationMs": 0.2099,
+      "Success": true
+    },
+    {
+      "Operation": "IsBranchNameValidAsync",
+      "Scenario": "read-path",
+      "Iteration": 5,
+      "WarmUp": false,
+      "DurationMs": 0.1045,
+      "Success": true
+    },
+    {
+      "Operation": "ProbeDirtyAsync",
+      "Scenario": "read-path",
+      "Iteration": 5,
+      "WarmUp": false,
+      "DurationMs": 16.4357,
+      "Success": true
+    },
+    {
+      "Operation": "ProbeDirtyAsync",
+      "Scenario": "read-path",
+      "Iteration": 5,
+      "WarmUp": false,
+      "DurationMs": 2.4208,
+      "Success": true
+    },
+    {
+      "Operation": "GetStatusAsync",
+      "Scenario": "read-path",
+      "Iteration": 5,
+      "WarmUp": false,
+      "DurationMs": 16.8316,
+      "Success": true
+    },
+    {
+      "Operation": "GetStatusAsync",
+      "Scenario": "read-path",
+      "Iteration": 5,
+      "WarmUp": false,
+      "DurationMs": 2.4362,
+      "Success": true
+    },
+    {
+      "Operation": "ScanForRepositoriesAsync",
+      "Scenario": "read-path",
+      "Iteration": 5,
+      "WarmUp": false,
+      "DurationMs": 0.0554,
+      "Success": true
+    },
+    {
+      "Operation": "GetRemoteUrlAsync",
+      "Scenario": "read-path",
+      "Iteration": 6,
+      "WarmUp": false,
+      "DurationMs": 0.353,
+      "Success": true
+    },
+    {
+      "Operation": "FindRepositoryRootAsync",
+      "Scenario": "read-path",
+      "Iteration": 6,
+      "WarmUp": false,
+      "DurationMs": 0.0099,
+      "Success": true
+    },
+    {
+      "Operation": "GetCurrentBranchAsync",
+      "Scenario": "read-path",
+      "Iteration": 6,
+      "WarmUp": false,
+      "DurationMs": 0.2819,
+      "Success": true
+    },
+    {
+      "Operation": "BranchExistsAsync",
+      "Scenario": "read-path",
+      "Iteration": 6,
+      "WarmUp": false,
+      "DurationMs": 0.1532,
+      "Success": true
+    },
+    {
+      "Operation": "IsBranchNameValidAsync",
+      "Scenario": "read-path",
+      "Iteration": 6,
+      "WarmUp": false,
+      "DurationMs": 0.1448,
+      "Success": true
+    },
+    {
+      "Operation": "ProbeDirtyAsync",
+      "Scenario": "read-path",
+      "Iteration": 6,
+      "WarmUp": false,
+      "DurationMs": 16.1022,
+      "Success": true
+    },
+    {
+      "Operation": "ProbeDirtyAsync",
+      "Scenario": "read-path",
+      "Iteration": 6,
+      "WarmUp": false,
+      "DurationMs": 2.5191,
+      "Success": true
+    },
+    {
+      "Operation": "GetStatusAsync",
+      "Scenario": "read-path",
+      "Iteration": 6,
+      "WarmUp": false,
+      "DurationMs": 16.0668,
+      "Success": true
+    },
+    {
+      "Operation": "GetStatusAsync",
+      "Scenario": "read-path",
+      "Iteration": 6,
+      "WarmUp": false,
+      "DurationMs": 2.4722,
+      "Success": true
+    },
+    {
+      "Operation": "ScanForRepositoriesAsync",
+      "Scenario": "read-path",
+      "Iteration": 6,
+      "WarmUp": false,
+      "DurationMs": 0.0552,
+      "Success": true
+    },
+    {
+      "Operation": "GetRemoteUrlAsync",
+      "Scenario": "read-path",
+      "Iteration": 7,
+      "WarmUp": false,
+      "DurationMs": 0.3583,
+      "Success": true
+    },
+    {
+      "Operation": "FindRepositoryRootAsync",
+      "Scenario": "read-path",
+      "Iteration": 7,
+      "WarmUp": false,
+      "DurationMs": 0.0114,
+      "Success": true
+    },
+    {
+      "Operation": "GetCurrentBranchAsync",
+      "Scenario": "read-path",
+      "Iteration": 7,
+      "WarmUp": false,
+      "DurationMs": 0.2282,
+      "Success": true
+    },
+    {
+      "Operation": "BranchExistsAsync",
+      "Scenario": "read-path",
+      "Iteration": 7,
+      "WarmUp": false,
+      "DurationMs": 0.1418,
+      "Success": true
+    },
+    {
+      "Operation": "IsBranchNameValidAsync",
+      "Scenario": "read-path",
+      "Iteration": 7,
+      "WarmUp": false,
+      "DurationMs": 0.0864,
+      "Success": true
+    },
+    {
+      "Operation": "ProbeDirtyAsync",
+      "Scenario": "read-path",
+      "Iteration": 7,
+      "WarmUp": false,
+      "DurationMs": 15.1012,
+      "Success": true
+    },
+    {
+      "Operation": "ProbeDirtyAsync",
+      "Scenario": "read-path",
+      "Iteration": 7,
+      "WarmUp": false,
+      "DurationMs": 2.553,
+      "Success": true
+    },
+    {
+      "Operation": "GetStatusAsync",
+      "Scenario": "read-path",
+      "Iteration": 7,
+      "WarmUp": false,
+      "DurationMs": 15.9723,
+      "Success": true
+    },
+    {
+      "Operation": "GetStatusAsync",
+      "Scenario": "read-path",
+      "Iteration": 7,
+      "WarmUp": false,
+      "DurationMs": 2.5537,
+      "Success": true
+    },
+    {
+      "Operation": "ScanForRepositoriesAsync",
+      "Scenario": "read-path",
+      "Iteration": 7,
+      "WarmUp": false,
+      "DurationMs": 0.0498,
+      "Success": true
+    },
+    {
+      "Operation": "GetRemoteUrlAsync",
+      "Scenario": "read-path",
+      "Iteration": 8,
+      "WarmUp": false,
+      "DurationMs": 0.3531,
+      "Success": true
+    },
+    {
+      "Operation": "FindRepositoryRootAsync",
+      "Scenario": "read-path",
+      "Iteration": 8,
+      "WarmUp": false,
+      "DurationMs": 0.0194,
+      "Success": true
+    },
+    {
+      "Operation": "GetCurrentBranchAsync",
+      "Scenario": "read-path",
+      "Iteration": 8,
+      "WarmUp": false,
+      "DurationMs": 0.2897,
+      "Success": true
+    },
+    {
+      "Operation": "BranchExistsAsync",
+      "Scenario": "read-path",
+      "Iteration": 8,
+      "WarmUp": false,
+      "DurationMs": 0.1833,
+      "Success": true
+    },
+    {
+      "Operation": "IsBranchNameValidAsync",
+      "Scenario": "read-path",
+      "Iteration": 8,
+      "WarmUp": false,
+      "DurationMs": 0.1522,
+      "Success": true
+    },
+    {
+      "Operation": "ProbeDirtyAsync",
+      "Scenario": "read-path",
+      "Iteration": 8,
+      "WarmUp": false,
+      "DurationMs": 16.8364,
+      "Success": true
+    },
+    {
+      "Operation": "ProbeDirtyAsync",
+      "Scenario": "read-path",
+      "Iteration": 8,
+      "WarmUp": false,
+      "DurationMs": 2.729,
+      "Success": true
+    },
+    {
+      "Operation": "GetStatusAsync",
+      "Scenario": "read-path",
+      "Iteration": 8,
+      "WarmUp": false,
+      "DurationMs": 16.7378,
+      "Success": true
+    },
+    {
+      "Operation": "GetStatusAsync",
+      "Scenario": "read-path",
+      "Iteration": 8,
+      "WarmUp": false,
+      "DurationMs": 2.6867,
+      "Success": true
+    },
+    {
+      "Operation": "ScanForRepositoriesAsync",
+      "Scenario": "read-path",
+      "Iteration": 8,
+      "WarmUp": false,
+      "DurationMs": 0.0628,
+      "Success": true
+    },
+    {
+      "Operation": "StageFileAsync",
+      "Scenario": "write-path",
+      "Iteration": 0,
+      "WarmUp": true,
+      "DurationMs": 11.4368,
+      "Success": true
+    },
+    {
+      "Operation": "UnstageFileAsync",
+      "Scenario": "write-path",
+      "Iteration": 0,
+      "WarmUp": true,
+      "DurationMs": 11.4428,
+      "Success": true
+    },
+    {
+      "Operation": "StageAllAsync",
+      "Scenario": "write-path",
+      "Iteration": 0,
+      "WarmUp": true,
+      "DurationMs": 12.7658,
+      "Success": true
+    },
+    {
+      "Operation": "UnstageAllAsync",
+      "Scenario": "write-path",
+      "Iteration": 0,
+      "WarmUp": true,
+      "DurationMs": 10.7888,
+      "Success": true
+    },
+    {
+      "Operation": "CommitAsync",
+      "Scenario": "write-path",
+      "Iteration": 0,
+      "WarmUp": true,
+      "DurationMs": 31.9075,
+      "Success": true
+    },
+    {
+      "Operation": "PushAsync",
+      "Scenario": "write-path",
+      "Iteration": 0,
+      "WarmUp": true,
+      "DurationMs": 15.2217,
+      "Success": true
+    },
+    {
+      "Operation": "PullAsync",
+      "Scenario": "write-path",
+      "Iteration": 0,
+      "WarmUp": true,
+      "DurationMs": 24.1497,
+      "Success": true
+    },
+    {
+      "Operation": "RebaseAsync",
+      "Scenario": "write-path",
+      "Iteration": 0,
+      "WarmUp": true,
+      "DurationMs": 56.6896,
+      "Success": true
+    },
+    {
+      "Operation": "StageFileAsync",
+      "Scenario": "write-path",
+      "Iteration": 1,
+      "WarmUp": true,
+      "DurationMs": 1.31,
+      "Success": true
+    },
+    {
+      "Operation": "UnstageFileAsync",
+      "Scenario": "write-path",
+      "Iteration": 1,
+      "WarmUp": true,
+      "DurationMs": 1.1343,
+      "Success": true
+    },
+    {
+      "Operation": "StageAllAsync",
+      "Scenario": "write-path",
+      "Iteration": 1,
+      "WarmUp": true,
+      "DurationMs": 10.3174,
+      "Success": true
+    },
+    {
+      "Operation": "UnstageAllAsync",
+      "Scenario": "write-path",
+      "Iteration": 1,
+      "WarmUp": true,
+      "DurationMs": 9.7812,
+      "Success": true
+    },
+    {
+      "Operation": "CommitAsync",
+      "Scenario": "write-path",
+      "Iteration": 1,
+      "WarmUp": true,
+      "DurationMs": 5.3873,
+      "Success": true
+    },
+    {
+      "Operation": "PushAsync",
+      "Scenario": "write-path",
+      "Iteration": 1,
+      "WarmUp": true,
+      "DurationMs": 14.7097,
+      "Success": true
+    },
+    {
+      "Operation": "PullAsync",
+      "Scenario": "write-path",
+      "Iteration": 1,
+      "WarmUp": true,
+      "DurationMs": 25.4729,
+      "Success": true
+    },
+    {
+      "Operation": "RebaseAsync",
+      "Scenario": "write-path",
+      "Iteration": 1,
+      "WarmUp": true,
+      "DurationMs": 56.0606,
+      "Success": true
+    },
+    {
+      "Operation": "StageFileAsync",
+      "Scenario": "write-path",
+      "Iteration": 2,
+      "WarmUp": false,
+      "DurationMs": 1.457,
+      "Success": true
+    },
+    {
+      "Operation": "UnstageFileAsync",
+      "Scenario": "write-path",
+      "Iteration": 2,
+      "WarmUp": false,
+      "DurationMs": 1.2022,
+      "Success": true
+    },
+    {
+      "Operation": "StageAllAsync",
+      "Scenario": "write-path",
+      "Iteration": 2,
+      "WarmUp": false,
+      "DurationMs": 10.3009,
+      "Success": true
+    },
+    {
+      "Operation": "UnstageAllAsync",
+      "Scenario": "write-path",
+      "Iteration": 2,
+      "WarmUp": false,
+      "DurationMs": 9.8086,
+      "Success": true
+    },
+    {
+      "Operation": "CommitAsync",
+      "Scenario": "write-path",
+      "Iteration": 2,
+      "WarmUp": false,
+      "DurationMs": 5.1156,
+      "Success": true
+    },
+    {
+      "Operation": "PushAsync",
+      "Scenario": "write-path",
+      "Iteration": 2,
+      "WarmUp": false,
+      "DurationMs": 14.8849,
+      "Success": true
+    },
+    {
+      "Operation": "PullAsync",
+      "Scenario": "write-path",
+      "Iteration": 2,
+      "WarmUp": false,
+      "DurationMs": 27.8579,
+      "Success": true
+    },
+    {
+      "Operation": "RebaseAsync",
+      "Scenario": "write-path",
+      "Iteration": 2,
+      "WarmUp": false,
+      "DurationMs": 31.3648,
+      "Success": true
+    },
+    {
+      "Operation": "StageFileAsync",
+      "Scenario": "write-path",
+      "Iteration": 3,
+      "WarmUp": false,
+      "DurationMs": 1.5046,
+      "Success": true
+    },
+    {
+      "Operation": "UnstageFileAsync",
+      "Scenario": "write-path",
+      "Iteration": 3,
+      "WarmUp": false,
+      "DurationMs": 1.0923,
+      "Success": true
+    },
+    {
+      "Operation": "StageAllAsync",
+      "Scenario": "write-path",
+      "Iteration": 3,
+      "WarmUp": false,
+      "DurationMs": 5.5574,
+      "Success": true
+    },
+    {
+      "Operation": "UnstageAllAsync",
+      "Scenario": "write-path",
+      "Iteration": 3,
+      "WarmUp": false,
+      "DurationMs": 4.2965,
+      "Success": true
+    },
+    {
+      "Operation": "CommitAsync",
+      "Scenario": "write-path",
+      "Iteration": 3,
+      "WarmUp": false,
+      "DurationMs": 4.8011,
+      "Success": true
+    },
+    {
+      "Operation": "PushAsync",
+      "Scenario": "write-path",
+      "Iteration": 3,
+      "WarmUp": false,
+      "DurationMs": 12.6188,
+      "Success": true
+    },
+    {
+      "Operation": "PullAsync",
+      "Scenario": "write-path",
+      "Iteration": 3,
+      "WarmUp": false,
+      "DurationMs": 19.954,
+      "Success": true
+    },
+    {
+      "Operation": "RebaseAsync",
+      "Scenario": "write-path",
+      "Iteration": 3,
+      "WarmUp": false,
+      "DurationMs": 30.9325,
+      "Success": true
+    },
+    {
+      "Operation": "StageFileAsync",
+      "Scenario": "write-path",
+      "Iteration": 4,
+      "WarmUp": false,
+      "DurationMs": 1.289,
+      "Success": true
+    },
+    {
+      "Operation": "UnstageFileAsync",
+      "Scenario": "write-path",
+      "Iteration": 4,
+      "WarmUp": false,
+      "DurationMs": 1.1981,
+      "Success": true
+    },
+    {
+      "Operation": "StageAllAsync",
+      "Scenario": "write-path",
+      "Iteration": 4,
+      "WarmUp": false,
+      "DurationMs": 5.4317,
+      "Success": true
+    },
+    {
+      "Operation": "UnstageAllAsync",
+      "Scenario": "write-path",
+      "Iteration": 4,
+      "WarmUp": false,
+      "DurationMs": 4.6157,
+      "Success": true
+    },
+    {
+      "Operation": "CommitAsync",
+      "Scenario": "write-path",
+      "Iteration": 4,
+      "WarmUp": false,
+      "DurationMs": 4.6734,
+      "Success": true
+    },
+    {
+      "Operation": "PushAsync",
+      "Scenario": "write-path",
+      "Iteration": 4,
+      "WarmUp": false,
+      "DurationMs": 14.8002,
+      "Success": true
+    },
+    {
+      "Operation": "PullAsync",
+      "Scenario": "write-path",
+      "Iteration": 4,
+      "WarmUp": false,
+      "DurationMs": 19.3961,
+      "Success": true
+    },
+    {
+      "Operation": "RebaseAsync",
+      "Scenario": "write-path",
+      "Iteration": 4,
+      "WarmUp": false,
+      "DurationMs": 30.7098,
+      "Success": true
+    },
+    {
+      "Operation": "StageFileAsync",
+      "Scenario": "write-path",
+      "Iteration": 5,
+      "WarmUp": false,
+      "DurationMs": 1.2456,
+      "Success": true
+    },
+    {
+      "Operation": "UnstageFileAsync",
+      "Scenario": "write-path",
+      "Iteration": 5,
+      "WarmUp": false,
+      "DurationMs": 1.122,
+      "Success": true
+    },
+    {
+      "Operation": "StageAllAsync",
+      "Scenario": "write-path",
+      "Iteration": 5,
+      "WarmUp": false,
+      "DurationMs": 4.8744,
+      "Success": true
+    },
+    {
+      "Operation": "UnstageAllAsync",
+      "Scenario": "write-path",
+      "Iteration": 5,
+      "WarmUp": false,
+      "DurationMs": 4.1018,
+      "Success": true
+    },
+    {
+      "Operation": "CommitAsync",
+      "Scenario": "write-path",
+      "Iteration": 5,
+      "WarmUp": false,
+      "DurationMs": 4.7443,
+      "Success": true
+    },
+    {
+      "Operation": "PushAsync",
+      "Scenario": "write-path",
+      "Iteration": 5,
+      "WarmUp": false,
+      "DurationMs": 12.7,
+      "Success": true
+    },
+    {
+      "Operation": "PullAsync",
+      "Scenario": "write-path",
+      "Iteration": 5,
+      "WarmUp": false,
+      "DurationMs": 20.4565,
+      "Success": true
+    },
+    {
+      "Operation": "RebaseAsync",
+      "Scenario": "write-path",
+      "Iteration": 5,
+      "WarmUp": false,
+      "DurationMs": 32.3692,
+      "Success": true
+    },
+    {
+      "Operation": "StageFileAsync",
+      "Scenario": "write-path",
+      "Iteration": 6,
+      "WarmUp": false,
+      "DurationMs": 1.3269,
+      "Success": true
+    },
+    {
+      "Operation": "UnstageFileAsync",
+      "Scenario": "write-path",
+      "Iteration": 6,
+      "WarmUp": false,
+      "DurationMs": 1.1943,
+      "Success": true
+    },
+    {
+      "Operation": "StageAllAsync",
+      "Scenario": "write-path",
+      "Iteration": 6,
+      "WarmUp": false,
+      "DurationMs": 5.6113,
+      "Success": true
+    },
+    {
+      "Operation": "UnstageAllAsync",
+      "Scenario": "write-path",
+      "Iteration": 6,
+      "WarmUp": false,
+      "DurationMs": 4.9728,
+      "Success": true
+    },
+    {
+      "Operation": "CommitAsync",
+      "Scenario": "write-path",
+      "Iteration": 6,
+      "WarmUp": false,
+      "DurationMs": 5.2102,
+      "Success": true
+    },
+    {
+      "Operation": "PushAsync",
+      "Scenario": "write-path",
+      "Iteration": 6,
+      "WarmUp": false,
+      "DurationMs": 16.3478,
+      "Success": true
+    },
+    {
+      "Operation": "PullAsync",
+      "Scenario": "write-path",
+      "Iteration": 6,
+      "WarmUp": false,
+      "DurationMs": 18.6873,
+      "Success": true
+    },
+    {
+      "Operation": "RebaseAsync",
+      "Scenario": "write-path",
+      "Iteration": 6,
+      "WarmUp": false,
+      "DurationMs": 32.309,
+      "Success": true
+    },
+    {
+      "Operation": "StageFileAsync",
+      "Scenario": "write-path",
+      "Iteration": 7,
+      "WarmUp": false,
+      "DurationMs": 1.4317,
+      "Success": true
+    },
+    {
+      "Operation": "UnstageFileAsync",
+      "Scenario": "write-path",
+      "Iteration": 7,
+      "WarmUp": false,
+      "DurationMs": 1.2205,
+      "Success": true
+    },
+    {
+      "Operation": "StageAllAsync",
+      "Scenario": "write-path",
+      "Iteration": 7,
+      "WarmUp": false,
+      "DurationMs": 5.484,
+      "Success": true
+    },
+    {
+      "Operation": "UnstageAllAsync",
+      "Scenario": "write-path",
+      "Iteration": 7,
+      "WarmUp": false,
+      "DurationMs": 4.8085,
+      "Success": true
+    },
+    {
+      "Operation": "CommitAsync",
+      "Scenario": "write-path",
+      "Iteration": 7,
+      "WarmUp": false,
+      "DurationMs": 4.8014,
+      "Success": true
+    },
+    {
+      "Operation": "PushAsync",
+      "Scenario": "write-path",
+      "Iteration": 7,
+      "WarmUp": false,
+      "DurationMs": 14.3407,
+      "Success": true
+    },
+    {
+      "Operation": "PullAsync",
+      "Scenario": "write-path",
+      "Iteration": 7,
+      "WarmUp": false,
+      "DurationMs": 20.4017,
+      "Success": true
+    },
+    {
+      "Operation": "RebaseAsync",
+      "Scenario": "write-path",
+      "Iteration": 7,
+      "WarmUp": false,
+      "DurationMs": 29.4274,
+      "Success": true
+    },
+    {
+      "Operation": "StageFileAsync",
+      "Scenario": "write-path",
+      "Iteration": 8,
+      "WarmUp": false,
+      "DurationMs": 1.2311,
+      "Success": true
+    },
+    {
+      "Operation": "UnstageFileAsync",
+      "Scenario": "write-path",
+      "Iteration": 8,
+      "WarmUp": false,
+      "DurationMs": 1.0591,
+      "Success": true
+    },
+    {
+      "Operation": "StageAllAsync",
+      "Scenario": "write-path",
+      "Iteration": 8,
+      "WarmUp": false,
+      "DurationMs": 5.2822,
+      "Success": true
+    },
+    {
+      "Operation": "UnstageAllAsync",
+      "Scenario": "write-path",
+      "Iteration": 8,
+      "WarmUp": false,
+      "DurationMs": 4.5114,
+      "Success": true
+    },
+    {
+      "Operation": "CommitAsync",
+      "Scenario": "write-path",
+      "Iteration": 8,
+      "WarmUp": false,
+      "DurationMs": 4.7528,
+      "Success": true
+    },
+    {
+      "Operation": "PushAsync",
+      "Scenario": "write-path",
+      "Iteration": 8,
+      "WarmUp": false,
+      "DurationMs": 14.0444,
+      "Success": true
+    },
+    {
+      "Operation": "PullAsync",
+      "Scenario": "write-path",
+      "Iteration": 8,
+      "WarmUp": false,
+      "DurationMs": 22.6174,
+      "Success": true
+    },
+    {
+      "Operation": "RebaseAsync",
+      "Scenario": "write-path",
+      "Iteration": 8,
+      "WarmUp": false,
+      "DurationMs": 31.244,
+      "Success": true
+    },
+    {
+      "Operation": "EnsureClonedAsync",
+      "Scenario": "clone",
+      "Iteration": 0,
+      "WarmUp": true,
+      "DurationMs": 39.382,
+      "Success": true
+    },
+    {
+      "Operation": "EnsureClonedAsync",
+      "Scenario": "clone",
+      "Iteration": 1,
+      "WarmUp": true,
+      "DurationMs": 31.6518,
+      "Success": true
+    },
+    {
+      "Operation": "EnsureClonedAsync",
+      "Scenario": "clone",
+      "Iteration": 2,
+      "WarmUp": false,
+      "DurationMs": 32.3968,
+      "Success": true
+    },
+    {
+      "Operation": "EnsureClonedAsync",
+      "Scenario": "clone",
+      "Iteration": 3,
+      "WarmUp": false,
+      "DurationMs": 31.5751,
+      "Success": true
+    },
+    {
+      "Operation": "EnsureClonedAsync",
+      "Scenario": "clone",
+      "Iteration": 4,
+      "WarmUp": false,
+      "DurationMs": 31.3854,
+      "Success": true
+    },
+    {
+      "Operation": "EnsureClonedAsync",
+      "Scenario": "clone",
+      "Iteration": 5,
+      "WarmUp": false,
+      "DurationMs": 30.761,
+      "Success": true
+    },
+    {
+      "Operation": "EnsureClonedAsync",
+      "Scenario": "clone",
+      "Iteration": 6,
+      "WarmUp": false,
+      "DurationMs": 30.6343,
+      "Success": true
+    },
+    {
+      "Operation": "EnsureClonedAsync",
+      "Scenario": "clone",
+      "Iteration": 7,
+      "WarmUp": false,
+      "DurationMs": 30.9835,
+      "Success": true
+    },
+    {
+      "Operation": "EnsureClonedAsync",
+      "Scenario": "clone",
+      "Iteration": 8,
+      "WarmUp": false,
+      "DurationMs": 31.0183,
+      "Success": true
+    }
+  ]
+}

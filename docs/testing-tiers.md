@@ -56,8 +56,25 @@ A switch is on when its value is `1` or `true` (case-insensitive).
 | `HAGICODE_LIBS_REAL_CLI_PI_USER_QUESTION` | Real-CLI user-question test for Pi |
 | `HAGICODE_LIBS_REAL_CLI_OMP_USER_QUESTION` | Real-CLI user-question test for Omp |
 | `HAGICODE_REAL_ONLINE_API_TESTS` | Online API tests in Skills (`RealOnlineApiIntegrationTests`) |
+| `HAGICODE_LIBS_GIT_TIMING_DIR` | Directory for the git suite's timing output (one JSON and one CSV per run). Unset means no timing files are written. See the git section below. |
 
 The gate is `ExternalGate.Require(switchName)` in `tests/Shared/TestTiers.cs`. It is the only switch parser.
+
+## Git suite (`HagiCode.Libs.Git.Tests`)
+
+Every test is an `Integration` test because it runs the real `git` executable. The suite does not stub git.
+
+- Local runs skip the suite with a reason naming git when git is not installed. On CI (`CI=true`) the same condition fails the run.
+- `Slow` marks the scenarios on the 1,000-file generated repository. They run under `-p:TestProfile=full`. The `regression` profile skips them.
+- Every operation call goes through `TimedGitClient`, so its duration is recorded without timing code in the test. Warm-up iterations are recorded but excluded from statistics.
+- Timing output is written only when `HAGICODE_LIBS_GIT_TIMING_DIR` is set. Files are named `git-timing-<platform>-<arch>.json` and `.csv`.
+- Durations are informational. No test asserts a time limit. The per-operation comparison is rendered by `scripts/git/aggregate_timings.py` in the `git-cross-platform.yml` summary.
+
+Example for one local run:
+
+```bash
+HAGICODE_LIBS_GIT_TIMING_DIR=$PWD/timing-out dotnet test tests/HagiCode.Libs.Git.Tests/HagiCode.Libs.Git.Tests.csproj -p:TestProfile=full
+```
 
 ## Guard
 

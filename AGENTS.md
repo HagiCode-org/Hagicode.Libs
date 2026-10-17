@@ -30,6 +30,7 @@ Tier markers, switch variables and filter expressions: `docs/testing-tiers.md`.
 - `src/HagiCode.Libs.Prompts/`: Handlebars prompt catalog
 - `src/HagiCode.Libs.Providers/`: provider abstractions (Claude, Copilot, Codex, Gemini, etc.)
 - `src/HagiCode.Libs.Skills/`: skills infrastructure and online API client
+- `src/HagiCode.Libs.Git/`: provider-agnostic git wrapper over the `git` CLI (`IGitClient`, typed results and failure codes; tests: `tests/HagiCode.Libs.Git.Tests/`, package guide: `src/HagiCode.Libs.Git/README.md`)
 - `src/HagiCode.Libs.Imaging/`: in-process AVIF conversion with bundled libvips native libraries (tests: `tests/HagiCode.Libs.Imaging.Tests/`, backend guide: `docs/avif-backend-integration-guide.md`)
 - `src/HagiCode.Libs.ConsoleTesting/`: shared harness for the per-provider `*.Console` projects (tests: `tests/HagiCode.Libs.ConsoleTesting.Tests/`)
 - `tests/`: NUnit coverage for each project; shared test settings, packages and global usings are in `tests/Directory.Build.props`
