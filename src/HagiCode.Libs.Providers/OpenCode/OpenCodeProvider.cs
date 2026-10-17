@@ -54,7 +54,14 @@ public class OpenCodeProvider : ICliProvider<OpenCodeOptions>
             sessionResolution.RuntimeFingerprint,
             sessionResolution.PoolFingerprint);
 
-        var request = OpenCodeSessionPromptRequest.FromText(prompt, ResolveModelSelection(options.Model));
+        // OpenCode 2.0 takes the model on the session, not on the prompt.
+        var model = ResolveModelSelection(options.Model);
+        if (model is not null)
+        {
+            await runtime.Client.SetSessionModelAsync(sessionResolution.SessionId, model, cancellationToken).ConfigureAwait(false);
+        }
+
+        var request = OpenCodeSessionPromptRequest.FromText(prompt);
         var response = await runtime.Client.PromptAsync(sessionResolution.SessionId, request, cancellationToken).ConfigureAwait(false);
 
         yield return lifecycleMessage;
@@ -177,6 +184,7 @@ public class OpenCodeProvider : ICliProvider<OpenCodeOptions>
         {
             ExecutablePath = options.ExecutablePath,
             BaseUrl = options.BaseUrl,
+            ServerPassword = options.ServerPassword,
             WorkingDirectory = options.WorkingDirectory,
             Workspace = options.Workspace,
             StartupTimeout = options.StartupTimeout,

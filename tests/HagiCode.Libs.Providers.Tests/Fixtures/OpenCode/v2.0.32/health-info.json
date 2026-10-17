@@ -1,0 +1,13 @@
+{
+  "version": "2.0.32",
+  "pid": 0,
+  "urls": [
+    "http://127.0.0.1:49701"
+  ],
+  "paths": {
+    "tmp": "/tmp/opencode"
+  },
+  "capabilities": {
+    "persistentPty": true
+  }
+}

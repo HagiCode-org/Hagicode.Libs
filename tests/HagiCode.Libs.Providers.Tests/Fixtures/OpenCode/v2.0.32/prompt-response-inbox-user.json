@@ -1,0 +1,14 @@
+{
+  "data": {
+    "id": "msg_14bda68ef001BWbIy2PSObC0EF",
+    "sessionID": "ses_eb425ad08ffeu7IGlo6YLWUx79",
+    "time": {
+      "created": 1792273967419
+    },
+    "type": "user",
+    "payload": {
+      "text": "Reply with exactly: pong"
+    },
+    "delivery": "steer"
+  }
+}

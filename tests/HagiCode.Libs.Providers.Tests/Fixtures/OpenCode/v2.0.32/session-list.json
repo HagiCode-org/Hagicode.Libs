@@ -1,0 +1,107 @@
+{
+  "data": [
+    {
+      "id": "ses_eb425084affe2ErE007BeqWSGq",
+      "projectID": "51f4df386125fd20fef84212c06c6d88277e0846",
+      "model": {
+        "id": "no-such-model",
+        "providerID": "no-such-provider",
+        "variant": "default"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "outcome": "failed",
+      "time": {
+        "created": 1792274003895,
+        "updated": 1792274009387,
+        "idle": 1792274009400
+      },
+      "location": {
+        "directory": "/sample/workspace"
+      }
+    },
+    {
+      "id": "ses_eb42513cfffeMHUpFpOkz7Zqdr",
+      "projectID": "51f4df386125fd20fef84212c06c6d88277e0846",
+      "model": {
+        "id": "no-such-model",
+        "providerID": "no-such-provider",
+        "variant": "default"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "time": {
+        "created": 1792274000947,
+        "updated": 1792274000947
+      },
+      "location": {
+        "directory": "/sample/workspace"
+      }
+    },
+    {
+      "id": "ses_eb425ad08ffeu7IGlo6YLWUx79",
+      "projectID": "51f4df386125fd20fef84212c06c6d88277e0846",
+      "cost": 0,
+      "tokens": {
+        "input": 4190,
+        "output": 6,
+        "reasoning": 71,
+        "cache": {
+          "read": 1536,
+          "write": 0
+        }
+      },
+      "outcome": "succeeded",
+      "time": {
+        "created": 1792273961721,
+        "updated": 1792273971999,
+        "idle": 1792273969561
+      },
+      "title": "pong",
+      "location": {
+        "directory": "/sample/workspace"
+      }
+    },
+    {
+      "id": "ses_eb425acfaffeKdXuOQKY3YlzeR",
+      "projectID": "dcb9fbab762fca1c72dae4cec0405b5b9fb1f49f",
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "time": {
+        "created": 1792273961735,
+        "updated": 1792273961735
+      },
+      "location": {
+        "directory": "/sample/runtime"
+      }
+    }
+  ],
+  "cursor": {
+    "previous": "eyJhbmNob3IiOnsiaWQiOiJzZXNfZWI0MjUwODRhZmZlMkVyRTAwN0JlcVdTR3EiLCJ0aW1lIjoxNzkyMjc0MDA5Mzg3LCJkaXJlY3Rpb24iOiJwcmV2aW91cyJ9fQ",
+    "next": "eyJhbmNob3IiOnsiaWQiOiJzZXNfZWI0MjVhY2ZhZmZlS2RYdU9RS1kzWWx6ZVIiLCJ0aW1lIjoxNzkyMjczOTYxNzM1LCJkaXJlY3Rpb24iOiJuZXh0In19"
+  }
+}

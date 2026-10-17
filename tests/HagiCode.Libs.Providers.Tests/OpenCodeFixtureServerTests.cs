@@ -1,3 +1,5 @@
+using System.Net;
+using System.Text;
 using HagiCode.Libs.Providers.OpenCode;
 using Shouldly;
 
@@ -5,51 +7,138 @@ namespace HagiCode.Libs.Providers.Tests;
 
 public sealed class OpenCodeFixtureServerTests
 {
+    private const string FixturePassword = "fixture-test-secret";
+
     [Test]
     public async Task FixtureServer_supports_health_create_and_prompt_round_trip()
     {
-        await using var fixture = await OpenCodeFixtureServer.StartAsync();
+        await using var fixture = await OpenCodeFixtureServer.StartAsync(new OpenCodeFixtureServerOptions
+        {
+            ServerPassword = FixturePassword,
+        });
         using var httpClient = new HttpClient { BaseAddress = fixture.BaseUri };
-        using var client = new OpenCodeHttpClient(httpClient, directory: "/tmp/hagicode-libs-fixture", workspace: "fixture-workspace");
+        using var client = new OpenCodeHttpClient(httpClient, directory: "/tmp/hagicode-libs-fixture", workspace: null, serverPassword: fixture.ServerPassword);
 
         var health = await client.HealthAsync();
         var session = await client.CreateSessionAsync("fixture-session");
-        var response = await client.PromptAsync(
-            session.Id,
-            OpenCodeSessionPromptRequest.FromText("Reply with the single word READY."));
+        var response = await PromptAndCollectAsync(client, session.Id, "Reply with the single word READY.");
 
+        health.Version.ShouldBe("2.0.32");
         health.Healthy.ShouldBeTrue();
         session.Title.ShouldBe("fixture-session");
-        session.Directory.ShouldBe("/tmp/hagicode-libs-fixture");
-        session.WorkspaceId.ShouldBe("fixture-workspace");
+        session.Location.ShouldNotBeNull();
+        session.Location!.Directory.ShouldBe("/tmp/hagicode-libs-fixture");
         response.GetTextContent().ShouldBe("READY");
+        response.Role.ShouldBe("assistant");
     }
 
     [Test]
-    public async Task FixtureServer_can_emit_structured_empty_text_diagnostics()
+    public async Task FixtureServer_rejects_requests_without_a_valid_credential()
     {
         await using var fixture = await OpenCodeFixtureServer.StartAsync(new OpenCodeFixtureServerOptions
         {
+            ServerPassword = FixturePassword,
+        });
+        using var anonymous = new HttpClient { BaseAddress = fixture.BaseUri };
+        using var wrong = CreateAuthenticatedHttpClient(fixture.BaseUri, "not-the-password");
+
+        using var withoutCredential = await anonymous.GetAsync("/api/info");
+        using var withWrongCredential = await wrong.GetAsync("/api/info");
+
+        withoutCredential.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+        withWrongCredential.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+    }
+
+    [Test]
+    public async Task FixtureServer_serves_the_legacy_html_shell_with_200_on_global_health()
+    {
+        await using var fixture = await OpenCodeFixtureServer.StartAsync(new OpenCodeFixtureServerOptions
+        {
+            ServerPassword = FixturePassword,
+        });
+        using var httpClient = CreateAuthenticatedHttpClient(fixture.BaseUri, fixture.ServerPassword);
+
+        using var response = await httpClient.GetAsync("/global/health");
+        var body = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.Content.Headers.ContentType!.MediaType.ShouldBe("text/html");
+        body.ShouldContain("<html");
+    }
+
+    [Test]
+    public async Task FixtureServer_reports_a_successful_turn_without_text_as_an_empty_reply()
+    {
+        await using var fixture = await OpenCodeFixtureServer.StartAsync(new OpenCodeFixtureServerOptions
+        {
+            ServerPassword = FixturePassword,
             EmptyTextModelIds = ["catalog/model-a"],
         });
         using var httpClient = new HttpClient { BaseAddress = fixture.BaseUri };
-        using var client = new OpenCodeHttpClient(httpClient, directory: null, workspace: null);
+        using var client = new OpenCodeHttpClient(httpClient, directory: null, workspace: null, serverPassword: fixture.ServerPassword);
         var session = await client.CreateSessionAsync("fixture-diagnostics");
+        await client.SetSessionModelAsync(session.Id, new OpenCodeModelSelection { ProviderId = "catalog", ModelId = "model-a" });
 
-        var response = await client.PromptAsync(
-            session.Id,
-            OpenCodeSessionPromptRequest.FromText(
-                "Reply with the single word READY.",
-                new OpenCodeModelSelection
-                {
-                    ProviderId = "catalog",
-                    ModelId = "model-a",
-                }));
+        var response = await PromptAndCollectAsync(client, session.Id, "Reply with the single word READY.");
 
         response.GetTextContent().ShouldBeEmpty();
         var diagnostic = response.BuildDiagnosticSummary();
-        diagnostic.ShouldContain("no readable text content");
-        diagnostic.ShouldContain("partTypes=step-finish, error");
-        diagnostic.ShouldContain("OpenCode fixture emitted an assistant envelope without text content.");
+        diagnostic.ShouldContain("successful response with no readable text content");
+        diagnostic.ShouldContain("partTypes=(none)");
+    }
+
+    [Test]
+    public async Task FixtureServer_reports_a_failed_turn_with_its_error_message()
+    {
+        await using var fixture = await OpenCodeFixtureServer.StartAsync(new OpenCodeFixtureServerOptions
+        {
+            ServerPassword = FixturePassword,
+            FailingModelIds = ["catalog/model-b"],
+        });
+        using var httpClient = new HttpClient { BaseAddress = fixture.BaseUri };
+        using var client = new OpenCodeHttpClient(httpClient, directory: null, workspace: null, serverPassword: fixture.ServerPassword);
+        var session = await client.CreateSessionAsync("fixture-failure");
+        await client.SetSessionModelAsync(session.Id, new OpenCodeModelSelection { ProviderId = "catalog", ModelId = "model-b" });
+
+        var response = await PromptAndCollectAsync(client, session.Id, "hello");
+
+        response.GetTextContent().ShouldBeEmpty();
+        var diagnostic = response.BuildDiagnosticSummary();
+        diagnostic.ShouldContain("failed turn");
+        diagnostic.ShouldContain("error.message=Model unavailable: catalog/model-b");
+    }
+
+    [Test]
+    public async Task FixtureServer_rejects_an_invalid_model_on_the_session_model_route()
+    {
+        await using var fixture = await OpenCodeFixtureServer.StartAsync(new OpenCodeFixtureServerOptions
+        {
+            ServerPassword = FixturePassword,
+            InvalidModelIds = ["catalog/missing"],
+        });
+        using var httpClient = new HttpClient { BaseAddress = fixture.BaseUri };
+        using var client = new OpenCodeHttpClient(httpClient, directory: null, workspace: null, serverPassword: fixture.ServerPassword);
+        var session = await client.CreateSessionAsync("fixture-invalid-model");
+
+        var exception = await Should.ThrowAsync<OpenCodeApiException>(async () =>
+            await client.SetSessionModelAsync(session.Id, new OpenCodeModelSelection { ProviderId = "catalog", ModelId = "missing" }));
+
+        exception.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+    }
+
+    private static HttpClient CreateAuthenticatedHttpClient(Uri baseUri, string password)
+    {
+        var httpClient = new HttpClient { BaseAddress = baseUri };
+        var credentials = Convert.ToBase64String(Encoding.UTF8.GetBytes($"opencode:{password}"));
+        httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", credentials);
+        return httpClient;
+    }
+
+    /// <summary>
+    /// Runs one prompt through the event flow and returns the assembled assistant envelope.
+    /// </summary>
+    private static Task<OpenCodeMessageEnvelope> PromptAndCollectAsync(OpenCodeHttpClient client, string sessionId, string text)
+    {
+        return client.PromptAsync(sessionId, OpenCodeSessionPromptRequest.FromText(text));
     }
 }

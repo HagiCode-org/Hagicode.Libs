@@ -8,9 +8,18 @@ namespace HagiCode.Libs.Providers.OpenCode;
 
 public sealed class OpenCodeProcessLauncher
 {
+    // OpenCode 2.0 prints "server listening on <url>"; 1.x printed "opencode server listening ... on <url>". Both are accepted.
     private static readonly Regex ListeningRegex = new(
-        @"opencode server listening.* on\s+(https?://[^\s]+)",
+        @"(?:opencode\s+)?server listening.* on\s+(https?://[^\s]+)",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    // OpenCode 2.0 prints "server password <value>" right after the listening line.
+    private static readonly Regex PasswordRegex = new(
+        @"^\s*server password\s+(\S+)\s*$",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    // The password line follows the listening line within the same startup burst; wait briefly for it.
+    private static readonly TimeSpan PasswordLineGrace = TimeSpan.FromSeconds(1);
 
     private readonly CliExecutableResolver _executableResolver;
 
@@ -95,6 +104,7 @@ public sealed class OpenCodeProcessLauncher
         var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         var output = new StringBuilder();
         var readySource = new TaskCompletionSource<Uri>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var passwordSource = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         if (!process.Start())
         {
@@ -107,6 +117,11 @@ public sealed class OpenCodeProcessLauncher
             {
                 readySource.TrySetResult(baseUri);
             }
+
+            if (TryParsePassword(line, out var password))
+            {
+                passwordSource.TrySetResult(password);
+            }
         });
         var stderrPump = PumpAsync(process.StandardError, output, _ => { });
         var exitedTask = process.WaitForExitAsync(cancellationToken);
@@ -115,18 +130,23 @@ public sealed class OpenCodeProcessLauncher
         var completed = await Task.WhenAny(readySource.Task, exitedTask, timeoutTask).ConfigureAwait(false);
         if (completed == readySource.Task)
         {
-            return new OpenCodeProcessHandle(process, readySource.Task.Result, output, stdoutPump, stderrPump);
+            var passwordLine = await Task.WhenAny(passwordSource.Task, Task.Delay(PasswordLineGrace, cancellationToken)).ConfigureAwait(false);
+            var serverPassword = passwordLine == passwordSource.Task ? passwordSource.Task.Result : null;
+            return new OpenCodeProcessHandle(process, readySource.Task.Result, serverPassword, output, stdoutPump, stderrPump);
         }
 
         TryKill(process);
         await Task.WhenAll(SuppressAsync(stdoutPump), SuppressAsync(stderrPump)).ConfigureAwait(false);
 
+        var passwordCaptured = passwordSource.Task.IsCompletedSuccessfully ? passwordSource.Task.Result : null;
+        var redactedOutput = OpenCodeSecretRedactor.Redact(CaptureOutput(output), passwordCaptured);
+
         if (completed == timeoutTask)
         {
-            throw new TimeoutException($"Timed out waiting for OpenCode runtime startup after {startupTimeout}. Output: {output}");
+            throw new TimeoutException($"Timed out waiting for OpenCode runtime startup after {startupTimeout}. Output: {redactedOutput}");
         }
 
-        throw new InvalidOperationException($"OpenCode runtime exited before it reported a listening URL. Output: {output}");
+        throw new InvalidOperationException($"OpenCode runtime exited before it reported a listening URL. Output: {redactedOutput}");
     }
 
     public string? ResolveExecutablePath(OpenCodeStandaloneServerOptions options, IReadOnlyDictionary<string, string?> runtimeEnvironment)
@@ -155,11 +175,32 @@ public sealed class OpenCodeProcessLauncher
         return false;
     }
 
+    public static bool TryParsePassword(string line, out string password)
+    {
+        var match = PasswordRegex.Match(line);
+        if (match.Success)
+        {
+            password = match.Groups[1].Value;
+            return true;
+        }
+
+        password = string.Empty;
+        return false;
+    }
+
     public static int GetFreeTcpPort()
     {
         using var listener = new TcpListener(System.Net.IPAddress.Loopback, 0);
         listener.Start();
         return ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+    }
+
+    private static string CaptureOutput(StringBuilder output)
+    {
+        lock (output)
+        {
+            return output.ToString();
+        }
     }
 
     private static async Task PumpAsync(StreamReader reader, StringBuilder output, Action<string> onLine)
@@ -218,12 +259,14 @@ public sealed class OpenCodeProcessHandle : IAsyncDisposable
     internal OpenCodeProcessHandle(
         Process process,
         Uri baseUri,
+        string? serverPassword,
         StringBuilder output,
         Task stdoutPump,
         Task stderrPump)
     {
         _process = process;
         BaseUri = baseUri;
+        ServerPassword = serverPassword;
         _output = output;
         _stdoutPump = stdoutPump;
         _stderrPump = stderrPump;
@@ -233,13 +276,19 @@ public sealed class OpenCodeProcessHandle : IAsyncDisposable
 
     public int? ProcessId => _process.Id;
 
+    /// <summary>
+    /// Gets the server password printed by the owned runtime, or <c>null</c> when none was printed.
+    /// Internal so that the password stays inside the lifecycle code.
+    /// </summary>
+    internal string? ServerPassword { get; }
+
     public string CapturedOutput
     {
         get
         {
             lock (_output)
             {
-                return _output.ToString();
+                return OpenCodeSecretRedactor.Redact(_output.ToString(), ServerPassword) ?? string.Empty;
             }
         }
     }

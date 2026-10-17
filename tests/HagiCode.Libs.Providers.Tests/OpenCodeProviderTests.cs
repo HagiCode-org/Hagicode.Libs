@@ -3,6 +3,7 @@ using System.Net;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Channels;
 using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Transport;
 using HagiCode.Libs.Providers.OpenCode;
@@ -286,6 +287,46 @@ public sealed class OpenCodeProviderTests
         result.Success.ShouldBeTrue();
     }
 
+    [Test]
+    public async Task ExecuteAsync_attach_forwards_the_configured_server_password_to_a_protected_runtime()
+    {
+        await using var fixture = await OpenCodeFixtureServer.StartAsync(new OpenCodeFixtureServerOptions
+        {
+            ServerPassword = "provider-forward-secret",
+        });
+        await using var provider = CreateProvider(new MissingExecutableResolver());
+
+        var messages = await DrainMessagesAsync(provider.ExecuteAsync(
+            new OpenCodeOptions
+            {
+                BaseUrl = fixture.BaseUri.ToString(),
+                ServerPassword = "provider-forward-secret",
+            },
+            "Reply with the single word READY."));
+
+        messages.Select(static message => message.Type).ShouldBe(["session.started", "assistant", "terminal.completed"]);
+        messages[1].Content.GetProperty("text").GetString().ShouldBe("READY");
+    }
+
+    [Test]
+    public async Task ExecuteAsync_attach_without_the_server_password_reports_authentication_failure_without_leaking_it()
+    {
+        await using var fixture = await OpenCodeFixtureServer.StartAsync(new OpenCodeFixtureServerOptions
+        {
+            ServerPassword = "provider-forward-secret",
+        });
+        await using var provider = CreateProvider(new MissingExecutableResolver());
+
+        var exception = await Should.ThrowAsync<OpenCodeStandaloneServerLifecycleException>(async () =>
+            await DrainMessagesAsync(provider.ExecuteAsync(
+                new OpenCodeOptions { BaseUrl = fixture.BaseUri.ToString() },
+                "hello")));
+
+        exception.Result.Stage.ShouldBe(OpenCodeLifecycleStage.HealthProbe);
+        exception.Message.ShouldContain("authentication failed");
+        exception.Message.ShouldNotContain("provider-forward-secret");
+    }
+
     private static TestOpenCodeProvider CreateProvider(CliExecutableResolver? executableResolver = null)
     {
         return new TestOpenCodeProvider(executableResolver ?? new CliExecutableResolver());
@@ -306,7 +347,7 @@ public sealed class OpenCodeProviderTests
     {
         var fileName = $"opencode-shim-{Guid.NewGuid():N}.sh";
         var path = Path.Combine(Path.GetTempPath(), fileName);
-        var content = $"#!/usr/bin/env bash\nset -euo pipefail\nprintf 'opencode server listening on {baseUri}\\n'\nwhile true; do sleep 1; done\n";
+        var content = $"#!/usr/bin/env bash\nset -euo pipefail\nprintf 'server listening on {baseUri.ToString().TrimEnd('/')}\\n'\nprintf 'server password provider-test-secret\\n'\nwhile true; do sleep 1; done\n";
         File.WriteAllText(path, content, new UTF8Encoding(false));
         if (!OperatingSystem.IsWindows())
         {
@@ -361,6 +402,9 @@ public sealed class OpenCodeProviderTests
             => null;
     }
 
+    /// <summary>
+    /// Simulates the OpenCode 2.0 HTTP surface. Each prompt's envelope from the responder is published as the 2.0 event sequence.
+    /// </summary>
     private sealed class OpenCodeTestServer : IAsyncDisposable
     {
         private readonly HttpListener _listener;
@@ -368,6 +412,8 @@ public sealed class OpenCodeProviderTests
         private readonly CancellationTokenSource _cts;
         private readonly Func<OpenCodeTestServer, string, string, OpenCodeMessageEnvelope> _promptResponder;
         private readonly ConcurrentDictionary<string, OpenCodeSession> _sessions = new(StringComparer.Ordinal);
+        private readonly List<Channel<string>> _subscribers = [];
+        private readonly object _subscriberLock = new();
         private int _nextSessionId;
         private int _disposed;
 
@@ -514,19 +560,19 @@ public sealed class OpenCodeProviderTests
             {
                 var request = context.Request;
                 var path = request.Url?.AbsolutePath ?? "/";
-                if (request.HttpMethod == "GET" && path == "/global/health")
+                if (request.HttpMethod == "GET" && path == "/api/info")
                 {
-                    await WriteJsonAsync(context.Response, new { healthy = true, version = Version }, cancellationToken);
+                    await WriteJsonAsync(context.Response, new { version = Version, pid = 1, urls = Array.Empty<string>(), paths = new { tmp = "/tmp" } }, cancellationToken);
                     return;
                 }
 
-                if (request.HttpMethod == "GET" && path == "/session")
+                if (request.HttpMethod == "GET" && path == "/api/session")
                 {
-                    await WriteJsonAsync(context.Response, _sessions.Values.ToArray(), cancellationToken);
+                    await WriteJsonAsync(context.Response, new { data = _sessions.Values.ToArray(), cursor = new { previous = (string?)null, next = (string?)null } }, cancellationToken);
                     return;
                 }
 
-                if (request.HttpMethod == "POST" && path == "/session")
+                if (request.HttpMethod == "POST" && path == "/api/session")
                 {
                     CreateSessionCount++;
                     if (RemainingCreateSessionFailures > 0)
@@ -537,21 +583,36 @@ public sealed class OpenCodeProviderTests
                         return;
                     }
 
-                    var sessionId = $"session-{Interlocked.Increment(ref _nextSessionId):D4}";
+                    using var body = await JsonDocument.ParseAsync(request.InputStream, cancellationToken: cancellationToken);
+                    var directory = body.RootElement.TryGetProperty("location", out var location) && location.TryGetProperty("directory", out var dir)
+                        ? dir.GetString()
+                        : null;
+                    var number = Interlocked.Increment(ref _nextSessionId);
                     var session = new OpenCodeSession
                     {
-                        Id = sessionId,
-                        Title = $"Test Session {_nextSessionId}",
-                        Directory = request.QueryString["directory"],
-                        WorkspaceId = request.QueryString["workspace"],
+                        Id = $"session-{number:D4}",
+                        Title = $"Test Session {number}",
+                        Location = directory is null ? null : new OpenCodeLocationRef { Directory = directory },
                         ProjectId = "test-project"
                     };
-                    _sessions[sessionId] = session;
-                    await WriteJsonAsync(context.Response, session, cancellationToken);
+                    _sessions[session.Id] = session;
+                    await WriteJsonAsync(context.Response, new { data = session }, cancellationToken);
                     return;
                 }
 
-                if (TryMatchPromptPath(path, out var sessionIdForPrompt))
+                if (request.HttpMethod == "GET" && path == "/api/event")
+                {
+                    await StreamEventsAsync(context.Response, cancellationToken);
+                    return;
+                }
+
+                if (request.HttpMethod == "POST" && TryMatchSessionAction(path, "model", out _))
+                {
+                    context.Response.StatusCode = 204;
+                    return;
+                }
+
+                if (request.HttpMethod == "POST" && TryMatchSessionAction(path, "prompt", out var sessionIdForPrompt))
                 {
                     if (!_sessions.ContainsKey(sessionIdForPrompt))
                     {
@@ -560,10 +621,8 @@ public sealed class OpenCodeProviderTests
                         return;
                     }
 
-                    var promptRequest = await JsonSerializer.DeserializeAsync<OpenCodeSessionPromptRequest>(request.InputStream, cancellationToken: cancellationToken)
-                        ?? new OpenCodeSessionPromptRequest();
-                    var promptText = promptRequest.Parts.FirstOrDefault(static part => string.Equals(part.Type, "text", StringComparison.OrdinalIgnoreCase))?.Text
-                        ?? string.Empty;
+                    using var promptBody = await JsonDocument.ParseAsync(request.InputStream, cancellationToken: cancellationToken);
+                    var promptText = promptBody.RootElement.TryGetProperty("text", out var text) ? text.GetString() ?? string.Empty : string.Empty;
                     PromptCount++;
                     if (RemainingPromptFailures > 0)
                     {
@@ -573,8 +632,19 @@ public sealed class OpenCodeProviderTests
                         return;
                     }
 
-                    var response = _promptResponder(this, sessionIdForPrompt, promptText);
-                    await WriteJsonAsync(context.Response, response, cancellationToken);
+                    var envelope = _promptResponder(this, sessionIdForPrompt, promptText);
+                    PublishTurn(sessionIdForPrompt, envelope);
+                    await WriteJsonAsync(context.Response, new
+                    {
+                        data = new
+                        {
+                            id = $"msg_{Guid.NewGuid():N}",
+                            sessionID = sessionIdForPrompt,
+                            type = "user",
+                            payload = new { text = promptText },
+                            delivery = "steer",
+                        }
+                    }, cancellationToken);
                     return;
                 }
 
@@ -590,15 +660,117 @@ public sealed class OpenCodeProviderTests
             }
         }
 
-        private static bool TryMatchPromptPath(string path, out string sessionId)
+        /// <summary>
+        /// Publishes the 2.0 event sequence for one turn: text parts become <c>session.text.ended</c>; an error part fails the turn.
+        /// </summary>
+        private void PublishTurn(string sessionId, OpenCodeMessageEnvelope envelope)
+        {
+            var assistantMessageId = envelope.MessageId ?? $"msg_{Guid.NewGuid():N}";
+            PublishEvent("session.execution.started", new { sessionID = sessionId });
+
+            var errorPart = envelope.Parts.FirstOrDefault(static part => part.ValueKind == JsonValueKind.Object &&
+                part.TryGetProperty("type", out var type) && type.GetString() == "error");
+            if (errorPart.ValueKind == JsonValueKind.Object)
+            {
+                var message = errorPart.TryGetProperty("message", out var messageNode) ? messageNode.GetString() : null;
+                PublishEvent("session.execution.failed", new
+                {
+                    sessionID = sessionId,
+                    error = new { type = "test.failure", message = message ?? "OpenCode test turn failed." },
+                });
+                return;
+            }
+
+            var ordinal = 0;
+            foreach (var part in envelope.Parts)
+            {
+                if (part.ValueKind == JsonValueKind.Object &&
+                    part.TryGetProperty("type", out var type) && type.GetString() == "text" &&
+                    part.TryGetProperty("text", out var textNode))
+                {
+                    PublishEvent("session.text.ended", new
+                    {
+                        sessionID = sessionId,
+                        assistantMessageID = assistantMessageId,
+                        ordinal = ordinal++,
+                        text = textNode.GetString(),
+                    });
+                }
+            }
+
+            PublishEvent("session.execution.succeeded", new { sessionID = sessionId });
+        }
+
+        private void PublishEvent(string type, object data)
+        {
+            var json = JsonSerializer.Serialize(new
+            {
+                id = $"evt_{Guid.NewGuid():N}",
+                created = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                type,
+                data,
+            });
+
+            lock (_subscriberLock)
+            {
+                foreach (var subscriber in _subscribers)
+                {
+                    subscriber.Writer.TryWrite(json);
+                }
+            }
+        }
+
+        private async Task StreamEventsAsync(HttpListenerResponse response, CancellationToken cancellationToken)
+        {
+            response.StatusCode = 200;
+            response.ContentType = "text/event-stream";
+            var channel = Channel.CreateUnbounded<string>();
+            lock (_subscriberLock)
+            {
+                _subscribers.Add(channel);
+            }
+
+            try
+            {
+                await using var writer = new StreamWriter(response.OutputStream, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
+                await writer.WriteAsync($"data: {JsonSerializer.Serialize(new { id = $"evt_{Guid.NewGuid():N}", type = "server.connected", data = new { } })}\n\n");
+                await writer.FlushAsync(cancellationToken);
+                await foreach (var json in channel.Reader.ReadAllAsync(cancellationToken))
+                {
+                    await writer.WriteAsync($"data: {json}\n\n");
+                    await writer.FlushAsync(cancellationToken);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (IOException)
+            {
+            }
+            catch (HttpListenerException)
+            {
+            }
+            finally
+            {
+                lock (_subscriberLock)
+                {
+                    _subscribers.Remove(channel);
+                }
+
+                channel.Writer.TryComplete();
+            }
+        }
+
+        private static bool TryMatchSessionAction(string path, string action, out string sessionId)
         {
             sessionId = string.Empty;
             var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
-            if (segments.Length == 3 &&
-                string.Equals(segments[0], "session", StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(segments[2], "message", StringComparison.OrdinalIgnoreCase))
+            if (segments.Length == 4 &&
+                string.Equals(segments[0], "api", StringComparison.Ordinal) &&
+                string.Equals(segments[1], "session", StringComparison.Ordinal) &&
+                string.Equals(segments[3], action, StringComparison.Ordinal))
             {
-                sessionId = Uri.UnescapeDataString(segments[1]);
+                sessionId = Uri.UnescapeDataString(segments[2]);
                 return true;
             }
 

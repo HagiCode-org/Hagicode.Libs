@@ -17,6 +17,12 @@ public sealed record OpenCodeOptions
     public string? BaseUrl { get; init; }
 
     /// <summary>
+    /// Gets or sets the OpenCode server password for an attached runtime (<see cref="BaseUrl"/>).
+    /// Owned runtimes capture their own password and ignore this value.
+    /// </summary>
+    public string? ServerPassword { get; init; }
+
+    /// <summary>
     /// Gets or sets the working directory forwarded to the OpenCode HTTP API.
     /// </summary>
     public string? WorkingDirectory { get; init; }
@@ -61,4 +67,12 @@ public sealed record OpenCodeOptions
     /// Gets or sets extra arguments appended to <c>opencode serve</c>.
     /// </summary>
     public IReadOnlyList<string> ExtraArguments { get; init; } = [];
+
+    /// <summary>
+    /// Formats the options without exposing <see cref="ServerPassword"/>.
+    /// </summary>
+    public override string ToString()
+    {
+        return $"OpenCodeOptions {{ ExecutablePath = {ExecutablePath}, BaseUrl = {BaseUrl}, WorkingDirectory = {WorkingDirectory}, Workspace = {Workspace}, Model = {Model}, SessionId = {SessionId}, ServerPassword = {(string.IsNullOrEmpty(ServerPassword) ? "null" : OpenCodeSecretRedactor.Marker)} }}";
+    }
 }

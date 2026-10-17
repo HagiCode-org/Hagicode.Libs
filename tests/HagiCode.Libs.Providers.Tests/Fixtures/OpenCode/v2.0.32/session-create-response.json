@@ -1,0 +1,23 @@
+{
+  "data": {
+    "id": "ses_eb425ad08ffeu7IGlo6YLWUx79",
+    "projectID": "51f4df386125fd20fef84212c06c6d88277e0846",
+    "cost": 0,
+    "tokens": {
+      "input": 0,
+      "output": 0,
+      "reasoning": 0,
+      "cache": {
+        "read": 0,
+        "write": 0
+      }
+    },
+    "time": {
+      "created": 1792273961721,
+      "updated": 1792273961721
+    },
+    "location": {
+      "directory": "/sample/workspace"
+    }
+  }
+}

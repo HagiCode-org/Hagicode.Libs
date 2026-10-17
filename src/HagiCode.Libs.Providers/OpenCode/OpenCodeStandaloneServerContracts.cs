@@ -33,9 +33,23 @@ public sealed record OpenCodeStandaloneServerOptions
 
     public TimeSpan? RequestTimeout { get; init; }
 
+    /// <summary>
+    /// Gets the optional OpenCode server password used to authenticate against an attached (<see cref="BaseUrl"/>) runtime.
+    /// Owned runtimes capture their own password from startup output and ignore this value.
+    /// </summary>
+    public string? ServerPassword { get; init; }
+
     public IReadOnlyDictionary<string, string?> EnvironmentVariables { get; init; } = new Dictionary<string, string?>();
 
     public IReadOnlyList<string> ExtraArguments { get; init; } = [];
+
+    /// <summary>
+    /// Formats the options without exposing <see cref="ServerPassword"/>.
+    /// </summary>
+    public override string ToString()
+    {
+        return $"OpenCodeStandaloneServerOptions {{ ExecutablePath = {ExecutablePath}, BaseUrl = {BaseUrl}, WorkingDirectory = {WorkingDirectory}, Workspace = {Workspace}, ServerPassword = {(string.IsNullOrEmpty(ServerPassword) ? "null" : OpenCodeSecretRedactor.Marker)} }}";
+    }
 }
 
 public sealed class OpenCodeStandaloneServerLifecycleResult
@@ -103,7 +117,8 @@ public sealed class OpenCodeStandaloneServerConnection : IAsyncDisposable
         string executionProfile,
         bool ownsRuntime,
         IAsyncDisposable? ownedResource,
-        OpenCodeStandaloneServerLifecycleResult lifecycleResult)
+        OpenCodeStandaloneServerLifecycleResult lifecycleResult,
+        string? serverPassword = null)
     {
         RuntimeKey = runtimeKey;
         Client = client ?? throw new ArgumentNullException(nameof(client));
@@ -111,11 +126,17 @@ public sealed class OpenCodeStandaloneServerConnection : IAsyncDisposable
         OwnsRuntime = ownsRuntime;
         _ownedResource = ownedResource;
         LifecycleResult = lifecycleResult ?? throw new ArgumentNullException(nameof(lifecycleResult));
+        ServerPassword = serverPassword;
     }
 
     public string RuntimeKey { get; }
 
     public OpenCodeHttpClient Client { get; }
+
+    /// <summary>
+    /// Gets the password this connection authenticates with, used only to redact lifecycle diagnostics.
+    /// </summary>
+    internal string? ServerPassword { get; }
 
     public string ExecutionProfile { get; }
 

@@ -217,6 +217,12 @@ public sealed class OpenCodeStandaloneServerHost : IOpenCodeStandaloneServerClie
         builder.Append("workspace=").Append(Normalize(options.Workspace)).Append('|');
         builder.Append("extraArgs=").Append(string.Join(',', options.ExtraArguments.Select(static value => Normalize(value)))).Append('|');
 
+        // Only an attached runtime uses the configured password; a digest keeps two passwords apart without storing either readably.
+        if (!string.IsNullOrWhiteSpace(options.BaseUrl))
+        {
+            builder.Append("serverPassword=").Append(DigestSecret(options.ServerPassword)).Append('|');
+        }
+
         foreach (var pair in runtimeEnvironment.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
         {
             builder.Append("env:").Append(pair.Key).Append('=').Append(Normalize(pair.Value)).Append('|');
@@ -261,7 +267,17 @@ public sealed class OpenCodeStandaloneServerHost : IOpenCodeStandaloneServerClie
                         errorMessage: $"OpenCode base URL '{options.BaseUrl}' is not a valid absolute URI.");
                 }
 
-                runtime = CreateHandle(baseUri, options, runtimeKey, requestTimeout, "attach", ownsRuntime: false, ownedResource: null, attemptedAt, diagnosticOutput: null);
+                runtime = CreateHandle(
+                    baseUri,
+                    options,
+                    runtimeKey,
+                    requestTimeout,
+                    "attach",
+                    ownsRuntime: false,
+                    ownedResource: null,
+                    attemptedAt,
+                    diagnosticOutput: null,
+                    serverPassword: options.ServerPassword);
                 await ProbeHealthyAsync(runtime, options, runtimeKey, cancellationToken).ConfigureAwait(false);
                 return runtime;
             }
@@ -279,7 +295,17 @@ public sealed class OpenCodeStandaloneServerHost : IOpenCodeStandaloneServerClie
             }
 
             var process = await _processLauncher.StartAsync(executablePath, options, runtimeEnvironment, cancellationToken).ConfigureAwait(false);
-            runtime = CreateHandle(process.BaseUri, options, runtimeKey, requestTimeout, "live", ownsRuntime: true, process, attemptedAt, process.CapturedOutput);
+            runtime = CreateHandle(
+                process.BaseUri,
+                options,
+                runtimeKey,
+                requestTimeout,
+                "live",
+                ownsRuntime: true,
+                process,
+                attemptedAt,
+                process.CapturedOutput,
+                serverPassword: process.ServerPassword);
             await ProbeHealthyAsync(runtime, options, runtimeKey, cancellationToken).ConfigureAwait(false);
             return runtime;
         }
@@ -308,6 +334,8 @@ public sealed class OpenCodeStandaloneServerHost : IOpenCodeStandaloneServerClie
                 await runtime.DisposeAsync().ConfigureAwait(false);
             }
 
+            var secret = runtime?.ServerPassword;
+            var message = OpenCodeSecretRedactor.Redact(ex.Message, secret);
             throw CreateLifecycleException(
                 OpenCodeStandaloneServerStatus.Unhealthy,
                 stage,
@@ -316,8 +344,8 @@ public sealed class OpenCodeStandaloneServerHost : IOpenCodeStandaloneServerClie
                 ownsRuntime: stage != OpenCodeLifecycleStage.Attach,
                 workingDirectory,
                 attemptedAt,
-                errorMessage: $"OpenCode lifecycle stage '{FormatStage(stage)}' failed: {ex.Message}",
-                diagnosticOutput: ex is TimeoutException or InvalidOperationException ? ex.Message : null,
+                errorMessage: $"OpenCode lifecycle stage '{FormatStage(stage)}' failed: {message}",
+                diagnosticOutput: ex is TimeoutException or InvalidOperationException ? message : null,
                 baseUri: runtime?.BaseUri.ToString());
         }
     }
@@ -370,6 +398,14 @@ public sealed class OpenCodeStandaloneServerHost : IOpenCodeStandaloneServerClie
         }
         catch (Exception ex)
         {
+            // Classify the cause so the diagnostic says whether the runtime was unreachable, rejected the password, or is not OpenCode 2.0.
+            var cause = ex switch
+            {
+                OpenCodeAuthenticationException => "authentication failed: the OpenCode server rejected the credentials (HTTP 401). Provide the OpenCode server password for this runtime.",
+                OpenCodeUnsupportedApiException => "unsupported API version: the server does not expose the OpenCode 2.0 API.",
+                HttpRequestException or TaskCanceledException => $"connection failed: {ex.Message}",
+                _ => ex.Message,
+            };
             throw CreateLifecycleException(
                 OpenCodeStandaloneServerStatus.Unhealthy,
                 OpenCodeLifecycleStage.HealthProbe,
@@ -378,10 +414,17 @@ public sealed class OpenCodeStandaloneServerHost : IOpenCodeStandaloneServerClie
                 runtime.OwnsRuntime,
                 workingDirectory,
                 attemptedAt,
-                errorMessage: $"OpenCode lifecycle stage 'health_probe' failed: {ex.Message}",
+                errorMessage: OpenCodeSecretRedactor.Redact($"OpenCode lifecycle stage 'health_probe' failed: {cause}", runtime.ServerPassword)!,
                 diagnosticOutput: runtime.LifecycleResult.DiagnosticOutput,
                 baseUri: runtime.BaseUri.ToString());
         }
+    }
+
+    private static string DigestSecret(string? secret)
+    {
+        return string.IsNullOrEmpty(secret)
+            ? string.Empty
+            : Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(secret)));
     }
 
     private async Task<IReadOnlyDictionary<string, string?>> ResolveRuntimeEnvironmentAsync(CancellationToken cancellationToken)
@@ -403,14 +446,15 @@ public sealed class OpenCodeStandaloneServerHost : IOpenCodeStandaloneServerClie
         bool ownsRuntime,
         IAsyncDisposable? ownedResource,
         DateTimeOffset attemptedAt,
-        string? diagnosticOutput)
+        string? diagnosticOutput,
+        string? serverPassword)
     {
         var httpClient = new HttpClient
         {
             BaseAddress = NormalizeBaseUri(baseUri),
             Timeout = requestTimeout,
         };
-        var client = new OpenCodeHttpClient(httpClient, options.WorkingDirectory, options.Workspace);
+        var client = new OpenCodeHttpClient(httpClient, options.WorkingDirectory, options.Workspace, serverPassword);
         return new OpenCodeStandaloneServerConnection(
             runtimeKey,
             client,
@@ -428,7 +472,8 @@ public sealed class OpenCodeStandaloneServerHost : IOpenCodeStandaloneServerClie
                 WorkingDirectory = NormalizeWorkingDirectory(options.WorkingDirectory),
                 AttemptedAt = attemptedAt,
                 DiagnosticOutput = string.IsNullOrWhiteSpace(diagnosticOutput) ? null : diagnosticOutput,
-            });
+            },
+            serverPassword);
     }
 
     private static OpenCodeStandaloneServerLifecycleException CreateLifecycleException(

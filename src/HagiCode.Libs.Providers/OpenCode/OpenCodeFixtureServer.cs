@@ -1,50 +1,79 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Channels;
 
 namespace HagiCode.Libs.Providers.OpenCode;
 
+/// <summary>
+/// Options for the in-process OpenCode 2.0 simulation used by tests.
+/// </summary>
 public sealed class OpenCodeFixtureServerOptions
 {
     public string Hostname { get; init; } = "127.0.0.1";
 
     public int? Port { get; init; }
 
-    public string Version { get; init; } = "fixture-1.0.0";
+    public string Version { get; init; } = "2.0.32";
 
     public string AssistantPrefix { get; init; } = "READY";
 
-    public IReadOnlyCollection<string> EmptyBodyModelIds { get; init; } = Array.Empty<string>();
+    /// <summary>
+    /// The password the simulated server requires. When <c>null</c>, a random password is generated.
+    /// </summary>
+    public string? ServerPassword { get; init; }
 
+    /// <summary>
+    /// When <c>true</c> (the default, as in OpenCode 2.0), every <c>/api/*</c> request needs a valid Basic credential.
+    /// </summary>
+    public bool RequireAuthentication { get; init; } = true;
+
+    /// <summary>Models whose prompt completes without any assistant text.</summary>
     public IReadOnlyCollection<string> EmptyTextModelIds { get; init; } = Array.Empty<string>();
 
+    /// <summary>Models whose prompt answers with an empty body.</summary>
+    public IReadOnlyCollection<string> EmptyBodyModelIds { get; init; } = Array.Empty<string>();
+
+    /// <summary>Models rejected when they are selected for a session.</summary>
     public IReadOnlyCollection<string> InvalidModelIds { get; init; } = Array.Empty<string>();
 
+    /// <summary>Models whose prompt answers with a non-JSON body.</summary>
     public IReadOnlyCollection<string> NonJsonModelIds { get; init; } = Array.Empty<string>();
 
-    public bool EmptyBodyWhenModelMissing { get; init; }
-
-    public bool NonJsonWhenModelMissing { get; init; }
+    /// <summary>Models whose turn ends with <c>session.execution.failed</c>.</summary>
+    public IReadOnlyCollection<string> FailingModelIds { get; init; } = Array.Empty<string>();
 }
 
+/// <summary>
+/// Simulates OpenCode 2.0: the startup lines, Basic authentication, the <c>/api/*</c> routes,
+/// the <c>/api/event</c> stream, and the Web UI HTML shell (HTTP 200) on every other path.
+/// </summary>
 public static class OpenCodeFixtureServer
 {
+    private const string Username = "opencode";
+    private const string LegacyHtml = "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>OpenCode</title></head><body><div id=\"root\"></div></body></html>";
+
     public static Task<OpenCodeFixtureServerHandle> StartAsync(
         OpenCodeFixtureServerOptions? options = null,
         CancellationToken cancellationToken = default)
     {
         options ??= new OpenCodeFixtureServerOptions();
+        var password = string.IsNullOrEmpty(options.ServerPassword)
+            ? Convert.ToHexString(RandomNumberGenerator.GetBytes(16))
+            : options.ServerPassword;
         var port = options.Port ?? OpenCodeProcessLauncher.GetFreeTcpPort();
         var listener = new HttpListener();
         listener.Prefixes.Add($"http://{options.Hostname}:{port}/");
         listener.Start();
 
-        var state = new FixtureState(options);
+        var baseUri = new Uri($"http://{options.Hostname}:{port}/");
+        var state = new FixtureState(options, password, baseUri);
         var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var loopTask = Task.Run(() => AcceptLoopAsync(listener, state, cts.Token), CancellationToken.None);
-        var baseUri = new Uri($"http://{options.Hostname}:{port}/");
-        return Task.FromResult(new OpenCodeFixtureServerHandle(listener, state, baseUri, loopTask, cts));
+        var startupOutput = $"server listening on {baseUri.ToString().TrimEnd('/')}{Environment.NewLine}server password {password}{Environment.NewLine}";
+        return Task.FromResult(new OpenCodeFixtureServerHandle(listener, baseUri, loopTask, cts, password, startupOutput));
     }
 
     private static async Task AcceptLoopAsync(HttpListener listener, FixtureState state, CancellationToken cancellationToken)
@@ -82,172 +111,118 @@ public static class OpenCodeFixtureServer
         {
             var request = context.Request;
             var path = request.Url?.AbsolutePath ?? "/";
+            var method = request.HttpMethod;
 
-            if (request.HttpMethod == "GET" && path == "/global/health")
+            if (!IsApiPath(path))
             {
-                await WriteJsonAsync(context.Response, new OpenCodeHealthResponse
+                // OpenCode 2.0 serves the Web UI shell with HTTP 200 for every non-API route, including the legacy ones.
+                await WriteAsync(context.Response, 200, "text/html; charset=utf-8", LegacyHtml, cancellationToken);
+                return;
+            }
+
+            if (state.Options.RequireAuthentication && !IsAuthorized(request, state.Password))
+            {
+                await WriteAsync(
+                    context.Response,
+                    401,
+                    "application/json",
+                    JsonSerializer.Serialize(new { _tag = "UnauthorizedError", message = "Authentication required" }),
+                    cancellationToken);
+                return;
+            }
+
+            if (method == "GET" && path == "/api/info")
+            {
+                await WriteJsonAsync(context.Response, 200, new
                 {
-                    Healthy = true,
-                    Version = state.Options.Version,
+                    version = state.Options.Version,
+                    pid = Environment.ProcessId,
+                    urls = new[] { state.BaseUri.ToString().TrimEnd('/') },
+                    paths = new { tmp = "/tmp/opencode" },
+                    capabilities = new { persistentPty = true },
                 }, cancellationToken);
                 return;
             }
 
-            if (request.HttpMethod == "GET" && path == "/project")
+            if (method == "GET" && path == "/api/project")
             {
-                await WriteJsonAsync(context.Response, Array.Empty<OpenCodeProject>(), cancellationToken);
+                await WriteJsonAsync(context.Response, 200, Array.Empty<object>(), cancellationToken);
                 return;
             }
 
-            if (request.HttpMethod == "GET" && path == "/session")
+            if (method == "GET" && path == "/api/fs/list")
+            {
+                await HandleFileListAsync(context.Response, request, cancellationToken);
+                return;
+            }
+
+            if (method == "GET" && path == "/api/session")
             {
                 var sessions = state.Sessions.Values.Select(session => session.Definition).ToArray();
-                await WriteJsonAsync(context.Response, sessions, cancellationToken);
+                await WriteJsonAsync(context.Response, 200, new { data = sessions, cursor = new { previous = (string?)null, next = (string?)null } }, cancellationToken);
                 return;
             }
 
-            if (request.HttpMethod == "POST" && path == "/session")
+            if (method == "POST" && path == "/api/session")
             {
-                var createRequest = await JsonSerializer.DeserializeAsync<OpenCodeSessionCreateRequest>(request.InputStream, cancellationToken: cancellationToken)
-                    ?? new OpenCodeSessionCreateRequest();
-                var sessionId = $"session-{Interlocked.Increment(ref state.NextSessionId):D4}";
-                var definition = new OpenCodeSession
+                var body = await ReadBodyAsync(request, cancellationToken);
+                using var document = body.Length == 0 ? null : JsonDocument.Parse(body);
+                var title = TryGetString(document?.RootElement, "title");
+                var directory = TryGetNestedString(document?.RootElement, "location", "directory");
+                var number = Interlocked.Increment(ref state.NextSessionId);
+                var newSessionId = $"ses_{number:D8}";
+                var created = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                var definition = new
                 {
-                    Id = sessionId,
-                    Title = string.IsNullOrWhiteSpace(createRequest.Title) ? $"Fixture Session {state.NextSessionId}" : createRequest.Title,
-                    Directory = ReadStringQuery(request, "directory"),
-                    WorkspaceId = ReadStringQuery(request, "workspace"),
-                    ProjectId = "fixture-project"
+                    id = newSessionId,
+                    projectID = "fixture-project",
+                    title = string.IsNullOrWhiteSpace(title) ? $"Fixture Session {number}" : title,
+                    location = directory is null ? null : new { directory },
+                    time = new { created, updated = created },
                 };
-                state.Sessions[sessionId] = new FixtureSession(definition);
-                await WriteJsonAsync(context.Response, definition, cancellationToken);
+                state.Sessions[newSessionId] = new FixtureSession(newSessionId, definition);
+                await WriteJsonAsync(context.Response, 200, new { data = definition }, cancellationToken);
                 return;
             }
 
-            if (request.HttpMethod == "GET" && path == "/event")
+            if (method == "GET" && path == "/api/event")
             {
-                context.Response.StatusCode = 200;
-                context.Response.ContentType = "text/event-stream";
-                await using var writer = new StreamWriter(context.Response.OutputStream, new UTF8Encoding(false));
-                await writer.WriteAsync("event: session.updated\n");
-                await writer.WriteAsync("data: {\"source\":\"fixture\",\"status\":\"ok\"}\n\n");
-                await writer.FlushAsync(cancellationToken);
-                context.Response.Close();
+                await StreamEventsAsync(context.Response, state, cancellationToken);
                 return;
             }
 
-            if (TryMatchSessionMessages(path, out var sessionIdForMessages))
+            if (TryMatchSessionRoute(path, out var sessionId, out var action))
             {
-                if (!state.Sessions.TryGetValue(sessionIdForMessages, out var session))
+                if (!state.Sessions.TryGetValue(sessionId, out var session))
                 {
-                    await WriteNotFoundAsync(context.Response, cancellationToken);
+                    await WriteJsonAsync(context.Response, 404, new { _tag = "SessionNotFoundError", message = $"Session not found: {sessionId}" }, cancellationToken);
                     return;
                 }
 
-                if (request.HttpMethod == "GET")
+                if (method == "POST" && action == "model")
                 {
-                    await WriteJsonAsync(context.Response, session.Messages.ToArray(), cancellationToken);
+                    await HandleSetModelAsync(context.Response, request, session, state, cancellationToken);
                     return;
                 }
 
-                if (request.HttpMethod == "POST")
+                if (method == "POST" && action == "prompt")
                 {
-                    var promptRequest = await JsonSerializer.DeserializeAsync<OpenCodeSessionPromptRequest>(request.InputStream, cancellationToken: cancellationToken)
-                        ?? new OpenCodeSessionPromptRequest();
-                    if (!string.IsNullOrWhiteSpace(promptRequest.MessageId) &&
-                        !promptRequest.MessageId.StartsWith("msg", StringComparison.Ordinal))
-                    {
-                        await WriteBadRequestAsync(
-                            context.Response,
-                            $"Invalid string: must start with \"msg\" (messageID={promptRequest.MessageId})",
-                            cancellationToken);
-                        return;
-                    }
+                    await HandlePromptAsync(context.Response, request, session, state, cancellationToken);
+                    return;
+                }
 
-                    if (promptRequest.Model is not null)
-                    {
-                        session.LastModel = promptRequest.Model;
-                    }
-
-                    var effectiveModel = promptRequest.Model ?? session.LastModel;
-                    var effectiveModelId = effectiveModel?.ModelId;
-                    var effectiveRawModel = BuildEffectiveRawModel(effectiveModel);
-                    if (effectiveModel == null && state.Options.NonJsonWhenModelMissing)
-                    {
-                        context.Response.StatusCode = 200;
-                        context.Response.ContentType = "text/plain";
-                        await WriteStringAsync(context.Response, "not-json", cancellationToken);
-                        return;
-                    }
-
-                    if (effectiveModel == null && state.Options.EmptyBodyWhenModelMissing)
-                    {
-                        context.Response.StatusCode = 200;
-                        context.Response.ContentType = "application/json";
-                        return;
-                    }
-
-                    if (MatchesConfiguredModel(state.Options.InvalidModelIds, effectiveModelId, effectiveRawModel))
-                    {
-                        await WriteBadRequestAsync(
-                            context.Response,
-                            $"ProviderModelNotFoundError: invalid-model ({effectiveRawModel ?? effectiveModelId ?? "unknown-model"})",
-                            cancellationToken);
-                        return;
-                    }
-
-                    if (MatchesConfiguredModel(state.Options.NonJsonModelIds, effectiveModelId, effectiveRawModel))
-                    {
-                        context.Response.StatusCode = 200;
-                        context.Response.ContentType = "text/plain";
-                        await WriteStringAsync(context.Response, "not-json", cancellationToken);
-                        return;
-                    }
-
-                    if (MatchesConfiguredModel(state.Options.EmptyBodyModelIds, effectiveModelId, effectiveRawModel))
-                    {
-                        context.Response.StatusCode = 200;
-                        context.Response.ContentType = "application/json";
-                        return;
-                    }
-
-                    if (MatchesConfiguredModel(state.Options.EmptyTextModelIds, effectiveModelId, effectiveRawModel))
-                    {
-                        var diagnosticAssistantMessage = CreateDiagnosticMessage(
-                            sessionIdForMessages,
-                            $"message-{Guid.NewGuid():N}",
-                            "assistant",
-                            "OpenCode fixture emitted an assistant envelope without text content.",
-                            "error");
-                        session.Messages.Add(diagnosticAssistantMessage);
-                        await WriteJsonAsync(context.Response, diagnosticAssistantMessage, cancellationToken);
-                        return;
-                    }
-
-                    var promptText = promptRequest.Parts.FirstOrDefault(part => string.Equals(part.Type, "text", StringComparison.OrdinalIgnoreCase))?.Text
-                        ?? string.Empty;
-                    var userMessage = CreateTextMessage(sessionIdForMessages, $"message-{Guid.NewGuid():N}", "user", promptText);
-                    var assistantText = BuildAssistantText(promptText, state.Options.AssistantPrefix);
-                    var assistantMessage = CreateTextMessage(sessionIdForMessages, $"message-{Guid.NewGuid():N}", "assistant", assistantText);
-                    session.Messages.Add(userMessage);
-                    session.Messages.Add(assistantMessage);
-                    await WriteJsonAsync(context.Response, assistantMessage, cancellationToken);
+                if (method == "GET" && action == "message")
+                {
+                    await WriteJsonAsync(context.Response, 200, new { data = session.Messages.ToArray(), cursor = new { previous = (string?)null, next = (string?)null } }, cancellationToken);
                     return;
                 }
             }
 
-            if (request.HttpMethod == "GET" && path == "/file")
-            {
-                await WriteJsonAsync(context.Response, Array.Empty<OpenCodeFileNode>(), cancellationToken);
-                return;
-            }
-
-            await WriteNotFoundAsync(context.Response, cancellationToken);
+            await WriteJsonAsync(context.Response, 404, new { _tag = "NotFoundError", message = $"Not found: {method} {path}" }, cancellationToken);
         }
         catch (Exception ex)
         {
-            context.Response.StatusCode = 500;
-            await WriteStringAsync(context.Response, ex.Message, cancellationToken);
+            await WriteAsync(context.Response, 500, "text/plain; charset=utf-8", ex.Message, cancellationToken);
         }
         finally
         {
@@ -258,149 +233,210 @@ public static class OpenCodeFixtureServer
         }
     }
 
-    private static OpenCodeMessageEnvelope CreateTextMessage(string sessionId, string messageId, string role, string text)
-    {
-        return new OpenCodeMessageEnvelope
-        {
-            Info = JsonSerializer.SerializeToElement(new Dictionary<string, object?>
-            {
-                ["id"] = messageId,
-                ["sessionID"] = sessionId,
-                ["role"] = role,
-            }),
-            Parts =
-            [
-                JsonSerializer.SerializeToElement(new Dictionary<string, object?>
-                {
-                    ["type"] = "text",
-                    ["text"] = text,
-                })
-            ]
-        };
-    }
-
-    private static OpenCodeMessageEnvelope CreateDiagnosticMessage(
-        string sessionId,
-        string messageId,
-        string role,
-        string message,
-        string reason)
-    {
-        return new OpenCodeMessageEnvelope
-        {
-            Info = JsonSerializer.SerializeToElement(new Dictionary<string, object?>
-            {
-                ["id"] = messageId,
-                ["sessionID"] = sessionId,
-                ["role"] = role,
-            }),
-            Parts =
-            [
-                JsonSerializer.SerializeToElement(new Dictionary<string, object?>
-                {
-                    ["type"] = "step-finish",
-                    ["reason"] = reason,
-                }),
-                JsonSerializer.SerializeToElement(new Dictionary<string, object?>
-                {
-                    ["type"] = "error",
-                    ["message"] = message,
-                })
-            ]
-        };
-    }
-
-    private static async Task WriteJsonAsync<T>(HttpListenerResponse response, T payload, CancellationToken cancellationToken)
-    {
-        response.StatusCode = 200;
-        response.ContentType = "application/json";
-        await JsonSerializer.SerializeAsync(response.OutputStream, payload, cancellationToken: cancellationToken);
-    }
-
-    private static async Task WriteNotFoundAsync(HttpListenerResponse response, CancellationToken cancellationToken)
-    {
-        response.StatusCode = 404;
-        await WriteStringAsync(response, "Not Found", cancellationToken);
-    }
-
-    private static async Task WriteBadRequestAsync(
+    private static async Task HandleSetModelAsync(
         HttpListenerResponse response,
-        string message,
+        HttpListenerRequest request,
+        FixtureSession session,
+        FixtureState state,
         CancellationToken cancellationToken)
     {
-        response.StatusCode = 400;
-        response.ContentType = "application/json";
-        await JsonSerializer.SerializeAsync(
-            response.OutputStream,
-            new
-            {
-                success = false,
-                error = new[]
-                {
-                    new
-                    {
-                        message,
-                    }
-                }
-            },
-            cancellationToken: cancellationToken);
-    }
-
-    private static async Task WriteStringAsync(HttpListenerResponse response, string value, CancellationToken cancellationToken)
-    {
-        await using var writer = new StreamWriter(response.OutputStream, new UTF8Encoding(false), leaveOpen: true);
-        await writer.WriteAsync(value.AsMemory(), cancellationToken);
-        await writer.FlushAsync(cancellationToken);
-    }
-
-    private static bool TryMatchSessionMessages(string path, out string sessionId)
-    {
-        sessionId = string.Empty;
-        var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        if (segments.Length == 3 &&
-            string.Equals(segments[0], "session", StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(segments[2], "message", StringComparison.OrdinalIgnoreCase))
+        using var document = JsonDocument.Parse(await ReadBodyAsync(request, cancellationToken));
+        if (!document.RootElement.TryGetProperty("model", out var model))
         {
-            sessionId = Uri.UnescapeDataString(segments[1]);
-            return true;
+            await WriteJsonAsync(response, 400, new { _tag = "InvalidRequestError", message = "Missing key\n  at [\"model\"]", kind = "Payload" }, cancellationToken);
+            return;
         }
 
-        return false;
+        var providerId = TryGetString(model, "providerID") ?? string.Empty;
+        var modelId = TryGetString(model, "id") ?? string.Empty;
+        if (Matches(state.Options.InvalidModelIds, providerId, modelId))
+        {
+            await WriteJsonAsync(response, 400, new { _tag = "ProviderModelNotFoundError", message = $"ProviderModelNotFoundError: {providerId}/{modelId}" }, cancellationToken);
+            return;
+        }
+
+        session.Model = (providerId, modelId);
+        response.StatusCode = 204;
     }
 
-    private static string? ReadStringQuery(HttpListenerRequest request, string key)
+    private static async Task HandlePromptAsync(
+        HttpListenerResponse response,
+        HttpListenerRequest request,
+        FixtureSession session,
+        FixtureState state,
+        CancellationToken cancellationToken)
     {
-        var value = request.QueryString[key];
-        return string.IsNullOrWhiteSpace(value) ? null : value;
+        using var document = JsonDocument.Parse(await ReadBodyAsync(request, cancellationToken));
+        var root = document.RootElement;
+        var promptText = TryGetString(root, "text") ?? string.Empty;
+        var requestedId = TryGetString(root, "id");
+        if (!string.IsNullOrWhiteSpace(requestedId) && !requestedId.StartsWith("msg", StringComparison.Ordinal))
+        {
+            await WriteJsonAsync(response, 400, new { _tag = "InvalidRequestError", message = $"Invalid string: must start with \"msg\" (id={requestedId})", kind = "Payload" }, cancellationToken);
+            return;
+        }
+
+        var (providerId, modelId) = session.Model ?? (string.Empty, string.Empty);
+        var hasModel = session.Model is not null;
+        if (hasModel && Matches(state.Options.NonJsonModelIds, providerId, modelId))
+        {
+            await WriteAsync(response, 200, "text/plain; charset=utf-8", "not-json", cancellationToken);
+            return;
+        }
+
+        if (hasModel && Matches(state.Options.EmptyBodyModelIds, providerId, modelId))
+        {
+            await WriteAsync(response, 200, "application/json", string.Empty, cancellationToken);
+            return;
+        }
+
+        var sessionId = session.Id;
+        var inboxId = $"msg_{Guid.NewGuid():N}";
+        var created = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        session.Messages.Add(new { id = inboxId, time = new { created }, type = "user", text = promptText });
+
+        state.Publish("session.inbox.enqueued", new { inboxID = inboxId, sessionID = sessionId });
+        state.Publish("session.execution.started", new { sessionID = sessionId });
+
+        if (hasModel && Matches(state.Options.FailingModelIds, providerId, modelId))
+        {
+            state.Publish("session.execution.failed", new
+            {
+                sessionID = sessionId,
+                error = new { type = "provider.no-route", message = $"Model unavailable: {providerId}/{modelId}" },
+            });
+        }
+        else
+        {
+            var assistantMessageId = $"msg_{Guid.NewGuid():N}";
+            if (hasModel && Matches(state.Options.EmptyTextModelIds, providerId, modelId))
+            {
+                state.Publish("session.step.ended", new { sessionID = sessionId, assistantMessageID = assistantMessageId, finish = "stop", rawFinish = "stop" });
+            }
+            else
+            {
+                var assistantText = BuildAssistantText(promptText, state.Options.AssistantPrefix);
+                state.Publish("session.text.started", new { sessionID = sessionId, assistantMessageID = assistantMessageId, ordinal = 0 });
+                state.Publish("session.text.delta", new { sessionID = sessionId, assistantMessageID = assistantMessageId, ordinal = 0, delta = assistantText });
+                state.Publish("session.text.ended", new { sessionID = sessionId, assistantMessageID = assistantMessageId, ordinal = 0, text = assistantText });
+                state.Publish("session.step.ended", new { sessionID = sessionId, assistantMessageID = assistantMessageId, finish = "stop", rawFinish = "stop" });
+                session.Messages.Add(new { id = assistantMessageId, time = new { created }, type = "assistant", content = new[] { new { type = "text", text = assistantText } }, finish = "stop" });
+            }
+
+            state.Publish("session.execution.succeeded", new { sessionID = sessionId });
+        }
+
+        await WriteJsonAsync(response, 200, new
+        {
+            data = new
+            {
+                id = inboxId,
+                sessionID = sessionId,
+                time = new { created },
+                type = "user",
+                payload = new { text = promptText },
+                delivery = "steer",
+            },
+        }, cancellationToken);
     }
 
-    private static bool MatchesConfiguredModel(
-        IReadOnlyCollection<string> configuredValues,
-        string? modelId,
-        string? rawModel)
+    private static async Task StreamEventsAsync(HttpListenerResponse response, FixtureState state, CancellationToken cancellationToken)
+    {
+        response.StatusCode = 200;
+        response.ContentType = "text/event-stream";
+        var channel = Channel.CreateUnbounded<string>();
+        state.Subscribe(channel);
+        try
+        {
+            await using var writer = new StreamWriter(response.OutputStream, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
+            await writer.WriteAsync($"data: {JsonSerializer.Serialize(new { id = $"evt_{Guid.NewGuid():N}", type = "server.connected", data = new { } })}\n\n");
+            await writer.FlushAsync(cancellationToken);
+            await foreach (var json in channel.Reader.ReadAllAsync(cancellationToken))
+            {
+                await writer.WriteAsync($"data: {json}\n\n");
+                await writer.FlushAsync(cancellationToken);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (IOException)
+        {
+        }
+        catch (HttpListenerException)
+        {
+        }
+        finally
+        {
+            state.Unsubscribe(channel);
+        }
+    }
+
+    private static async Task HandleFileListAsync(HttpListenerResponse response, HttpListenerRequest request, CancellationToken cancellationToken)
+    {
+        var locationDirectory = request.QueryString["location[directory]"];
+        var relativePath = request.QueryString["path"] ?? string.Empty;
+        var root = string.IsNullOrWhiteSpace(locationDirectory) ? Directory.GetCurrentDirectory() : locationDirectory;
+        var target = Path.GetFullPath(Path.Combine(root, relativePath));
+        if (!Directory.Exists(target))
+        {
+            await WriteJsonAsync(response, 404, new { _tag = "FileNotFoundError", path = target, message = $"Directory not found: {target}" }, cancellationToken);
+            return;
+        }
+
+        var entries = Directory.EnumerateFileSystemEntries(target)
+            .Select(entry => new
+            {
+                path = Path.GetRelativePath(target, entry),
+                type = Directory.Exists(entry) ? "directory" : "file",
+            })
+            .ToArray();
+        await WriteJsonAsync(response, 200, new { location = new { directory = root }, data = entries }, cancellationToken);
+    }
+
+    private static bool IsApiPath(string path)
+    {
+        return path == "/api" || path.StartsWith("/api/", StringComparison.Ordinal);
+    }
+
+    private static bool IsAuthorized(HttpListenerRequest request, string password)
+    {
+        var expected = "Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes($"{Username}:{password}"));
+        return string.Equals(request.Headers["Authorization"], expected, StringComparison.Ordinal);
+    }
+
+    private static bool TryMatchSessionRoute(string path, out string sessionId, out string action)
+    {
+        const string prefix = "/api/session/";
+        sessionId = string.Empty;
+        action = string.Empty;
+        if (!path.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var parts = path[prefix.Length..].Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length != 2)
+        {
+            return false;
+        }
+
+        sessionId = Uri.UnescapeDataString(parts[0]);
+        action = parts[1];
+        return true;
+    }
+
+    private static bool Matches(IReadOnlyCollection<string> configuredValues, string providerId, string modelId)
     {
         if (configuredValues.Count == 0)
         {
             return false;
         }
 
+        var qualified = string.IsNullOrEmpty(providerId) ? modelId : $"{providerId}/{modelId}";
         return configuredValues.Any(candidate =>
-            (!string.IsNullOrWhiteSpace(modelId)
-             && string.Equals(candidate, modelId, StringComparison.OrdinalIgnoreCase))
-            || (!string.IsNullOrWhiteSpace(rawModel)
-                && string.Equals(candidate, rawModel, StringComparison.OrdinalIgnoreCase)));
-    }
-
-    private static string? BuildEffectiveRawModel(OpenCodeModelSelection? model)
-    {
-        if (model == null || string.IsNullOrWhiteSpace(model.ModelId))
-        {
-            return null;
-        }
-
-        return string.IsNullOrWhiteSpace(model.ProviderId)
-            ? model.ModelId
-            : $"{model.ProviderId}/{model.ModelId}";
+            string.Equals(candidate, qualified, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(candidate, modelId, StringComparison.OrdinalIgnoreCase));
     }
 
     private static string BuildAssistantText(string promptText, string assistantPrefix)
@@ -421,38 +457,132 @@ The canonical OpenCode console project `HagiCode.Libs.OpenCode.Console` owns the
 
         if (promptText.Contains("READY", StringComparison.OrdinalIgnoreCase))
         {
-            return $"{assistantPrefix}";
+            return assistantPrefix;
         }
 
         return $"{assistantPrefix}: {promptText}";
     }
 
+    private static async Task<string> ReadBodyAsync(HttpListenerRequest request, CancellationToken cancellationToken)
+    {
+        using var reader = new StreamReader(request.InputStream, Encoding.UTF8);
+        return await reader.ReadToEndAsync(cancellationToken);
+    }
+
+    private static string? TryGetString(JsonElement? element, string propertyName)
+    {
+        return element is { ValueKind: JsonValueKind.Object } value &&
+               value.TryGetProperty(propertyName, out var property) &&
+               property.ValueKind == JsonValueKind.String
+            ? property.GetString()
+            : null;
+    }
+
+    private static string? TryGetNestedString(JsonElement? element, string outer, string inner)
+    {
+        if (element is not { ValueKind: JsonValueKind.Object } root ||
+            !root.TryGetProperty(outer, out var nested))
+        {
+            return null;
+        }
+
+        return TryGetString(nested, inner);
+    }
+
+    private static Task WriteJsonAsync<T>(HttpListenerResponse response, int statusCode, T payload, CancellationToken cancellationToken)
+    {
+        return WriteAsync(response, statusCode, "application/json", JsonSerializer.Serialize(payload), cancellationToken);
+    }
+
+    private static async Task WriteAsync(
+        HttpListenerResponse response,
+        int statusCode,
+        string contentType,
+        string body,
+        CancellationToken cancellationToken)
+    {
+        response.StatusCode = statusCode;
+        response.ContentType = contentType;
+        var bytes = Encoding.UTF8.GetBytes(body);
+        response.ContentLength64 = bytes.Length;
+        await response.OutputStream.WriteAsync(bytes, cancellationToken);
+    }
+
     private sealed class FixtureState
     {
-        public FixtureState(OpenCodeFixtureServerOptions options)
+        private readonly List<Channel<string>> _subscribers = [];
+        private readonly object _subscriberLock = new();
+
+        public FixtureState(OpenCodeFixtureServerOptions options, string password, Uri baseUri)
         {
             Options = options;
+            Password = password;
+            BaseUri = baseUri;
         }
 
         public OpenCodeFixtureServerOptions Options { get; }
 
+        public string Password { get; }
+
+        public Uri BaseUri { get; }
+
         public ConcurrentDictionary<string, FixtureSession> Sessions { get; } = new(StringComparer.Ordinal);
 
-        public int NextSessionId;
+        public long NextSessionId;
+
+        public void Subscribe(Channel<string> channel)
+        {
+            lock (_subscriberLock)
+            {
+                _subscribers.Add(channel);
+            }
+        }
+
+        public void Unsubscribe(Channel<string> channel)
+        {
+            lock (_subscriberLock)
+            {
+                _subscribers.Remove(channel);
+            }
+
+            channel.Writer.TryComplete();
+        }
+
+        public void Publish(string type, object data)
+        {
+            var json = JsonSerializer.Serialize(new
+            {
+                id = $"evt_{Guid.NewGuid():N}",
+                created = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                type,
+                data,
+            });
+
+            lock (_subscriberLock)
+            {
+                foreach (var subscriber in _subscribers)
+                {
+                    subscriber.Writer.TryWrite(json);
+                }
+            }
+        }
     }
 
     private sealed class FixtureSession
     {
-        public FixtureSession(OpenCodeSession definition)
+        public FixtureSession(string id, object definition)
         {
+            Id = id;
             Definition = definition;
         }
 
-        public OpenCodeSession Definition { get; }
+        public object Definition { get; }
 
-        public List<OpenCodeMessageEnvelope> Messages { get; } = [];
+        public string Id { get; }
 
-        public OpenCodeModelSelection? LastModel { get; set; }
+        public (string ProviderId, string ModelId)? Model { get; set; }
+
+        public List<object> Messages { get; } = [];
     }
 }
 
@@ -461,28 +591,39 @@ public sealed class OpenCodeFixtureServerHandle : IAsyncDisposable
     private readonly HttpListener _listener;
     private readonly Task _loopTask;
     private readonly CancellationTokenSource _cts;
+    private readonly string _startupOutput;
     private readonly object _sync = new();
     private int _disposed;
 
     internal OpenCodeFixtureServerHandle(
         HttpListener listener,
-        object state,
         Uri baseUri,
         Task loopTask,
-        CancellationTokenSource cts)
+        CancellationTokenSource cts,
+        string serverPassword,
+        string startupOutput)
     {
         _listener = listener;
-        _ = state;
         BaseUri = baseUri;
         _loopTask = loopTask;
         _cts = cts;
+        ServerPassword = serverPassword;
+        _startupOutput = startupOutput;
     }
 
     public Uri BaseUri { get; }
 
+    /// <summary>
+    /// Gets the password the simulated server requires. Test code uses it to configure attach mode.
+    /// </summary>
+    public string ServerPassword { get; }
+
     public int? ProcessId => null;
 
-    public string? CapturedOutput => "fixture-server";
+    /// <summary>
+    /// Gets the startup output with the password redacted, in the same form an owned OpenCode 2.0 runtime prints.
+    /// </summary>
+    public string? CapturedOutput => OpenCodeSecretRedactor.Redact(_startupOutput, ServerPassword);
 
     public async ValueTask DisposeAsync()
     {

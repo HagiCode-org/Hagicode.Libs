@@ -6,19 +6,46 @@ using System.Text.Json.Serialization;
 
 namespace HagiCode.Libs.Providers.OpenCode;
 
+/// <summary>
+/// Response of <c>GET /api/info</c>. OpenCode 2.0 has no <c>healthy</c> flag: a successful JSON response is the health signal.
+/// </summary>
 public sealed class OpenCodeHealthResponse
 {
-    [JsonPropertyName("healthy")]
-    public bool Healthy { get; init; }
-
     [JsonPropertyName("version")]
     public string Version { get; init; } = string.Empty;
+
+    [JsonPropertyName("pid")]
+    public long? ProcessId { get; init; }
+
+    [JsonPropertyName("urls")]
+    public List<string> Urls { get; init; } = [];
+
+    [JsonIgnore]
+    public bool Healthy => !string.IsNullOrWhiteSpace(Version);
+}
+
+/// <summary>
+/// Wraps a single OpenCode 2.0 payload: <c>{ "data": ... }</c>.
+/// </summary>
+public sealed class OpenCodeDataResponse<T>
+{
+    [JsonPropertyName("data")]
+    public T? Data { get; init; }
+}
+
+public sealed class OpenCodeLocationRef
+{
+    [JsonPropertyName("directory")]
+    public string Directory { get; init; } = string.Empty;
 }
 
 public sealed class OpenCodeProject
 {
     [JsonPropertyName("id")]
     public string Id { get; init; } = string.Empty;
+
+    [JsonPropertyName("canonical")]
+    public string? Canonical { get; init; }
 
     [JsonPropertyName("worktree")]
     public string Worktree { get; init; } = string.Empty;
@@ -59,6 +86,9 @@ public sealed class OpenCodeSession
     [JsonPropertyName("directory")]
     public string? Directory { get; init; }
 
+    [JsonPropertyName("location")]
+    public OpenCodeLocationRef? Location { get; init; }
+
     [JsonPropertyName("parentID")]
     public string? ParentId { get; init; }
 
@@ -82,6 +112,33 @@ public sealed class OpenCodeSession
 
     [JsonPropertyName("revert")]
     public JsonElement? Revert { get; init; }
+}
+
+/// <summary>
+/// Response of <c>GET /api/session</c>: a page of sessions with a cursor.
+/// </summary>
+public sealed class OpenCodeSessionPage
+{
+    [JsonPropertyName("data")]
+    public List<OpenCodeSession> Data { get; init; } = [];
+}
+
+/// <summary>
+/// One entry of <c>GET /api/fs/list</c>.
+/// </summary>
+public sealed class OpenCodeFileSystemEntry
+{
+    [JsonPropertyName("path")]
+    public string Path { get; init; } = string.Empty;
+
+    [JsonPropertyName("type")]
+    public string Type { get; init; } = string.Empty;
+}
+
+public sealed class OpenCodeFileSystemListResponse
+{
+    [JsonPropertyName("data")]
+    public List<OpenCodeFileSystemEntry> Data { get; init; } = [];
 }
 
 public sealed class OpenCodeFileNode
@@ -118,104 +175,94 @@ public sealed class OpenCodeSessionCreateRequest
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Title { get; init; }
 
-    [JsonPropertyName("permission")]
+    [JsonPropertyName("location")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public JsonNode? Permission { get; init; }
+    public OpenCodeLocationRef? Location { get; init; }
+
+    [JsonPropertyName("permissions")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public JsonNode? Permissions { get; init; }
 }
 
+/// <summary>
+/// The in-memory model selection (<c>providerID</c> + model id) used by providers.
+/// </summary>
 public sealed class OpenCodeModelSelection
 {
-    [JsonPropertyName("providerID")]
     public string ProviderId { get; init; } = string.Empty;
 
-    [JsonPropertyName("modelID")]
     public string ModelId { get; init; } = string.Empty;
 }
 
-public sealed class OpenCodePromptPartInput
+/// <summary>
+/// Model reference as OpenCode 2.0 sends it: <c>{ "id": ..., "providerID": ... }</c>.
+/// </summary>
+public sealed class OpenCodeModelRef
 {
-    [JsonPropertyName("type")]
-    public string Type { get; init; } = "text";
+    [JsonPropertyName("id")]
+    public string Id { get; init; } = string.Empty;
 
-    [JsonPropertyName("text")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Text { get; init; }
+    [JsonPropertyName("providerID")]
+    public string ProviderId { get; init; } = string.Empty;
 
-    [JsonPropertyName("mime")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Mime { get; init; }
-
-    [JsonPropertyName("url")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Url { get; init; }
-
-    [JsonPropertyName("agent")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Agent { get; init; }
-
-    [JsonPropertyName("prompt")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Prompt { get; init; }
-
-    [JsonExtensionData]
-    public Dictionary<string, JsonElement>? AdditionalProperties { get; init; }
-
-    public static OpenCodePromptPartInput TextPart(string text) => new()
+    public static OpenCodeModelRef From(OpenCodeModelSelection selection) => new()
     {
-        Type = "text",
-        Text = text,
+        Id = selection.ModelId,
+        ProviderId = selection.ProviderId,
     };
 }
 
+/// <summary>
+/// Body of <c>POST /api/session/{id}/model</c>.
+/// </summary>
+public sealed class OpenCodeSessionModelRequest
+{
+    [JsonPropertyName("model")]
+    public OpenCodeModelRef Model { get; init; } = new();
+}
+
+/// <summary>
+/// Body of <c>POST /api/session/{id}/prompt</c> (OpenCode 2.0). The model is set on the session, not on the prompt.
+/// </summary>
 public sealed class OpenCodeSessionPromptRequest
 {
-    [JsonPropertyName("messageID")]
+    [JsonPropertyName("text")]
+    public string Text { get; init; } = string.Empty;
+
+    [JsonPropertyName("id")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? MessageId { get; init; }
 
-    [JsonPropertyName("model")]
+    [JsonPropertyName("delivery")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public OpenCodeModelSelection? Model { get; init; }
+    public string? Delivery { get; init; }
 
-    [JsonPropertyName("agent")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Agent { get; init; }
-
-    [JsonPropertyName("noReply")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public bool? NoReply { get; init; }
-
-    [JsonPropertyName("tools")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public Dictionary<string, bool>? Tools { get; init; }
-
-    [JsonPropertyName("format")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public JsonNode? Format { get; init; }
-
-    [JsonPropertyName("system")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? System { get; init; }
-
-    [JsonPropertyName("variant")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Variant { get; init; }
-
-    [JsonPropertyName("parts")]
-    public List<OpenCodePromptPartInput> Parts { get; init; } = [];
-
-    public static OpenCodeSessionPromptRequest FromText(
-        string text,
-        OpenCodeModelSelection? model = null,
-        string? agent = null)
+    public static OpenCodeSessionPromptRequest FromText(string text)
     {
         return new OpenCodeSessionPromptRequest
         {
-            Model = model,
-            Agent = agent,
-            Parts = [OpenCodePromptPartInput.TextPart(text)],
+            Text = text,
         };
     }
+}
+
+/// <summary>
+/// The queued user inbox item that <c>POST /api/session/{id}/prompt</c> returns (<c>Session.Inbox.User</c>).
+/// It is an acknowledgement only; the assistant reply arrives on the event stream.
+/// </summary>
+public sealed class OpenCodeInboxUser
+{
+    [JsonPropertyName("id")]
+    public string? Id { get; init; }
+
+    [JsonPropertyName("sessionID")]
+    public string? SessionId { get; init; }
+
+    [JsonPropertyName("type")]
+    public string? Type { get; init; }
+
+    [JsonPropertyName("delivery")]
+    public string? Delivery { get; init; }
 }
 
 public sealed class OpenCodeMessageEnvelope
@@ -306,7 +353,12 @@ public sealed class OpenCodeMessageEnvelope
             ? "No diagnostic text was present in the OpenCode response envelope."
             : string.Join(" | ", diagnostics.Distinct(StringComparer.Ordinal));
 
-        return $"OpenCode returned a successful response with no readable text content. messageId={messageId}; role={role}; partTypes={partTypeSummary}; diagnostics={diagnosticSummary}";
+        // A failed turn is reported as an "error" part; it must not read like a successful empty reply.
+        var lead = partTypes.Any(static type => string.Equals(type, "error", StringComparison.OrdinalIgnoreCase))
+            ? "OpenCode reported a failed turn with no readable text content."
+            : "OpenCode returned a successful response with no readable text content.";
+
+        return $"{lead} messageId={messageId}; role={role}; partTypes={partTypeSummary}; diagnostics={diagnosticSummary}";
     }
 
     private static void AddDiagnosticCandidate(
@@ -338,14 +390,62 @@ public sealed class OpenCodeMessageEnvelope
     }
 }
 
+/// <summary>
+/// One message from <c>GET /api/event</c>. <see cref="Data"/> holds the whole <c>V2EventEncoded</c> JSON object.
+/// </summary>
 public sealed class OpenCodeEventEnvelope
 {
     public string? EventName { get; init; }
 
     public JsonElement Data { get; init; }
+
+    /// <summary>
+    /// Gets the event type, for example <c>session.text.ended</c>.
+    /// </summary>
+    public string? EventType => TryGetString(Data, "type");
+
+    /// <summary>
+    /// Gets the session the event belongs to (<c>data.sessionID</c>), when present.
+    /// </summary>
+    public string? SessionId
+    {
+        get
+        {
+            return Data.ValueKind == JsonValueKind.Object &&
+                   Data.TryGetProperty("data", out var payload) &&
+                   payload.ValueKind == JsonValueKind.Object
+                ? TryGetString(payload, "sessionID")
+                : null;
+        }
+    }
+
+    /// <summary>
+    /// Gets the event payload (<c>data.data</c>), or a default element when absent.
+    /// </summary>
+    public JsonElement Payload
+    {
+        get
+        {
+            return Data.ValueKind == JsonValueKind.Object && Data.TryGetProperty("data", out var payload)
+                ? payload
+                : default;
+        }
+    }
+
+    private static string? TryGetString(JsonElement element, string propertyName)
+    {
+        if (element.ValueKind == JsonValueKind.Object &&
+            element.TryGetProperty(propertyName, out var property) &&
+            property.ValueKind == JsonValueKind.String)
+        {
+            return property.GetString();
+        }
+
+        return null;
+    }
 }
 
-public sealed class OpenCodeApiException : InvalidOperationException
+public class OpenCodeApiException : InvalidOperationException
 {
     public OpenCodeApiException(HttpStatusCode statusCode, string message, string? responseBody = null)
         : base(responseBody is null ? message : $"{message} Response: {responseBody}")
@@ -357,4 +457,32 @@ public sealed class OpenCodeApiException : InvalidOperationException
     public HttpStatusCode StatusCode { get; }
 
     public string? ResponseBody { get; }
+}
+
+/// <summary>
+/// The OpenCode server rejected the credentials (HTTP 401), or no password was supplied for a protected runtime.
+/// The message never contains the password.
+/// </summary>
+public sealed class OpenCodeAuthenticationException : OpenCodeApiException
+{
+    public OpenCodeAuthenticationException(string requestUri)
+        : base(
+            HttpStatusCode.Unauthorized,
+            $"OpenCode API authentication failed for '{requestUri}' (HTTP 401). The OpenCode server password is missing or wrong; configure the server password for this runtime.")
+    {
+    }
+}
+
+/// <summary>
+/// The target server does not serve the OpenCode 2.0 <c>/api/*</c> interface (for example it answered with the Web UI HTML shell).
+/// </summary>
+public sealed class OpenCodeUnsupportedApiException : OpenCodeApiException
+{
+    public OpenCodeUnsupportedApiException(string requestUri, string? bodyExcerpt)
+        : base(
+            HttpStatusCode.OK,
+            $"OpenCode API request to '{requestUri}' returned a response that is not the OpenCode 2.0 API. The server does not expose the supported OpenCode API (OpenCode 2.0 is required).",
+            bodyExcerpt)
+    {
+    }
 }

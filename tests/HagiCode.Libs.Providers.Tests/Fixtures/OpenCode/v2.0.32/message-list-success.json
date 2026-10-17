@@ -1,0 +1,67 @@
+{
+  "data": [
+    {
+      "id": "msg_14bda7199001dfVV7FFWhkhB2a",
+      "time": {
+        "created": 1792273969561
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    },
+    {
+      "id": "msg_14bda6951001F6Dh7Ni2uKtbet",
+      "time": {
+        "created": 1792273967448,
+        "streamed": 1792273969558,
+        "completed": 1792273969559
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "big-pickle",
+        "providerID": "opencode"
+      },
+      "content": [
+        {
+          "type": "reasoning",
+          "text": "The user wants me to reply with exactly \"pong\".",
+          "state": {
+            "reasoningField": "reasoning_content"
+          },
+          "time": {
+            "created": 1792273969243,
+            "completed": 1792273969555
+          }
+        },
+        {
+          "type": "text",
+          "text": "pong"
+        }
+      ],
+      "finish": "stop",
+      "rawFinish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 4178,
+        "output": 3,
+        "reasoning": 12,
+        "cache": {
+          "read": 1024,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_14bda68ef001BWbIy2PSObC0EF",
+      "time": {
+        "created": 1792273967430
+      },
+      "text": "Reply with exactly: pong",
+      "type": "user"
+    }
+  ],
+  "cursor": {
+    "previous": "eyJpZCI6Im1zZ18xNGJkYTcxOTkwMDFkZlZWN0ZGV2hraEIyYSIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6InByZXZpb3VzIn0",
+    "next": "eyJpZCI6Im1zZ18xNGJkYTY4ZWYwMDFCV2JJeTJQU09iQzBFRiIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6Im5leHQifQ"
+  }
+}
