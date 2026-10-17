@@ -9,6 +9,7 @@
     <None Include="Fixtures\Omp\*.jsonl" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Fixtures\Reasonix\v2.41.0\*.jsonl" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Fixtures\Codex\AppServer\*.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Fixtures\OpenCode\v2.0.32\*" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Fixtures\ToolCalls\**\*.jsonl" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
