@@ -341,11 +341,29 @@ await foreach (var message in opencode.ExecuteAsync(
 
 `CliInstallRegistry` now tracks OpenCode as a publicly installable CLI descriptor:
 
-- npm package: `opencode-ai@1.3.3`
+- npm package: `opencode-ai@1.3.3` (predates the OpenCode 2.0 runtime; see "OpenCode 2.0 runtime compatibility")
 - executable candidates: `opencode`
 - public installability: `true`
 
 The descriptor is aligned with the official OpenCode install guidance (`npm i -g opencode-ai@latest`) plus the pinned npm version snapshot resolved for this repository on `2026-03-28`. Real CLI validation still stays behind the `HAGICODE_REAL_CLI_TESTS` gate, so the default automated suite remains deterministic even when OpenCode is not installed locally.
+
+## OpenCode 2.0 runtime compatibility
+
+`HagiCode.Libs.Providers` supports **OpenCode 2.0** (verified with `v2.0.32`). OpenCode 1.x is no longer supported: its routes answer with the Web UI HTML shell and HTTP 200, which the provider reports as an unsupported API version instead of a JSON error.
+
+- **Owned runtime.** The provider launches `opencode serve`. OpenCode 2.0 prints `server listening on <url>` and `server password <value>` at startup; the provider accepts both lines, captures the password, and sends it as HTTP Basic credentials (username `opencode`) on every `/api/*` request. No setting is needed.
+- **Attach mode.** When `OpenCodeOptions.BaseUrl` points at an externally managed runtime that requires a password, set `OpenCodeOptions.ServerPassword`. Without it, the health probe reports `authentication failed` in the `health_probe` stage.
+- **Password handling.** The password is never returned in `CapturedOutput`, lifecycle `DiagnosticOutput`, exception messages, or the runtime key (only a SHA-256 digest of an attach password takes part in the key). `OpenCodeOptions` and `OpenCodeStandaloneServerOptions` do not print it in `ToString()`.
+- **Prompts.** OpenCode 2.0 accepts the prompt as a queued inbox item. The assistant reply is assembled from `GET /api/event`: a turn completes on `session.execution.succeeded`, fails on `session.execution.failed`, and its text comes from `session.text.ended`. The model is set on the session through `POST /api/session/{id}/model`, not on the prompt.
+- **Fixture.** `OpenCodeFixtureServer` simulates OpenCode 2.0 (Basic authentication on by default, `/api/*`, `/api/event`, HTML with HTTP 200 on other paths). Its handle exposes `ServerPassword` for attach-mode tests.
+
+Run the OpenCode provider tests (no real OpenCode installation needed):
+
+```bash
+dotnet test tests/HagiCode.Libs.Providers.Tests/HagiCode.Libs.Providers.Tests.csproj --filter "FullyQualifiedName~OpenCode"
+```
+
+> Note: the `CliInstallRegistry` descriptor still pins `opencode-ai@1.3.3` (see below). That version is not compatible with this runtime and needs to move to an OpenCode 2.0 release before the install path can be used with it.
 
 ## Claude Code thinking display
 
