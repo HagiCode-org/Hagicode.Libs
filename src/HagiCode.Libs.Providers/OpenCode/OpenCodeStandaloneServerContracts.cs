@@ -98,7 +98,15 @@ public interface IOpenCodeStandaloneServerClient : IAsyncDisposable
 public sealed class OpenCodeStandaloneServerLifecycleException : InvalidOperationException
 {
     public OpenCodeStandaloneServerLifecycleException(OpenCodeStandaloneServerLifecycleResult result)
-        : base(result?.ErrorMessage ?? "OpenCode standalone lifecycle failed.")
+        : this(result, innerException: null)
+    {
+    }
+
+    /// <summary>
+    /// Creates the exception with the typed cause (for example <see cref="OpenCodeAuthenticationException"/>) as <see cref="Exception.InnerException"/>.
+    /// </summary>
+    public OpenCodeStandaloneServerLifecycleException(OpenCodeStandaloneServerLifecycleResult result, Exception? innerException)
+        : base(result?.ErrorMessage ?? "OpenCode standalone lifecycle failed.", innerException)
     {
         Result = result ?? throw new ArgumentNullException(nameof(result));
     }

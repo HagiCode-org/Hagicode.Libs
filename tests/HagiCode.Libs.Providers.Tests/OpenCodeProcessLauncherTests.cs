@@ -51,6 +51,10 @@ public sealed class OpenCodeProcessLauncherTests
 
         var unknownSecret = OpenCodeSecretRedactor.Redact("server password other-secret-value", secret: null);
         unknownSecret.ShouldBe("server password <redacted>");
+
+        // Prose that mentions the password is not a startup line and must stay readable.
+        const string prose = "Provide the OpenCode server password for this runtime.";
+        OpenCodeSecretRedactor.Redact(prose, secret: null).ShouldBe(prose);
     }
 
     [Test]

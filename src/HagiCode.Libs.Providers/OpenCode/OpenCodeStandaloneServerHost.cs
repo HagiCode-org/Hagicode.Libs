@@ -416,7 +416,8 @@ public sealed class OpenCodeStandaloneServerHost : IOpenCodeStandaloneServerClie
                 attemptedAt,
                 errorMessage: OpenCodeSecretRedactor.Redact($"OpenCode lifecycle stage 'health_probe' failed: {cause}", runtime.ServerPassword)!,
                 diagnosticOutput: runtime.LifecycleResult.DiagnosticOutput,
-                baseUri: runtime.BaseUri.ToString());
+                baseUri: runtime.BaseUri.ToString(),
+                innerException: ex);
         }
     }
 
@@ -486,7 +487,8 @@ public sealed class OpenCodeStandaloneServerHost : IOpenCodeStandaloneServerClie
         DateTimeOffset attemptedAt,
         string errorMessage,
         string? diagnosticOutput = null,
-        string? baseUri = null)
+        string? baseUri = null,
+        Exception? innerException = null)
     {
         return new OpenCodeStandaloneServerLifecycleException(
             new OpenCodeStandaloneServerLifecycleResult
@@ -501,7 +503,8 @@ public sealed class OpenCodeStandaloneServerHost : IOpenCodeStandaloneServerClie
                 AttemptedAt = attemptedAt,
                 ErrorMessage = errorMessage,
                 DiagnosticOutput = string.IsNullOrWhiteSpace(diagnosticOutput) ? null : diagnosticOutput,
-            });
+            },
+            innerException);
     }
 
     private static OpenCodeStandaloneServerLifecycleException CreateMissingExecutableLifecycleException(

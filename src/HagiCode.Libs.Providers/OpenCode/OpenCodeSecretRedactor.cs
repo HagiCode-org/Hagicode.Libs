@@ -27,6 +27,7 @@ internal static partial class OpenCodeSecretRedactor
         return PasswordLineRegex().Replace(redacted, match => $"{match.Groups[1].Value}{Marker}");
     }
 
-    [GeneratedRegex(@"(server password\s+)\S+", RegexOptions.IgnoreCase)]
+    // Only a whole startup line ("server password <value>") is redacted; prose such as "the server password for this runtime" is kept.
+    [GeneratedRegex(@"^([ \t]*server password[ \t]+)\S+[ \t]*\r?$", RegexOptions.IgnoreCase | RegexOptions.Multiline)]
     private static partial Regex PasswordLineRegex();
 }
