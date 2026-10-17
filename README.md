@@ -1,5 +1,11 @@
 # HagiCode.Libs
 
+[![license](https://img.shields.io/badge/license-MIT-ffd43b)](./LICENSE)
+[![.NET](https://img.shields.io/badge/.NET-10.0-512bd4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
+[![NuGet Core](https://img.shields.io/nuget/v/HagiCode.Libs.Core?logo=nuget&label=Libs.Core)](https://www.nuget.org/packages/HagiCode.Libs.Core)
+[![NuGet Providers](https://img.shields.io/nuget/v/HagiCode.Libs.Providers?logo=nuget&label=Libs.Providers)](https://www.nuget.org/packages/HagiCode.Libs.Providers)
+[![NuGet publish](https://img.shields.io/github/actions/workflow/status/HagiCode-org/Hagicode.Libs/nuget-publish.yml?branch=main&label=NuGet%20publish)](https://github.com/HagiCode-org/Hagicode.Libs/actions/workflows/nuget-publish.yml)
+
 `HagiCode.Libs` is a lightweight .NET 10 library workspace for reusable HagiCode CLI integrations and repository exploration.
 
 ## Projects
