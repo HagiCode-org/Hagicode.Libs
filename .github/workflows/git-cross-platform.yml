@@ -1,0 +1,117 @@
+name: Git Wrapper Cross-Platform
+
+# Runs the HagiCode.Libs.Git integration suite on four runners against the real git executable, records how long every wrapper
+# operation takes on each operating system, and prints the comparison to the job summary.
+#
+# Durations are informational. Nothing here compares them with a threshold, and a slow runner does not fail the job.
+# Functional assertions still fail the job. CI=true (set by GitHub) makes a missing git a failure rather than a skip.
+
+on:
+  push:
+    paths:
+      - '.github/workflows/git-cross-platform.yml'
+      - 'src/HagiCode.Libs.Git/**'
+      - 'tests/HagiCode.Libs.Git.Tests/**'
+      - 'scripts/git/**'
+      - 'src/HagiCode.Libs.Core/**'
+      - 'Directory.Build.props'
+      - 'Directory.Packages.props'
+      - 'global.json'
+      - '*.slnx'
+  pull_request:
+    paths:
+      - '.github/workflows/git-cross-platform.yml'
+      - 'src/HagiCode.Libs.Git/**'
+      - 'tests/HagiCode.Libs.Git.Tests/**'
+      - 'scripts/git/**'
+      - 'src/HagiCode.Libs.Core/**'
+      - 'Directory.Build.props'
+      - 'Directory.Packages.props'
+      - 'global.json'
+      - '*.slnx'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  git-suite:
+    name: 'Git suite (${{ matrix.rid }})'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rid: linux-x64
+          - os: windows-latest
+            rid: windows-x64
+          # Intel macOS (x64). Label confirmed against actions/runner-images: macos-15-intel.
+          - os: macos-15-intel
+            rid: osx-x64
+          # Apple Silicon (arm64). macos-latest is the arm64 image.
+          - os: macos-latest
+            rid: osx-arm64
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK from global.json
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Record the git executable in use
+        run: git --version
+
+      - name: Run the git suite with every operation timed
+        env:
+          HAGICODE_LIBS_GIT_TIMING_DIR: ${{ runner.temp }}/git-timing
+        run: >-
+          dotnet test tests/HagiCode.Libs.Git.Tests/HagiCode.Libs.Git.Tests.csproj
+          -c Release -p:TestProfile=full
+          --logger "trx;LogFileName=git-tests.trx"
+          --results-directory "${{ runner.temp }}/git-test-logs"
+
+      - name: Upload timing files and test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: git-timing-${{ matrix.rid }}
+          path: |
+            ${{ runner.temp }}/git-timing
+            ${{ runner.temp }}/git-test-logs
+          if-no-files-found: warn
+          retention-days: 30
+
+  git-summary:
+    name: 'Git timing summary'
+    needs: git-suite
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Download timing artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: git-timing-*
+          path: ${{ runner.temp }}/timing-artifacts
+
+      - name: Check the aggregation script
+        run: python3 -m unittest discover -s scripts/git -p 'test_*.py'
+
+      - name: Write the per-operation comparison to the job summary
+        run: >-
+          python3 scripts/git/aggregate_timings.py "${{ runner.temp }}/timing-artifacts"
+          --expect linux-x64 windows-x64 osx-x64 osx-arm64
+          >> "$GITHUB_STEP_SUMMARY"
