@@ -43,6 +43,34 @@ internal static class OpenCodeMessageMapper
             JsonSerializer.SerializeToElement(BuildPayload("assistant", sessionId, messageId, text, debugContext)));
     }
 
+    /// <summary>
+    /// Creates the <see cref="OpenCodeUserInputRequest.MessageType"/> message that carries one question to the caller.
+    /// </summary>
+    public static CliMessage CreateQuestionMessage(OpenCodeUserInputRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return new CliMessage(
+            OpenCodeUserInputRequest.MessageType,
+            JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+            {
+                ["type"] = OpenCodeUserInputRequest.MessageType,
+                ["requestId"] = request.RequestId,
+                ["sessionId"] = request.SessionId,
+                ["toolCallId"] = request.ToolCallId,
+                ["questions"] = request.Questions.Select(static question => new Dictionary<string, object>
+                {
+                    ["question"] = question.Question,
+                    ["header"] = question.Header,
+                    ["multiSelect"] = question.MultiSelect,
+                    ["options"] = question.Options.Select(static option => new Dictionary<string, string>
+                    {
+                        ["label"] = option.Label,
+                        ["description"] = option.Description,
+                    }).ToArray(),
+                }).ToArray(),
+            }));
+    }
+
     public static CliMessage CreateTerminalCompletedMessage(
         string sessionId,
         string text,

@@ -1,0 +1,56 @@
+{
+  "data": [
+    {
+      "id": "frm_14c3b4ae3001cAMETLPP5nYnus",
+      "sessionID": "ses_eb3c4c8ebffeoPuTSmM55ew47v",
+      "title": "Questions",
+      "metadata": {
+        "kind": "question",
+        "tool": {
+          "messageID": "msg_14c3b373f001BD0Xr3R7HARkcW",
+          "id": "call_97424"
+        }
+      },
+      "fields": [
+        {
+          "key": "q0",
+          "title": "Color",
+          "description": "Which color do you prefer?",
+          "type": "string",
+          "options": [
+            {
+              "value": "Red",
+              "label": "Red",
+              "description": "warm"
+            },
+            {
+              "value": "Blue",
+              "label": "Blue",
+              "description": "cool"
+            }
+          ],
+          "custom": true
+        },
+        {
+          "key": "q1",
+          "title": "Pets",
+          "description": "Which pets do you like?",
+          "type": "multiselect",
+          "options": [
+            {
+              "value": "Cats",
+              "label": "Cats",
+              "description": "felines"
+            },
+            {
+              "value": "Dogs",
+              "label": "Dogs",
+              "description": "canines"
+            }
+          ],
+          "custom": true
+        }
+      ]
+    }
+  ]
+}

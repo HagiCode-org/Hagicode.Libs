@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Threading.Channels;
 using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Environment;
 using HagiCode.Libs.Core.Transport;
@@ -43,6 +44,12 @@ public class OpenCodeProvider : ICliProvider<OpenCodeOptions>
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(options);
         ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
+        if (options.UserInputHandler is not null)
+        {
+            OpenCodeUserInput.ValidateQuestionTimeout(options.QuestionTimeout, nameof(options.QuestionTimeout));
+        }
+
+        OpenCodeAgentWorkTurn.ValidateTimeouts(options.AgentWorkWaitTimeout, options.AgentWorkSettleInterval);
 
         var runtime = await _standaloneServerClient.AcquireAsync(ToStandaloneOptions(options), cancellationToken).ConfigureAwait(false);
         var sessionResolution = await ResolveSessionAsync(runtime, options, cancellationToken).ConfigureAwait(false);
@@ -62,6 +69,19 @@ public class OpenCodeProvider : ICliProvider<OpenCodeOptions>
         }
 
         var request = OpenCodeSessionPromptRequest.FromText(prompt);
+        if (options.UserInputHandler is not null || options.EmitAgentWorkSnapshots)
+        {
+            // Queue path: questions and agent work snapshots are yielded in stream order while the prompt runs on its own task.
+            yield return lifecycleMessage;
+
+            await foreach (var message in StreamTurnAsync(runtime.Client, sessionResolution.SessionId, request, options, debugContext, cancellationToken).ConfigureAwait(false))
+            {
+                yield return message;
+            }
+
+            yield break;
+        }
+
         var response = await runtime.Client.PromptAsync(sessionResolution.SessionId, request, cancellationToken).ConfigureAwait(false);
 
         yield return lifecycleMessage;
@@ -74,6 +94,85 @@ public class OpenCodeProvider : ICliProvider<OpenCodeOptions>
 
         yield return OpenCodeMessageMapper.CreateAssistantMessage(sessionResolution.SessionId, assistantText, response.MessageId, debugContext);
         yield return OpenCodeMessageMapper.CreateTerminalCompletedMessage(sessionResolution.SessionId, assistantText, response.MessageId, debugContext);
+    }
+
+    /// <summary>
+    /// Runs a turn on the queue path: the prompt runs on a background task, and each question or agent work snapshot is queued in the
+    /// order it happens. The queue is drained until the turn ends. Then the assistant and terminal messages follow.
+    /// </summary>
+    private static async IAsyncEnumerable<CliMessage> StreamTurnAsync(
+        OpenCodeHttpClient client,
+        string sessionId,
+        OpenCodeSessionPromptRequest request,
+        OpenCodeOptions options,
+        OpenCodeMessageDebugContext debugContext,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var questions = Channel.CreateUnbounded<CliMessage>(new UnboundedChannelOptions { SingleReader = true });
+        var turnSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var turnToken = turnSource.Token;
+        var interaction = options.UserInputHandler is null
+            ? null
+            : new OpenCodeTurnInteraction(
+                options.UserInputHandler,
+                options.QuestionTimeout,
+                question => questions.Writer.TryWrite(OpenCodeMessageMapper.CreateQuestionMessage(question)));
+        var agentWork = options.EmitAgentWorkSnapshots
+            ? new OpenCodeAgentWorkTurn(
+                snapshot => questions.Writer.TryWrite(snapshot.ToCliMessage()),
+                options.AgentWorkWaitTimeout,
+                options.AgentWorkSettleInterval)
+            : null;
+
+        var promptTask = Task.Run(async () =>
+        {
+            try
+            {
+                return await client.PromptAsync(sessionId, request, interaction, agentWork, turnToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                questions.Writer.TryComplete();
+            }
+        }, CancellationToken.None);
+
+        var drained = false;
+        try
+        {
+            await foreach (var message in questions.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            {
+                yield return message;
+            }
+
+            drained = true;
+        }
+        finally
+        {
+            // The consumer stopped early or the caller cancelled: stop the prompt too.
+            if (!drained)
+            {
+                turnSource.Cancel();
+            }
+        }
+
+        OpenCodeMessageEnvelope response;
+        try
+        {
+            response = await promptTask.ConfigureAwait(false);
+        }
+        finally
+        {
+            turnSource.Dispose();
+        }
+
+        var assistantText = response.GetTextContent();
+        if (string.IsNullOrWhiteSpace(assistantText))
+        {
+            throw new InvalidOperationException(response.BuildDiagnosticSummary());
+        }
+
+        yield return OpenCodeMessageMapper.CreateAssistantMessage(sessionId, assistantText, response.MessageId, debugContext);
+        yield return OpenCodeMessageMapper.CreateTerminalCompletedMessage(sessionId, assistantText, response.MessageId, debugContext);
     }
 
     /// <inheritdoc />

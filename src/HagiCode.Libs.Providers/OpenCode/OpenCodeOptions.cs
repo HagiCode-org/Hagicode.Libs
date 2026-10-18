@@ -69,10 +69,69 @@ public sealed record OpenCodeOptions
     public IReadOnlyList<string> ExtraArguments { get; init; } = [];
 
     /// <summary>
+    /// Gets or sets the callback that answers the questions the agent asks through OpenCode's built-in <c>question</c> tool.
+    /// It is <see langword="null" /> by default. A run without a handler keeps the provider's behaviour, except that a question
+    /// is declined at once (with a message the agent receives) instead of being left pending until the request timeout.
+    /// </summary>
+    /// <remarks>
+    /// The handler runs as a background task per question, so the event stream keeps flowing while a user thinks. It receives a
+    /// token that is cancelled when <see cref="QuestionTimeout"/> passes, the run ends, or the caller cancels. Returning
+    /// <see langword="null"/>, timing out, or throwing declines the question. A value that is not one of the offered labels is
+    /// sent unchanged. The wait for an answer does not count against <see cref="RequestTimeout"/>.
+    /// </remarks>
+    public Func<OpenCodeUserInputRequest, CancellationToken, Task<OpenCodeUserInputResponse?>>? UserInputHandler { get; init; }
+
+    /// <summary>
+    /// Gets or sets how long an interactive question may stay unanswered. When it passes, the question is declined and the run
+    /// goes on to its normal result. The default is 30 minutes. Use <see cref="System.Threading.Timeout.InfiniteTimeSpan"/> to
+    /// wait without a limit. A value that is neither positive nor infinite is rejected with an <see cref="ArgumentException"/>
+    /// before any request is sent, when <see cref="UserInputHandler"/> is set.
+    /// </summary>
+    public TimeSpan QuestionTimeout { get; init; } = DefaultQuestionTimeout;
+
+    /// <summary>
+    /// The default value of <see cref="QuestionTimeout"/>.
+    /// </summary>
+    public static readonly TimeSpan DefaultQuestionTimeout = TimeSpan.FromMinutes(30);
+
+    /// <summary>
+    /// Gets or sets whether the provider reports the agent work of the run (child sessions the agent spawned) as
+    /// <c>agent_work_snapshot</c> messages. The default is <see langword="true"/>. When <see langword="false"/>, child sessions are
+    /// not tracked, no snapshot is produced, and a turn ends as soon as the prompted session reports its result.
+    /// </summary>
+    public bool EmitAgentWorkSnapshots { get; init; } = true;
+
+    /// <summary>
+    /// Gets or sets how long a turn stays open after OpenCode reports success while a tracked child session is still active.
+    /// The turn then keeps reading so that a follow-up turn of the prompted session and the end of the child are observed. The
+    /// default is 10 minutes. When it passes, the still-active items are reported as <c>stopped</c>. Use
+    /// <see cref="System.Threading.Timeout.InfiniteTimeSpan"/> to wait without a limit. A value that is neither positive nor
+    /// infinite is rejected with an <see cref="ArgumentException"/> before any request is sent.
+    /// </summary>
+    public TimeSpan AgentWorkWaitTimeout { get; init; } = DefaultAgentWorkWaitTimeout;
+
+    /// <summary>
+    /// Gets or sets how long the turn waits, after the last tracked child has ended and the prompted session is idle, for a follow-up
+    /// turn of the prompted session to start before it returns. The default is 2 seconds. Zero returns at once. A negative or infinite
+    /// value is rejected with an <see cref="ArgumentException"/> before any request is sent.
+    /// </summary>
+    public TimeSpan AgentWorkSettleInterval { get; init; } = DefaultAgentWorkSettleInterval;
+
+    /// <summary>
+    /// The default value of <see cref="AgentWorkWaitTimeout"/>.
+    /// </summary>
+    public static readonly TimeSpan DefaultAgentWorkWaitTimeout = TimeSpan.FromMinutes(10);
+
+    /// <summary>
+    /// The default value of <see cref="AgentWorkSettleInterval"/>.
+    /// </summary>
+    public static readonly TimeSpan DefaultAgentWorkSettleInterval = TimeSpan.FromSeconds(2);
+
+    /// <summary>
     /// Formats the options without exposing <see cref="ServerPassword"/>.
     /// </summary>
     public override string ToString()
     {
-        return $"OpenCodeOptions {{ ExecutablePath = {ExecutablePath}, BaseUrl = {BaseUrl}, WorkingDirectory = {WorkingDirectory}, Workspace = {Workspace}, Model = {Model}, SessionId = {SessionId}, ServerPassword = {(string.IsNullOrEmpty(ServerPassword) ? "null" : OpenCodeSecretRedactor.Marker)} }}";
+        return $"OpenCodeOptions {{ ExecutablePath = {ExecutablePath}, BaseUrl = {BaseUrl}, WorkingDirectory = {WorkingDirectory}, Workspace = {Workspace}, Model = {Model}, SessionId = {SessionId}, ServerPassword = {(string.IsNullOrEmpty(ServerPassword) ? "null" : OpenCodeSecretRedactor.Marker)}, UserInputHandler = {(UserInputHandler is null ? "null" : "set")}, QuestionTimeout = {QuestionTimeout} }}";
     }
 }

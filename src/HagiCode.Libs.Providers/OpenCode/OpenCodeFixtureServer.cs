@@ -44,7 +44,118 @@ public sealed class OpenCodeFixtureServerOptions
 
     /// <summary>Models whose turn ends with <c>session.execution.failed</c>.</summary>
     public IReadOnlyCollection<string> FailingModelIds { get; init; } = Array.Empty<string>();
+
+    /// <summary>Models whose prompt runs the <see cref="QuestionScript"/> turn: the agent opens forms and waits for their settlement.</summary>
+    public IReadOnlyCollection<string> QuestionModelIds { get; init; } = Array.Empty<string>();
+
+    /// <summary>The forms a question turn opens and how the turn proceeds.</summary>
+    public OpenCodeFixtureQuestionScript QuestionScript { get; init; } = new();
+
+    /// <summary>Models whose prompt runs the <see cref="ChildSessionScript"/> turn: the agent spawns a child session that outlives the parent's success.</summary>
+    public IReadOnlyCollection<string> ChildSessionModelIds { get; init; } = Array.Empty<string>();
+
+    /// <summary>The child-session turn the models in <see cref="ChildSessionModelIds"/> run.</summary>
+    public OpenCodeFixtureChildSessionScript ChildSessionScript { get; init; } = new();
 }
+
+/// <summary>
+/// The script of a question turn: which forms the agent opens, and how the turn reacts to their settlement.
+/// </summary>
+public sealed class OpenCodeFixtureQuestionScript
+{
+    /// <summary>
+    /// The forms, in the order they are opened. The default is the form the live probe recorded: a single-choice question and a
+    /// multi-select question in one form.
+    /// </summary>
+    public IReadOnlyList<OpenCodeFixtureForm> Forms { get; init; } =
+    [
+        new OpenCodeFixtureForm
+        {
+            Fields =
+            [
+                new OpenCodeFixtureField("Color", "Which color do you prefer?", MultiSelect: false, Options: ["Red", "Blue"]),
+                new OpenCodeFixtureField("Pets", "Which pets do you like?", MultiSelect: true, Options: ["Cats", "Dogs"]),
+            ],
+        },
+    ];
+
+    /// <summary>When true, every form is published before the first one is settled (a second question while the first is pending).</summary>
+    public bool PublishAllAtOnce { get; init; }
+
+    /// <summary>When true, the turn completes right after the forms are published, without waiting for them (the turn ends while they are pending).</summary>
+    public bool CompleteWithoutWaiting { get; init; }
+
+    /// <summary>When true, the turn publishes nothing after the forms settle (an agent that stalls after the answer).</summary>
+    public bool StallAfterSettlement { get; init; }
+}
+
+/// <summary>
+/// A scripted turn in which the prompted session spawns a child session through the <c>task</c> tool, as OpenCode 2.0.32 reports it:
+/// <c>session.created</c> carrying <c>parentID</c> and the task title, the child's execution and tool events, and the parent's own
+/// success, which can come while the child still runs.
+/// </summary>
+public sealed class OpenCodeFixtureChildSessionScript
+{
+    /// <summary>The title of the child session, which is the task description.</summary>
+    public string ChildTitle { get; init; } = "count files";
+
+    /// <summary>The text the child emits. It must never appear in the prompted session's result.</summary>
+    public string ChildText { get; init; } = "CHILD-ONLY-TEXT";
+
+    /// <summary>The text the prompted session emits before it reports success.</summary>
+    public string ParentText { get; init; } = "PARENT-READY";
+
+    /// <summary>How long the child runs after the parent reports success.</summary>
+    public TimeSpan ChildRunTime { get; init; } = TimeSpan.FromMilliseconds(300);
+
+    /// <summary>When true, the child ends interrupted instead of succeeded.</summary>
+    public bool ChildInterrupted { get; init; }
+
+    /// <summary>When true, the child never ends, so only the wait bound stops the turn.</summary>
+    public bool ChildNeverEnds { get; init; }
+
+    /// <summary>When set, the prompted session starts a follow-up execution after the child ends and answers with this text.</summary>
+    public string? FollowUpText { get; init; }
+
+    /// <summary>When true, the follow-up execution asks one question first and waits for its answer before it answers with <see cref="FollowUpText"/>.</summary>
+    public bool FollowUpQuestion { get; init; }
+
+    /// <summary>When true, the prompted session reports interrupted while the child still runs, instead of succeeded.</summary>
+    public bool ParentInterruptsWhileChildRuns { get; init; }
+
+    /// <summary>When true, a session of another client on the same stream emits a child and text, which must be ignored.</summary>
+    public bool IncludeForeignSession { get; init; } = true;
+}
+
+/// <summary>
+/// One form a scripted turn opens. A <c>question</c> form with no <see cref="SessionId"/> belongs to the turn and the turn waits for it.
+/// </summary>
+public sealed class OpenCodeFixtureForm
+{
+    /// <summary>The form kind (<c>metadata.kind</c>). <c>question</c> by default; <c>mcp</c> models an elicitation form.</summary>
+    public string Kind { get; init; } = "question";
+
+    /// <summary>The session of the form. Null means the turn's own session; another id models a form of a different session.</summary>
+    public string? SessionId { get; init; }
+
+    public IReadOnlyList<OpenCodeFixtureField> Fields { get; init; } = [];
+}
+
+/// <summary>
+/// One question of a scripted form: the header, the question text, whether it is multi-select, and the option labels.
+/// </summary>
+public sealed record OpenCodeFixtureField(string Header, string Question, bool MultiSelect, IReadOnlyList<string> Options);
+
+/// <summary>
+/// The state of one form of a fixture server, as the tests read it.
+/// </summary>
+/// <param name="Id">The form id.</param>
+/// <param name="SessionId">The session of the form.</param>
+/// <param name="Kind">The form kind.</param>
+/// <param name="State">The form state: <see cref="OpenCodeFormStates"/>.</param>
+/// <param name="Message">The message of a cancel, or null.</param>
+/// <param name="AnswerJson">The answer of a reply as JSON, or null.</param>
+public sealed record OpenCodeFixtureFormSnapshot(string Id, string SessionId, string Kind, string State, string? Message, string? AnswerJson);
 
 /// <summary>
 /// Simulates OpenCode 2.0: the startup lines, Basic authentication, the <c>/api/*</c> routes,
@@ -73,7 +184,17 @@ public static class OpenCodeFixtureServer
         var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var loopTask = Task.Run(() => AcceptLoopAsync(listener, state, cts.Token), CancellationToken.None);
         var startupOutput = $"server listening on {baseUri.ToString().TrimEnd('/')}{Environment.NewLine}server password {password}{Environment.NewLine}";
-        return Task.FromResult(new OpenCodeFixtureServerHandle(listener, baseUri, loopTask, cts, password, startupOutput));
+        return Task.FromResult(new OpenCodeFixtureServerHandle(
+            listener,
+            baseUri,
+            loopTask,
+            cts,
+            password,
+            startupOutput,
+            () => state.Forms.Values
+                .Select(static form => new OpenCodeFixtureFormSnapshot(form.Id, form.SessionId, form.Kind, form.State, form.Message, form.AnswerJson))
+                .ToArray(),
+            () => Interlocked.Read(ref state.InterruptRequestCount)));
     }
 
     private static async Task AcceptLoopAsync(HttpListener listener, FixtureState state, CancellationToken cancellationToken)
@@ -191,6 +312,43 @@ public static class OpenCodeFixtureServer
                 return;
             }
 
+            if (TryMatchFormRoute(path, out var formSessionId, out var formAction, out var formId))
+            {
+                if (!state.Sessions.TryGetValue(formSessionId, out var formSession))
+                {
+                    await WriteJsonAsync(context.Response, 404, new { _tag = "SessionNotFoundError", message = $"Session not found: {formSessionId}" }, cancellationToken);
+                    return;
+                }
+
+                if (method == "GET" && formAction == "form")
+                {
+                    var pending = state.Forms.Values
+                        .Where(form => form.SessionId == formSession.Id && form.IsPending)
+                        .Select(static form => form.ToFormJson())
+                        .ToArray();
+                    await WriteJsonAsync(context.Response, 200, new { data = pending }, cancellationToken);
+                    return;
+                }
+
+                if (method == "POST" && formAction == "reply")
+                {
+                    await HandleFormReplyAsync(context.Response, request, formSession, formId, state, cancellationToken);
+                    return;
+                }
+
+                if (method == "DELETE" && formAction == "form")
+                {
+                    await HandleFormCancelAsync(context.Response, request, formSession, formId, state, cancellationToken);
+                    return;
+                }
+
+                if (method == "POST" && formAction == "interrupt")
+                {
+                    await HandleInterruptAsync(context.Response, formSession, state, cancellationToken);
+                    return;
+                }
+            }
+
             if (TryMatchSessionRoute(path, out var sessionId, out var action))
             {
                 if (!state.Sessions.TryGetValue(sessionId, out var session))
@@ -231,6 +389,273 @@ public static class OpenCodeFixtureServer
                 context.Response.Close();
             }
         }
+    }
+
+    private static async Task HandleFormReplyAsync(
+        HttpListenerResponse response,
+        HttpListenerRequest request,
+        FixtureSession session,
+        string formId,
+        FixtureState state,
+        CancellationToken cancellationToken)
+    {
+        if (!state.Forms.TryGetValue(formId, out var form) || form.SessionId != session.Id)
+        {
+            await WriteJsonAsync(response, 404, new { _tag = "FormNotFoundError", id = formId, message = $"Form not found: {formId}" }, cancellationToken);
+            return;
+        }
+
+        if (!form.IsPending)
+        {
+            await WriteJsonAsync(response, 409, new { _tag = "FormAlreadySettledError", id = formId, message = $"Form already settled: {formId}" }, cancellationToken);
+            return;
+        }
+
+        using var document = JsonDocument.Parse(await ReadBodyAsync(request, cancellationToken));
+        if (!document.RootElement.TryGetProperty("answer", out var answer) || answer.ValueKind != JsonValueKind.Object)
+        {
+            await WriteJsonAsync(response, 400, new { _tag = "InvalidRequestError", message = "Missing key\n  at [\"answer\"]", kind = "Payload" }, cancellationToken);
+            return;
+        }
+
+        // The live probe: a string field takes a JSON string, a multiselect field takes an array of strings, and a wrong shape is
+        // refused with the form still pending.
+        for (var index = 0; index < form.Fields.Count; index++)
+        {
+            var key = "q" + index.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (!answer.TryGetProperty(key, out var value))
+            {
+                continue;
+            }
+
+            var valid = form.Fields[index].MultiSelect
+                ? value.ValueKind == JsonValueKind.Array && value.EnumerateArray().All(static item => item.ValueKind == JsonValueKind.String)
+                : value.ValueKind == JsonValueKind.String;
+            if (!valid)
+            {
+                var expected = form.Fields[index].MultiSelect ? "Expected string array for form field: " : "Expected string for form field: ";
+                await WriteJsonAsync(response, 400, new { _tag = "FormInvalidAnswerError", id = formId, message = expected + key }, cancellationToken);
+                return;
+            }
+        }
+
+        form.AnswerJson = answer.GetRawText();
+        form.State = OpenCodeFormStates.Replied;
+        state.Publish("form.replied", new { id = formId, sessionID = session.Id, answer = answer.Clone() });
+        form.Settled.TrySetResult();
+        response.StatusCode = 204;
+    }
+
+    private static async Task HandleFormCancelAsync(
+        HttpListenerResponse response,
+        HttpListenerRequest request,
+        FixtureSession session,
+        string formId,
+        FixtureState state,
+        CancellationToken cancellationToken)
+    {
+        if (!state.Forms.TryGetValue(formId, out var form) || form.SessionId != session.Id)
+        {
+            await WriteJsonAsync(response, 404, new { _tag = "FormNotFoundError", id = formId, message = $"Form not found: {formId}" }, cancellationToken);
+            return;
+        }
+
+        if (!form.IsPending)
+        {
+            await WriteJsonAsync(response, 409, new { _tag = "FormAlreadySettledError", id = formId, message = $"Form already settled: {formId}" }, cancellationToken);
+            return;
+        }
+
+        form.Message = request.QueryString["message"];
+        CancelForm(form, state, session.Id);
+        response.StatusCode = 204;
+    }
+
+    private static async Task HandleInterruptAsync(
+        HttpListenerResponse response,
+        FixtureSession session,
+        FixtureState state,
+        CancellationToken cancellationToken)
+    {
+        Interlocked.Increment(ref state.InterruptRequestCount);
+        var activeTurn = Interlocked.Exchange(ref session.ActiveTurnId, 0);
+        if (activeTurn != 0)
+        {
+            // OpenCode 2.0.32: the pending forms are cancelled, then the turn ends with session.execution.interrupted (reason user).
+            Interlocked.Exchange(ref session.InterruptedTurnId, activeTurn);
+            foreach (var form in state.Forms.Values.Where(form => form.SessionId == session.Id && form.IsPending))
+            {
+                CancelForm(form, state, session.Id);
+            }
+
+            state.Publish("session.execution.interrupted", new { sessionID = session.Id, reason = "user" });
+        }
+
+        await WriteJsonAsync(response, 200, new { interrupted = activeTurn != 0 }, cancellationToken);
+    }
+
+    private static void CancelForm(FixtureForm form, FixtureState state, string sessionId)
+    {
+        form.State = OpenCodeFormStates.Cancelled;
+        state.Publish("form.cancelled", new { id = form.Id, sessionID = sessionId });
+        form.Settled.TrySetResult();
+    }
+
+    /// <summary>
+    /// Publishes the forms of a scripted question turn and reacts to their settlement, the way the probe's turn did.
+    /// </summary>
+    private static async Task RunQuestionTurnAsync(FixtureSession session, FixtureState state, OpenCodeFixtureQuestionScript script, long turnId)
+    {
+        try
+        {
+            var messageId = $"msg_{Guid.NewGuid():N}";
+            var forms = new List<FixtureForm>();
+            foreach (var definition in script.Forms)
+            {
+                var form = new FixtureForm(
+                    $"frm_{Guid.NewGuid():N}",
+                    definition.SessionId ?? session.Id,
+                    definition.Kind,
+                    messageId,
+                    $"call_{Guid.NewGuid():N}",
+                    definition.Fields);
+                state.Forms[form.Id] = form;
+                forms.Add(form);
+            }
+
+            if (script.PublishAllAtOnce)
+            {
+                foreach (var form in forms)
+                {
+                    state.Publish("form.created", new { form = form.ToFormJson() });
+                }
+            }
+
+            foreach (var form in forms)
+            {
+                if (!script.PublishAllAtOnce)
+                {
+                    state.Publish("form.created", new { form = form.ToFormJson() });
+                }
+
+                var waitsForTurn = form.SessionId == session.Id && form.Kind == OpenCodeFormKinds.Question;
+                if (waitsForTurn && !script.CompleteWithoutWaiting)
+                {
+                    await form.Settled.Task.WaitAsync(TimeSpan.FromSeconds(60)).ConfigureAwait(false);
+                }
+            }
+
+            if (Interlocked.Read(ref session.InterruptedTurnId) == turnId || script.StallAfterSettlement)
+            {
+                return;
+            }
+
+            if (Interlocked.CompareExchange(ref session.ActiveTurnId, 0, turnId) != turnId)
+            {
+                return;
+            }
+
+            var text = "QUESTIONS: " + string.Join(" | ", forms.Where(form => form.SessionId == session.Id).Select(form => $"{form.State}:{form.AnswerJson ?? form.Message ?? string.Empty}"));
+            var assistantMessageId = $"msg_{Guid.NewGuid():N}";
+            state.Publish("session.text.ended", new { sessionID = session.Id, assistantMessageID = assistantMessageId, ordinal = 0, text });
+            state.Publish("session.step.ended", new { sessionID = session.Id, assistantMessageID = assistantMessageId, finish = "stop", rawFinish = "stop" });
+            state.Publish("session.execution.succeeded", new { sessionID = session.Id });
+        }
+        catch (TimeoutException)
+        {
+            // A form that nobody settled within the fixture's limit leaves the turn pending, like a stalled agent.
+        }
+    }
+
+    private static async Task RunChildSessionTurnAsync(FixtureSession session, FixtureState state, OpenCodeFixtureChildSessionScript script)
+    {
+        var childId = $"ses_{Guid.NewGuid():N}";
+        var childMessageId = $"msg_{Guid.NewGuid():N}";
+        var parentMessageId = $"msg_{Guid.NewGuid():N}";
+        var callId = $"call_{Guid.NewGuid():N}";
+
+        if (script.IncludeForeignSession)
+        {
+            // Another client's session on the same server: a root session and a child of a session this turn never prompted.
+            var foreignId = $"ses_{Guid.NewGuid():N}";
+            state.Publish("session.created", new { sessionID = foreignId, title = "other client" });
+            state.Publish("session.execution.started", new { sessionID = foreignId });
+            state.Publish("session.text.ended", new { sessionID = foreignId, assistantMessageID = $"msg_{Guid.NewGuid():N}", ordinal = 0, text = "FOREIGN-TEXT" });
+            state.Publish("session.created", new { sessionID = $"ses_{Guid.NewGuid():N}", parentID = foreignId, title = "foreign child" });
+        }
+
+        state.Publish("session.created", new { sessionID = childId, parentID = session.Id, title = script.ChildTitle, agent = "general" });
+        state.Publish("session.execution.started", new { sessionID = childId });
+        state.Publish("session.tool.called", new { sessionID = childId, assistantMessageID = childMessageId, id = callId, input = new { path = "." }, executed = false });
+        state.Publish("session.tool.success", new { sessionID = childId, assistantMessageID = childMessageId, id = callId, content = new[] { new { type = "text", text = "listing" } }, executed = false });
+        state.Publish("session.text.ended", new { sessionID = childId, assistantMessageID = childMessageId, ordinal = 0, text = script.ChildText });
+
+        if (script.ParentInterruptsWhileChildRuns)
+        {
+            state.Publish("session.execution.interrupted", new { sessionID = session.Id });
+            return;
+        }
+
+        state.Publish("session.text.ended", new { sessionID = session.Id, assistantMessageID = parentMessageId, ordinal = 0, text = script.ParentText });
+        state.Publish("session.execution.succeeded", new { sessionID = session.Id });
+
+        if (script.ChildNeverEnds)
+        {
+            return;
+        }
+
+        await Task.Delay(script.ChildRunTime).ConfigureAwait(false);
+        state.Publish(
+            script.ChildInterrupted ? "session.execution.interrupted" : "session.execution.succeeded",
+            new { sessionID = childId });
+
+        // OpenCode also tells the prompted session that the child ended: a synthetic inbox item (state "cancelled" for an interrupted child).
+        state.Publish("session.inbox.enqueued", new
+        {
+            inboxID = $"msg_{Guid.NewGuid():N}",
+            sessionID = session.Id,
+            item = new
+            {
+                type = "synthetic",
+                payload = new
+                {
+                    text = $"<subagent sessionID=\"{childId}\" state=\"{(script.ChildInterrupted ? "cancelled" : "completed")}\" description=\"{script.ChildTitle}\">",
+                    description = script.ChildTitle,
+                    metadata = new
+                    {
+                        source = "subagent",
+                        childID = childId,
+                        agent = "General",
+                        state = script.ChildInterrupted ? "cancelled" : "completed",
+                    },
+                },
+                delivery = "steer",
+            },
+        });
+
+        if (script.FollowUpText is null)
+        {
+            return;
+        }
+
+        var followUpMessageId = $"msg_{Guid.NewGuid():N}";
+        state.Publish("session.execution.started", new { sessionID = session.Id });
+        if (script.FollowUpQuestion)
+        {
+            var form = new FixtureForm(
+                $"frm_{Guid.NewGuid():N}",
+                session.Id,
+                OpenCodeFormKinds.Question,
+                followUpMessageId,
+                callId,
+                [new OpenCodeFixtureField("Color", "Which color do you prefer?", MultiSelect: false, Options: ["Red", "Blue"])]);
+            state.Forms[form.Id] = form;
+            state.Publish("form.created", new { form = form.ToFormJson() });
+            await form.Settled.Task.WaitAsync(TimeSpan.FromSeconds(60)).ConfigureAwait(false);
+        }
+
+        state.Publish("session.text.ended", new { sessionID = session.Id, assistantMessageID = followUpMessageId, ordinal = 0, text = script.FollowUpText });
+        state.Publish("session.execution.succeeded", new { sessionID = session.Id });
     }
 
     private static async Task HandleSetModelAsync(
@@ -305,6 +730,18 @@ public static class OpenCodeFixtureServer
                 sessionID = sessionId,
                 error = new { type = "provider.no-route", message = $"Model unavailable: {providerId}/{modelId}" },
             });
+        }
+        else if (hasModel && Matches(state.Options.QuestionModelIds, providerId, modelId))
+        {
+            // The turn continues in the background: the prompt is acknowledged now and the forms are published after it.
+            var turnId = Interlocked.Increment(ref session.LastTurnId);
+            Interlocked.Exchange(ref session.ActiveTurnId, turnId);
+            _ = Task.Run(() => RunQuestionTurnAsync(session, state, state.Options.QuestionScript, turnId), CancellationToken.None);
+        }
+        else if (hasModel && Matches(state.Options.ChildSessionModelIds, providerId, modelId))
+        {
+            // The turn continues in the background: the prompt is acknowledged now and the child session is published after it.
+            _ = Task.Run(() => RunChildSessionTurnAsync(session, state, state.Options.ChildSessionScript), CancellationToken.None);
         }
         else
         {
@@ -426,6 +863,44 @@ public static class OpenCodeFixtureServer
         return true;
     }
 
+    /// <summary>
+    /// Matches the form and interrupt routes: <c>/api/session/{id}/form</c>, <c>/api/session/{id}/form/{formId}</c>,
+    /// <c>/api/session/{id}/form/{formId}/reply</c> and <c>/api/session/{id}/interrupt</c>.
+    /// </summary>
+    private static bool TryMatchFormRoute(string path, out string sessionId, out string action, out string formId)
+    {
+        const string prefix = "/api/session/";
+        sessionId = string.Empty;
+        action = string.Empty;
+        formId = string.Empty;
+        if (!path.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var parts = path[prefix.Length..].Split('/', StringSplitOptions.RemoveEmptyEntries);
+        sessionId = parts.Length > 0 ? Uri.UnescapeDataString(parts[0]) : string.Empty;
+        switch (parts)
+        {
+            case [_, "form"]:
+                action = "form";
+                return true;
+            case [_, "interrupt"]:
+                action = "interrupt";
+                return true;
+            case [_, "form", var id]:
+                action = "form";
+                formId = Uri.UnescapeDataString(id);
+                return true;
+            case [_, "form", var id, "reply"]:
+                action = "reply";
+                formId = Uri.UnescapeDataString(id);
+                return true;
+            default:
+                return false;
+        }
+    }
+
     private static bool Matches(IReadOnlyCollection<string> configuredValues, string providerId, string modelId)
     {
         if (configuredValues.Count == 0)
@@ -528,7 +1003,11 @@ The canonical OpenCode console project `HagiCode.Libs.OpenCode.Console` owns the
 
         public ConcurrentDictionary<string, FixtureSession> Sessions { get; } = new(StringComparer.Ordinal);
 
+        public ConcurrentDictionary<string, FixtureForm> Forms { get; } = new(StringComparer.Ordinal);
+
         public long NextSessionId;
+
+        public long InterruptRequestCount;
 
         public void Subscribe(Channel<string> channel)
         {
@@ -583,6 +1062,73 @@ The canonical OpenCode console project `HagiCode.Libs.OpenCode.Console` owns the
         public (string ProviderId, string ModelId)? Model { get; set; }
 
         public List<object> Messages { get; } = [];
+
+        /// <summary>The id of the scripted question turn that is running, or 0.</summary>
+        public long ActiveTurnId;
+
+        /// <summary>The id of the last scripted turn that was interrupted.</summary>
+        public long InterruptedTurnId;
+
+        public long LastTurnId;
+
+    }
+
+    /// <summary>
+    /// One form of a fixture session. It is settled by a reply or a cancel, and the scripted turn waits on <see cref="Settled"/>.
+    /// </summary>
+    private sealed class FixtureForm
+    {
+        public FixtureForm(string id, string sessionId, string kind, string messageId, string callId, IReadOnlyList<OpenCodeFixtureField> fields)
+        {
+            Id = id;
+            SessionId = sessionId;
+            Kind = kind;
+            MessageId = messageId;
+            CallId = callId;
+            Fields = fields;
+        }
+
+        public string Id { get; }
+
+        public string SessionId { get; }
+
+        public string Kind { get; }
+
+        public string MessageId { get; }
+
+        public string CallId { get; }
+
+        public IReadOnlyList<OpenCodeFixtureField> Fields { get; }
+
+        public string State { get; set; } = OpenCodeFormStates.Pending;
+
+        public string? Message { get; set; }
+
+        public string? AnswerJson { get; set; }
+
+        public TaskCompletionSource Settled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public bool IsPending => State == OpenCodeFormStates.Pending;
+
+        public object ToFormJson()
+        {
+            return new
+            {
+                id = Id,
+                sessionID = SessionId,
+                title = "Questions",
+                metadata = new { kind = Kind, tool = new { messageID = MessageId, id = CallId } },
+                fields = Fields.Select((field, index) => new
+                {
+                    key = "q" + index.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    title = field.Header,
+                    description = field.Question,
+                    type = field.MultiSelect ? "multiselect" : "string",
+                    options = field.Options.Select(label => new { value = label, label, description = string.Empty }).ToArray(),
+                    custom = true,
+                }).ToArray(),
+            };
+        }
     }
 }
 
@@ -592,6 +1138,8 @@ public sealed class OpenCodeFixtureServerHandle : IAsyncDisposable
     private readonly Task _loopTask;
     private readonly CancellationTokenSource _cts;
     private readonly string _startupOutput;
+    private readonly Func<IReadOnlyList<OpenCodeFixtureFormSnapshot>> _formSnapshot;
+    private readonly Func<long> _interruptCount;
     private readonly object _sync = new();
     private int _disposed;
 
@@ -601,7 +1149,9 @@ public sealed class OpenCodeFixtureServerHandle : IAsyncDisposable
         Task loopTask,
         CancellationTokenSource cts,
         string serverPassword,
-        string startupOutput)
+        string startupOutput,
+        Func<IReadOnlyList<OpenCodeFixtureFormSnapshot>> formSnapshot,
+        Func<long> interruptCount)
     {
         _listener = listener;
         BaseUri = baseUri;
@@ -609,7 +1159,19 @@ public sealed class OpenCodeFixtureServerHandle : IAsyncDisposable
         _cts = cts;
         ServerPassword = serverPassword;
         _startupOutput = startupOutput;
+        _formSnapshot = formSnapshot;
+        _interruptCount = interruptCount;
     }
+
+    /// <summary>
+    /// The forms the simulated server has opened, with their current state. Tests read the settled outcome from it.
+    /// </summary>
+    public IReadOnlyList<OpenCodeFixtureFormSnapshot> GetForms() => _formSnapshot();
+
+    /// <summary>
+    /// The number of <c>POST /api/session/{id}/interrupt</c> requests the simulated server has received.
+    /// </summary>
+    public long InterruptRequestCount => _interruptCount();
 
     public Uri BaseUri { get; }
 

@@ -405,17 +405,49 @@ public sealed class OpenCodeEventEnvelope
     public string? EventType => TryGetString(Data, "type");
 
     /// <summary>
-    /// Gets the session the event belongs to (<c>data.sessionID</c>), when present.
+    /// Gets the session the event belongs to: <c>data.sessionID</c>, or <c>data.form.sessionID</c> for a form event
+    /// (OpenCode 2.0.32 <c>form.created</c> carries the session inside the form only). Null when neither is present.
     /// </summary>
     public string? SessionId
     {
         get
         {
-            return Data.ValueKind == JsonValueKind.Object &&
-                   Data.TryGetProperty("data", out var payload) &&
-                   payload.ValueKind == JsonValueKind.Object
-                ? TryGetString(payload, "sessionID")
-                : null;
+            if (Data.ValueKind != JsonValueKind.Object ||
+                !Data.TryGetProperty("data", out var payload) ||
+                payload.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            return TryGetString(payload, "sessionID") ??
+                   (payload.TryGetProperty("form", out var form) ? TryGetString(form, "sessionID") : null);
+        }
+    }
+
+    /// <summary>
+    /// Gets the form carried by a <c>form.*</c> event (<c>data.form</c>), or null when the event carries none.
+    /// The <c>form.replied</c> and <c>form.cancelled</c> events carry only the form id, so they return null.
+    /// </summary>
+    public OpenCodeFormInfo? Form
+    {
+        get
+        {
+            if (Payload.ValueKind != JsonValueKind.Object ||
+                !Payload.TryGetProperty("form", out var form) ||
+                form.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            try
+            {
+                return form.Deserialize<OpenCodeFormInfo>(OpenCodeFormJson.Options);
+            }
+            catch (JsonException)
+            {
+                // A form that does not match the model cannot be answered; the turn treats it as absent.
+                return null;
+            }
         }
     }
 
@@ -443,6 +475,195 @@ public sealed class OpenCodeEventEnvelope
 
         return null;
     }
+}
+
+/// <summary>
+/// The kinds of OpenCode form that the client knows about (<c>form.metadata.kind</c>).
+/// </summary>
+public static class OpenCodeFormKinds
+{
+    /// <summary>The form the built-in <c>question</c> tool opens. The client answers these.</summary>
+    public const string Question = "question";
+
+    /// <summary>The form an MCP server opens for elicitation. The client leaves these untouched.</summary>
+    public const string Mcp = "mcp";
+}
+
+/// <summary>
+/// The lifecycle names of an OpenCode form (<c>form.state</c>). A pending form accepts a reply or a cancel.
+/// </summary>
+public static class OpenCodeFormStates
+{
+    public const string Pending = "pending";
+
+    public const string Replied = "replied";
+
+    public const string Cancelled = "cancelled";
+}
+
+/// <summary>
+/// One option of an OpenCode form field (<c>form.fields[].options[]</c>).
+/// </summary>
+public sealed class OpenCodeFormOption
+{
+    [JsonPropertyName("value")]
+    public string? Value { get; init; }
+
+    [JsonPropertyName("label")]
+    public string? Label { get; init; }
+
+    [JsonPropertyName("description")]
+    public string? Description { get; init; }
+}
+
+/// <summary>
+/// One field of an OpenCode form (<c>form.fields[]</c>). A question form has one field per question, keyed <c>q0</c>..<c>qN</c>
+/// in the order the agent asked. A <c>string</c> field takes one string, a <c>multiselect</c> field takes a list of strings.
+/// </summary>
+public sealed class OpenCodeFormField
+{
+    [JsonPropertyName("key")]
+    public string Key { get; init; } = string.Empty;
+
+    /// <summary>The question header (the question tool's <c>header</c>).</summary>
+    [JsonPropertyName("title")]
+    public string? Title { get; init; }
+
+    /// <summary>The question text (the question tool's <c>question</c>).</summary>
+    [JsonPropertyName("description")]
+    public string? Description { get; init; }
+
+    /// <summary>Either <c>string</c> (single choice) or <c>multiselect</c>.</summary>
+    [JsonPropertyName("type")]
+    public string? Type { get; init; }
+
+    [JsonPropertyName("options")]
+    public List<OpenCodeFormOption> Options { get; init; } = [];
+
+    /// <summary>Whether the user may type a value that is not one of the options.</summary>
+    [JsonPropertyName("custom")]
+    public bool Custom { get; init; }
+}
+
+/// <summary>
+/// The tool call that opened a form (<c>form.metadata.tool</c>). Diagnostic only; the form id identifies the form.
+/// </summary>
+public sealed class OpenCodeFormToolReference
+{
+    [JsonPropertyName("messageID")]
+    public string? MessageId { get; init; }
+
+    [JsonPropertyName("id")]
+    public string? Id { get; init; }
+}
+
+/// <summary>
+/// The metadata of an OpenCode form (<c>form.metadata</c>). <see cref="Kind"/> decides who answers the form.
+/// </summary>
+public sealed class OpenCodeFormMetadata
+{
+    [JsonPropertyName("kind")]
+    public string? Kind { get; init; }
+
+    [JsonPropertyName("tool")]
+    public OpenCodeFormToolReference? Tool { get; init; }
+}
+
+/// <summary>
+/// An OpenCode form as <c>form.created</c> and <c>GET /api/session/{id}/form</c> report it.
+/// </summary>
+public sealed class OpenCodeFormInfo
+{
+    /// <summary>The form id (<c>frm_...</c>). It is the key of the reply and cancel routes.</summary>
+    [JsonPropertyName("id")]
+    public string Id { get; init; } = string.Empty;
+
+    [JsonPropertyName("sessionID")]
+    public string? SessionId { get; init; }
+
+    [JsonPropertyName("title")]
+    public string? Title { get; init; }
+
+    [JsonPropertyName("metadata")]
+    public OpenCodeFormMetadata? Metadata { get; init; }
+
+    [JsonPropertyName("fields")]
+    public List<OpenCodeFormField> Fields { get; init; } = [];
+
+    /// <summary>
+    /// The form state as OpenCode reports it, when the form detail carries one. A form detail reports <c>cancelled</c>
+    /// after a cancel; the state may be a plain string or an object with a <c>status</c>. Use <see cref="StateName"/>.
+    /// </summary>
+    [JsonPropertyName("state")]
+    public JsonElement? State { get; init; }
+
+    /// <summary>The form kind (<c>metadata.kind</c>), or null when the form carries none.</summary>
+    [JsonIgnore]
+    public string? Kind => Metadata?.Kind;
+
+    /// <summary>
+    /// The state name (<see cref="OpenCodeFormStates"/>) read from <see cref="State"/>, or null when the form carries no state.
+    /// </summary>
+    [JsonIgnore]
+    public string? StateName
+    {
+        get
+        {
+            if (State is not { } state)
+            {
+                return null;
+            }
+
+            return state.ValueKind switch
+            {
+                JsonValueKind.String => state.GetString(),
+                JsonValueKind.Object when state.TryGetProperty("status", out var status) && status.ValueKind == JsonValueKind.String => status.GetString(),
+                _ => null,
+            };
+        }
+    }
+}
+
+/// <summary>
+/// Body of <c>POST /api/session/{id}/form/{formId}/reply</c>. The answer is keyed by field key; a <c>string</c> field takes a
+/// string and a <c>multiselect</c> field takes a list of strings.
+/// </summary>
+public sealed class OpenCodeFormReplyRequest
+{
+    [JsonPropertyName("answer")]
+    public IReadOnlyDictionary<string, object> Answer { get; init; } = new Dictionary<string, object>(StringComparer.Ordinal);
+}
+
+/// <summary>
+/// Body of <c>POST /api/session/{id}/interrupt</c>: whether OpenCode interrupted the session.
+/// </summary>
+public sealed class OpenCodeSessionInterruptResponse
+{
+    [JsonPropertyName("interrupted")]
+    public bool Interrupted { get; init; }
+}
+
+/// <summary>
+/// What OpenCode did with a reply or a cancel of a form.
+/// </summary>
+public enum OpenCodeFormOutcome
+{
+    /// <summary>OpenCode accepted the reply or cancel (HTTP 204).</summary>
+    Accepted,
+
+    /// <summary>The form was already settled (<c>409 FormAlreadySettledError</c>). The question is closed; nothing is left to do.</summary>
+    AlreadySettled,
+}
+
+/// <summary>
+/// Reads the OpenCode JSON settings used by the form models.
+/// </summary>
+internal static class OpenCodeFormJson
+{
+    internal static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)
+    {
+        PropertyNameCaseInsensitive = true,
+    };
 }
 
 public class OpenCodeApiException : InvalidOperationException

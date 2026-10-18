@@ -1,0 +1,11 @@
+[
+  {
+    "status": "error",
+    "output": null,
+    "error": {
+      "type": "tool.execution",
+      "message": "The user declined to answer this question"
+    },
+    "metadata": null
+  }
+]

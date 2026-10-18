@@ -1,0 +1,24 @@
+[
+  {
+    "status": "completed",
+    "output": [
+      {
+        "type": "text",
+        "text": "User has answered your questions: \"Which color do you prefer?\"=\"Purple\", \"Which pets do you like?\"=\"Cats, Hamsters\". You can now continue with the user's answers in mind."
+      }
+    ],
+    "error": null,
+    "metadata": {
+      "answers": [
+        [
+          "Purple"
+        ],
+        [
+          "Cats",
+          "Hamsters"
+        ]
+      ],
+      "truncated": false
+    }
+  }
+]

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
@@ -158,26 +159,67 @@ public sealed class OpenCodeHttpClient : IDisposable
     /// <summary>
     /// Runs one prompt and returns the assistant reply assembled from <c>GET /api/event</c>.
     /// The event stream is opened and confirmed before the prompt is posted, so early events of the turn are not lost.
+    /// A question the agent asks is declined at once, because this overload has no handler.
     /// </summary>
-    public async Task<OpenCodeMessageEnvelope> PromptAsync(
+    public Task<OpenCodeMessageEnvelope> PromptAsync(
         string sessionId,
         OpenCodeSessionPromptRequest request,
         CancellationToken cancellationToken = default)
     {
+        return PromptAsync(sessionId, request, interaction: null, cancellationToken);
+    }
+
+    /// <summary>
+    /// Runs one prompt. When <paramref name="interaction"/> is set, each question the agent asks is handed to its handler on a
+    /// background task while the turn keeps reading events. The request timeout does not count the time a question is pending;
+    /// the question timeout bounds that wait instead.
+    /// </summary>
+    /// <param name="sessionId">The session to prompt.</param>
+    /// <param name="request">The prompt.</param>
+    /// <param name="interaction">The question handler and its timeout, or <see langword="null"/> to decline every question.</param>
+    /// <param name="cancellationToken">Cancels the turn. An interactive turn that is cancelled also cancels its pending forms and interrupts the session.</param>
+    public Task<OpenCodeMessageEnvelope> PromptAsync(
+        string sessionId,
+        OpenCodeSessionPromptRequest request,
+        OpenCodeTurnInteraction? interaction,
+        CancellationToken cancellationToken = default)
+    {
+        return PromptAsync(sessionId, request, interaction, agentWork: null, cancellationToken);
+    }
+
+    /// <summary>
+    /// Runs one prompt with the agent work of the run reported to <paramref name="agentWork"/>. The child sessions the prompted
+    /// session spawns are tracked (see <see cref="OpenCodeAgentWorkTracker"/>), and the turn is held open after the prompted session
+    /// reports success while a tracked child is still active.
+    /// </summary>
+    public async Task<OpenCodeMessageEnvelope> PromptAsync(
+        string sessionId,
+        OpenCodeSessionPromptRequest request,
+        OpenCodeTurnInteraction? interaction,
+        OpenCodeAgentWorkTurn? agentWork,
+        CancellationToken cancellationToken = default)
+    {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentNullException.ThrowIfNull(request);
-
-        using var turnSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var requestTimeout = _httpClient.Timeout;
-        if (requestTimeout != Timeout.InfiniteTimeSpan)
+        if (interaction is not null)
         {
-            turnSource.CancelAfter(requestTimeout);
+            ArgumentNullException.ThrowIfNull(interaction.Handler, "interaction");
+            OpenCodeUserInput.ValidateQuestionTimeout(interaction.QuestionTimeout, "QuestionTimeout");
         }
 
+        agentWork?.Validate();
+
+        using var turnSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        // The event read has its own source, so a read still waiting when the turn ends can be stopped before the enumerator is disposed.
+        using var readSource = CancellationTokenSource.CreateLinkedTokenSource(turnSource.Token);
+        var requestTimeout = _httpClient.Timeout;
+        var deadline = new TurnDeadline(turnSource, requestTimeout);
+        var questions = new OpenCodeQuestionScope(this, sessionId, interaction, deadline, turnSource.Token);
+        var promptPosted = false;
         var turnToken = turnSource.Token;
         try
         {
-            await using var events = SubscribeEventsAsync(turnToken).GetAsyncEnumerator(turnToken);
+            await using var events = SubscribeEventsAsync(readSource.Token).GetAsyncEnumerator(readSource.Token);
             if (!await events.MoveNextAsync().ConfigureAwait(false))
             {
                 throw new InvalidOperationException("OpenCode event stream closed before the prompt was sent.");
@@ -188,13 +230,115 @@ public sealed class OpenCodeHttpClient : IDisposable
                 BuildUri($"/api/session/{Uri.EscapeDataString(sessionId)}/prompt"),
                 request,
                 turnToken).ConfigureAwait(false);
+            promptPosted = true;
 
-            return await AwaitTurnAsync(events, sessionId, ack.Data?.Id, turnToken).ConfigureAwait(false);
+            return await AwaitTurnAsync(events, sessionId, ack.Data?.Id, questions, agentWork, deadline, readSource, turnToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             throw new TimeoutException($"OpenCode prompt for session '{sessionId}' did not finish within {requestTimeout}.");
         }
+        finally
+        {
+            // Runs on every exit: the pending forms are closed, and an interactive turn the caller cancelled interrupts its session.
+            await questions.CloseAsync(interruptSession: promptPosted && cancellationToken.IsCancellationRequested).ConfigureAwait(false);
+            questions.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Lists the pending forms of a session (<c>GET /api/session/{id}/form</c>).
+    /// </summary>
+    public async Task<IReadOnlyList<OpenCodeFormInfo>> ListFormsAsync(
+        string sessionId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+
+        var response = await SendAsync<OpenCodeDataResponse<List<OpenCodeFormInfo>>>(
+            HttpMethod.Get,
+            BuildUri($"/api/session/{Uri.EscapeDataString(sessionId)}/form"),
+            null,
+            cancellationToken).ConfigureAwait(false);
+        return response.Data ?? [];
+    }
+
+    /// <summary>
+    /// Answers a form (<c>POST /api/session/{id}/form/{formId}/reply</c>). The answer is keyed by field key. A form that is already
+    /// settled answers <see cref="OpenCodeFormOutcome.AlreadySettled"/> instead of failing.
+    /// </summary>
+    /// <exception cref="OpenCodeApiException">OpenCode refused the answer, for example <c>400 FormInvalidAnswerError</c>; the form stays pending.</exception>
+    public async Task<OpenCodeFormOutcome> ReplyFormAsync(
+        string sessionId,
+        string formId,
+        IReadOnlyDictionary<string, object> answer,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(formId);
+        ArgumentNullException.ThrowIfNull(answer);
+
+        try
+        {
+            await SendForBodyAsync(
+                HttpMethod.Post,
+                BuildUri($"/api/session/{Uri.EscapeDataString(sessionId)}/form/{Uri.EscapeDataString(formId)}/reply"),
+                new OpenCodeFormReplyRequest { Answer = answer },
+                cancellationToken).ConfigureAwait(false);
+            return OpenCodeFormOutcome.Accepted;
+        }
+        catch (OpenCodeApiException exception) when (IsFormAlreadySettled(exception))
+        {
+            return OpenCodeFormOutcome.AlreadySettled;
+        }
+    }
+
+    /// <summary>
+    /// Cancels a form with a message the agent receives (<c>DELETE /api/session/{id}/form/{formId}?message=</c>). A form that is
+    /// already settled answers <see cref="OpenCodeFormOutcome.AlreadySettled"/> instead of failing.
+    /// </summary>
+    public async Task<OpenCodeFormOutcome> CancelFormAsync(
+        string sessionId,
+        string formId,
+        string? message,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(formId);
+
+        try
+        {
+            await SendForBodyAsync(
+                HttpMethod.Delete,
+                BuildUri(
+                    $"/api/session/{Uri.EscapeDataString(sessionId)}/form/{Uri.EscapeDataString(formId)}",
+                    Query(("message", string.IsNullOrEmpty(message) ? null : message))),
+                null,
+                cancellationToken).ConfigureAwait(false);
+            return OpenCodeFormOutcome.Accepted;
+        }
+        catch (OpenCodeApiException exception) when (IsFormAlreadySettled(exception))
+        {
+            return OpenCodeFormOutcome.AlreadySettled;
+        }
+    }
+
+    /// <summary>
+    /// Interrupts a session (<c>POST /api/session/{id}/interrupt</c>). Returns whether OpenCode reports the session interrupted.
+    /// A pending form must be cancelled first to release a tool that is blocked on it, though the interrupt also ends the turn.
+    /// </summary>
+    public async Task<bool> InterruptSessionAsync(
+        string sessionId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+
+        var response = await SendAsync<OpenCodeSessionInterruptResponse>(
+            HttpMethod.Post,
+            BuildUri($"/api/session/{Uri.EscapeDataString(sessionId)}/interrupt"),
+            null,
+            cancellationToken).ConfigureAwait(false);
+        return response.Interrupted;
     }
 
     public async Task<IReadOnlyList<OpenCodeFileNode>> ListFilesAsync(
@@ -285,52 +429,257 @@ public sealed class OpenCodeHttpClient : IDisposable
         IAsyncEnumerator<OpenCodeEventEnvelope> events,
         string sessionId,
         string? promptMessageId,
+        OpenCodeQuestionScope questions,
+        OpenCodeAgentWorkTurn? agentWork,
+        TurnDeadline deadline,
+        CancellationTokenSource readSource,
         CancellationToken cancellationToken)
     {
         var textSegments = new List<string>();
         string? assistantMessageId = null;
 
-        while (await events.MoveNextAsync().ConfigureAwait(false))
+        // Agent work is observed for every envelope, before the session filter, so child sessions never reach the parent switch.
+        var tracker = agentWork is null ? null : new OpenCodeAgentWorkTracker(sessionId);
+
+        // Hold-open state (design D5). The turn is held only after the prompted session reports success while a tracked child is active.
+        var holding = false;
+        var parentRunning = false;
+        var holdStartedAt = 0L;
+        long? idleSince = null;
+        Task<bool>? pendingRead = null;
+
+        void EmitAgentWork()
         {
-            var envelope = events.Current;
-            if (!string.Equals(envelope.SessionId, sessionId, StringComparison.Ordinal))
+            var snapshot = tracker?.TakeSnapshot();
+            if (snapshot is not null)
             {
-                continue;
+                agentWork!.Emit(snapshot);
+            }
+        }
+
+        void EndAgentWork()
+        {
+            tracker?.StopActive();
+            EmitAgentWork();
+        }
+
+        void SettleHold()
+        {
+            // The hold ends only once no child is active and the prompted session has been idle for the settle interval.
+            if (!holding)
+            {
+                return;
             }
 
-            switch (envelope.EventType)
+            if (parentRunning || tracker!.HasActiveWork)
             {
-                case "session.text.ended":
-                    assistantMessageId = TryGetString(envelope.Payload, "assistantMessageID") ?? assistantMessageId;
-                    var text = TryGetString(envelope.Payload, "text");
-                    if (!string.IsNullOrWhiteSpace(text))
+                idleSince = null;
+            }
+            else
+            {
+                idleSince ??= Stopwatch.GetTimestamp();
+            }
+        }
+
+        OpenCodeMessageEnvelope Result(List<JsonElement> parts)
+        {
+            return BuildAssistantEnvelope(sessionId, assistantMessageId ?? promptMessageId, parts);
+        }
+
+        try
+        {
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (holding)
+                {
+                    if (HasElapsed(holdStartedAt, agentWork!.WaitTimeout))
                     {
-                        textSegments.Add(text);
+                        // The wait bound passed: items still running are reported stopped and the turn returns what it has.
+                        EndAgentWork();
+                        return Result(TextParts(textSegments));
                     }
 
-                    break;
-
-                case "session.execution.succeeded":
-                    return BuildAssistantEnvelope(
-                        sessionId,
-                        assistantMessageId ?? promptMessageId,
-                        textSegments.Select(static segment => JsonSerializer.SerializeToElement(new { type = "text", text = segment })).ToList());
-
-                case "session.execution.failed":
-                    var error = envelope.Payload.ValueKind == JsonValueKind.Object && envelope.Payload.TryGetProperty("error", out var errorNode)
-                        ? errorNode
-                        : default;
-                    var errorPart = JsonSerializer.SerializeToElement(new
+                    if (idleSince is { } idleAt && HasElapsed(idleAt, agentWork!.SettleInterval))
                     {
-                        type = "error",
-                        reason = TryGetString(error, "type") ?? "unknown",
-                        message = TryGetString(error, "message") ?? "OpenCode reported a failed turn.",
-                    });
-                    return BuildAssistantEnvelope(sessionId, assistantMessageId ?? promptMessageId, [errorPart]);
+                        // Every tracked child ended and the prompted session did not start again.
+                        tracker!.ReleaseHold();
+                        EmitAgentWork();
+                        return Result(TextParts(textSegments));
+                    }
+                }
+
+                pendingRead ??= events.MoveNextAsync().AsTask();
+                if (holding && !pendingRead.IsCompleted)
+                {
+                    var wait = UntilElapsed(holdStartedAt, agentWork!.WaitTimeout);
+                    if (idleSince is { } settleAt)
+                    {
+                        var settleWait = UntilElapsed(settleAt, agentWork.SettleInterval);
+                        wait = wait == Timeout.InfiniteTimeSpan || settleWait < wait ? settleWait : wait;
+                    }
+
+                    if (await Task.WhenAny(pendingRead, Task.Delay(wait, cancellationToken)).ConfigureAwait(false) != pendingRead)
+                    {
+                        // A timer fired before the next event. The loop re-checks the bounds at the top.
+                        continue;
+                    }
+                }
+
+                if (!await pendingRead.ConfigureAwait(false))
+                {
+                    break;
+                }
+
+                pendingRead = null;
+                var envelope = events.Current;
+                if (tracker is not null)
+                {
+                    ObserveAgentWork(tracker, envelope);
+                    EmitAgentWork();
+                }
+
+                if (!string.Equals(envelope.SessionId, sessionId, StringComparison.Ordinal))
+                {
+                    SettleHold();
+                    continue;
+                }
+
+                switch (envelope.EventType)
+                {
+                    case "form.created":
+                        if (envelope.Form is { } form)
+                        {
+                            await questions.OnFormCreatedAsync(form, cancellationToken).ConfigureAwait(false);
+                        }
+
+                        break;
+
+                    case "session.text.ended":
+                        assistantMessageId = TryGetString(envelope.Payload, "assistantMessageID") ?? assistantMessageId;
+                        var text = TryGetString(envelope.Payload, "text");
+                        if (!string.IsNullOrWhiteSpace(text))
+                        {
+                            textSegments.Add(text);
+                        }
+
+                        break;
+
+                    case "session.execution.started":
+                        parentRunning = true;
+                        break;
+
+                    case "session.execution.succeeded":
+                        if (!holding)
+                        {
+                            if (tracker is null || !tracker.HasActiveWork)
+                            {
+                                return Result(TextParts(textSegments));
+                            }
+
+                            // Success while a child still runs: keep the turn open. The request deadline does not count the wait.
+                            holding = true;
+                            holdStartedAt = Stopwatch.GetTimestamp();
+                            deadline.Pause();
+                            tracker.HoldActive();
+                        }
+
+                        parentRunning = false;
+                        break;
+
+                    case "session.execution.failed":
+                        EndAgentWork();
+                        var error = envelope.Payload.ValueKind == JsonValueKind.Object && envelope.Payload.TryGetProperty("error", out var errorNode)
+                            ? errorNode
+                            : default;
+                        var errorPart = JsonSerializer.SerializeToElement(new
+                        {
+                            type = "error",
+                            reason = TryGetString(error, "type") ?? "unknown",
+                            message = TryGetString(error, "message") ?? "OpenCode reported a failed turn.",
+                        });
+                        return Result([errorPart]);
+
+                    case "session.execution.interrupted":
+                        // Terminal as well: OpenCode emits it after POST /interrupt (or a user stop) and sends no succeeded/failed.
+                        EndAgentWork();
+                        var interruptedPart = JsonSerializer.SerializeToElement(new
+                        {
+                            type = "error",
+                            reason = TryGetString(envelope.Payload, "reason") ?? "interrupted",
+                            message = "OpenCode interrupted the turn.",
+                        });
+                        return Result([interruptedPart]);
+                }
+
+                SettleHold();
+                EmitAgentWork();
+            }
+        }
+        finally
+        {
+            if (pendingRead is { IsCompleted: false })
+            {
+                // The turn is over while a read still waits for an event. Stop that read, so the enumerator is not disposed while it runs.
+                readSource.Cancel();
+                try
+                {
+                    await pendingRead.ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Expected: the read was stopped above.
+                }
             }
         }
 
         throw new InvalidOperationException("OpenCode event stream ended before the prompt turn finished.");
+    }
+
+    /// <summary>
+    /// Passes one envelope to the agent work tracker. Tracking never fails or ends the turn, so a failure here is ignored and the
+    /// tracker keeps the list it had.
+    /// </summary>
+    private static void ObserveAgentWork(OpenCodeAgentWorkTracker tracker, OpenCodeEventEnvelope envelope)
+    {
+        try
+        {
+            tracker.Observe(envelope);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // Tracking is best effort: the event is dropped and the turn carries on.
+        }
+    }
+
+    private static List<JsonElement> TextParts(IEnumerable<string> segments)
+    {
+        return segments.Select(static segment => JsonSerializer.SerializeToElement(new { type = "text", text = segment })).ToList();
+    }
+
+    /// <summary>Whether a window that started at <paramref name="startedAt"/> has passed. An infinite window never passes.</summary>
+    private static bool HasElapsed(long startedAt, TimeSpan window)
+    {
+        return window != Timeout.InfiniteTimeSpan && Stopwatch.GetElapsedTime(startedAt) >= window;
+    }
+
+    /// <summary>The time left in a window that started at <paramref name="startedAt"/>, or infinite when the window is.</summary>
+    private static TimeSpan UntilElapsed(long startedAt, TimeSpan window)
+    {
+        if (window == Timeout.InfiniteTimeSpan)
+        {
+            return Timeout.InfiniteTimeSpan;
+        }
+
+        var left = window - Stopwatch.GetElapsedTime(startedAt);
+        return left > TimeSpan.Zero ? left : TimeSpan.Zero;
+    }
+
+    private static bool IsFormAlreadySettled(OpenCodeApiException exception)
+    {
+        return exception.StatusCode == HttpStatusCode.Conflict &&
+               exception.ResponseBody?.Contains("FormAlreadySettledError", StringComparison.Ordinal) == true;
     }
 
     private static OpenCodeMessageEnvelope BuildAssistantEnvelope(string sessionId, string? messageId, List<JsonElement> parts)

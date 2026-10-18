@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -214,6 +215,430 @@ public sealed class OpenCodeHttpClientTests
             await client.PromptAsync(SessionId, OpenCodeSessionPromptRequest.FromText("hi")));
 
         exception.Message.ShouldContain("did not finish");
+    }
+
+    [Test]
+    public async Task Form_routes_list_reply_and_cancel_against_the_fixture_with_settled_outcomes()
+    {
+        await using var fixture = await QuestionFixture.StartAsync(new OpenCodeFixtureQuestionScript
+        {
+            Forms =
+            [
+                McpForm("Name", OpenCodeFormKinds.Mcp, type: false),
+                McpForm("Pets", OpenCodeFormKinds.Mcp, type: true),
+                McpForm("Note", OpenCodeFormKinds.Mcp, type: false),
+            ],
+        });
+
+        // MCP forms are left to their owner, so the turn completes and the three forms stay pending.
+        await fixture.Client.PromptAsync(fixture.SessionId, OpenCodeSessionPromptRequest.FromText("ask"));
+        var pending = await fixture.Client.ListFormsAsync(fixture.SessionId);
+        pending.Count.ShouldBe(3);
+        pending.ShouldAllBe(static form => form.Kind == OpenCodeFormKinds.Mcp);
+        var name = pending.Single(static form => form.Fields[0].Title == "Name");
+        var pets = pending.Single(static form => form.Fields[0].Title == "Pets");
+        var note = pending.Single(static form => form.Fields[0].Title == "Note");
+
+        (await fixture.Client.ReplyFormAsync(fixture.SessionId, name.Id, Answer(("q0", "Ada")))).ShouldBe(OpenCodeFormOutcome.Accepted);
+
+        // A wrong shape is refused and the form stays pending.
+        var refused = await Should.ThrowAsync<OpenCodeApiException>(async () =>
+            await fixture.Client.ReplyFormAsync(fixture.SessionId, pets.Id, Answer(("q0", "Cats"))));
+        refused.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        refused.ResponseBody.ShouldContain("Expected string array for form field: q0");
+        (await fixture.Client.ReplyFormAsync(fixture.SessionId, pets.Id, Answer(("q0", new[] { "Cats", "Hamsters" }))))
+            .ShouldBe(OpenCodeFormOutcome.Accepted);
+
+        (await fixture.Client.CancelFormAsync(fixture.SessionId, note.Id, "Not now.")).ShouldBe(OpenCodeFormOutcome.Accepted);
+
+        (await fixture.Client.ReplyFormAsync(fixture.SessionId, pets.Id, Answer(("q0", new[] { "Cats" }))))
+            .ShouldBe(OpenCodeFormOutcome.AlreadySettled);
+        (await fixture.Client.CancelFormAsync(fixture.SessionId, note.Id, "again")).ShouldBe(OpenCodeFormOutcome.AlreadySettled);
+        (await fixture.Client.ListFormsAsync(fixture.SessionId)).ShouldBeEmpty();
+
+        var forms = fixture.Server.GetForms();
+        forms.Single(form => form.Id == name.Id).State.ShouldBe(OpenCodeFormStates.Replied);
+        forms.Single(form => form.Id == name.Id).AnswerJson.ShouldBe("{\"q0\":\"Ada\"}");
+        forms.Single(form => form.Id == pets.Id).AnswerJson.ShouldBe("{\"q0\":[\"Cats\",\"Hamsters\"]}");
+        forms.Single(form => form.Id == note.Id).State.ShouldBe(OpenCodeFormStates.Cancelled);
+        forms.Single(form => form.Id == note.Id).Message.ShouldBe("Not now.");
+    }
+
+    [Test]
+    public async Task Interrupt_ends_a_turn_that_is_blocked_on_a_form_with_the_interrupted_event()
+    {
+        await using var fixture = await QuestionFixture.StartAsync(new OpenCodeFixtureQuestionScript { StallAfterSettlement = true });
+
+        // The client declines the question at once, and the fixture's turn then stalls until it is interrupted.
+        var prompt = fixture.Client.PromptAsync(fixture.SessionId, OpenCodeSessionPromptRequest.FromText("ask"));
+        await WaitUntilAsync(() => fixture.Server.GetForms().Any(static form => form.State == OpenCodeFormStates.Cancelled));
+
+        (await fixture.Client.InterruptSessionAsync(fixture.SessionId)).ShouldBeTrue();
+        var envelope = await prompt;
+
+        envelope.Parts.Count.ShouldBe(1);
+        envelope.Parts[0].GetProperty("type").GetString().ShouldBe("error");
+        envelope.Parts[0].GetProperty("reason").GetString().ShouldBe("user");
+        fixture.Server.InterruptRequestCount.ShouldBe(1);
+        (await fixture.Client.InterruptSessionAsync(fixture.SessionId)).ShouldBeFalse();
+    }
+
+    [Test]
+    public async Task Form_routes_report_an_authentication_failure_for_a_wrong_password()
+    {
+        await using var fixture = await QuestionFixture.StartAsync(new OpenCodeFixtureQuestionScript());
+        using var http = new HttpClient { BaseAddress = fixture.Server.BaseUri };
+        using var client = new OpenCodeHttpClient(http, directory: null, workspace: null, "wrong-password");
+
+        var listed = await Should.ThrowAsync<OpenCodeAuthenticationException>(async () => await client.ListFormsAsync(fixture.SessionId));
+        var replied = await Should.ThrowAsync<OpenCodeAuthenticationException>(async () =>
+            await client.ReplyFormAsync(fixture.SessionId, "frm_missing", Answer(("q0", "x"))));
+        var cancelled = await Should.ThrowAsync<OpenCodeAuthenticationException>(async () =>
+            await client.CancelFormAsync(fixture.SessionId, "frm_missing", "x"));
+        var interrupted = await Should.ThrowAsync<OpenCodeAuthenticationException>(async () =>
+            await client.InterruptSessionAsync(fixture.SessionId));
+
+        new[] { listed, replied, cancelled, interrupted }.ShouldAllBe(static exception => exception.StatusCode == HttpStatusCode.Unauthorized);
+        new[] { listed, replied, cancelled, interrupted }.ShouldAllBe(static exception => !exception.Message.Contains("wrong-password", StringComparison.Ordinal));
+    }
+
+    [Test]
+    public async Task Question_is_handed_over_in_order_and_answered_with_fields_encoded_by_type()
+    {
+        await using var fixture = await QuestionFixture.StartAsync();
+        var order = new List<string>();
+        var interaction = new OpenCodeTurnInteraction(
+            (request, _) =>
+            {
+                order.Add("handler");
+                return Task.FromResult<OpenCodeUserInputResponse?>(new OpenCodeUserInputResponse(Answers(
+                    ("Which color do you prefer?", ["Red"]),
+                    ("Which pets do you like?", ["Cats"]))));
+            },
+            TimeSpan.FromMinutes(5),
+            request => order.Add($"asked:{request.Questions.Count}"));
+
+        var envelope = await fixture.Client.PromptAsync(fixture.SessionId, OpenCodeSessionPromptRequest.FromText("ask"), interaction);
+
+        order.ShouldBe(["asked:2", "handler"]);
+        var form = fixture.Server.GetForms().Single();
+        form.State.ShouldBe(OpenCodeFormStates.Replied);
+        form.AnswerJson.ShouldBe("{\"q0\":\"Red\",\"q1\":[\"Cats\"]}");
+        envelope.GetTextContent().ShouldContain("replied:{\"q0\":\"Red\",\"q1\":[\"Cats\"]}");
+    }
+
+    [Test]
+    public async Task A_second_question_is_handed_over_while_the_first_is_still_pending()
+    {
+        await using var fixture = await QuestionFixture.StartAsync(new OpenCodeFixtureQuestionScript
+        {
+            PublishAllAtOnce = true,
+            Forms = [SingleQuestionForm("First?"), SingleQuestionForm("Second?")],
+        });
+        var secondSeen = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var handled = new ConcurrentBag<string>();
+        var interaction = new OpenCodeTurnInteraction(
+            async (request, token) =>
+            {
+                var question = request.Questions.Single().Question;
+                handled.Add(question);
+                if (question == "First?")
+                {
+                    // Only returns once the second question has reached the handler: a sequential loop would time out here.
+                    await secondSeen.Task.WaitAsync(TimeSpan.FromSeconds(10), token);
+                }
+                else
+                {
+                    secondSeen.TrySetResult();
+                }
+
+                return new OpenCodeUserInputResponse(Answers((question, ["yes"])));
+            },
+            TimeSpan.FromMinutes(5));
+
+        await fixture.Client.PromptAsync(fixture.SessionId, OpenCodeSessionPromptRequest.FromText("ask"), interaction);
+
+        handled.OrderBy(static question => question, StringComparer.Ordinal).ShouldBe(["First?", "Second?"]);
+        fixture.Server.GetForms().ShouldAllBe(static form => form.State == OpenCodeFormStates.Replied);
+    }
+
+    [Test]
+    public async Task Handler_that_throws_declines_the_question_and_the_turn_completes()
+    {
+        await using var fixture = await QuestionFixture.StartAsync();
+        var interaction = new OpenCodeTurnInteraction(
+            static async (_, _) =>
+            {
+                await Task.Yield();
+                throw new InvalidOperationException("handler failure");
+            },
+            TimeSpan.FromMinutes(5));
+
+        var envelope = await fixture.Client.PromptAsync(fixture.SessionId, OpenCodeSessionPromptRequest.FromText("ask"), interaction);
+
+        envelope.GetTextContent().ShouldContain("cancelled:" + OpenCodeUserInput.DeclinedMessage);
+        var form = fixture.Server.GetForms().Single();
+        form.State.ShouldBe(OpenCodeFormStates.Cancelled);
+        form.Message.ShouldBe(OpenCodeUserInput.DeclinedMessage);
+    }
+
+    [Test]
+    public async Task Null_answer_declines_the_question()
+    {
+        await using var fixture = await QuestionFixture.StartAsync();
+        var interaction = new OpenCodeTurnInteraction(
+            static (_, _) => Task.FromResult<OpenCodeUserInputResponse?>(null),
+            TimeSpan.FromMinutes(5));
+
+        await fixture.Client.PromptAsync(fixture.SessionId, OpenCodeSessionPromptRequest.FromText("ask"), interaction);
+
+        var form = fixture.Server.GetForms().Single();
+        form.State.ShouldBe(OpenCodeFormStates.Cancelled);
+        form.Message.ShouldBe(OpenCodeUserInput.DeclinedMessage);
+    }
+
+    [Test]
+    public async Task Question_timeout_cancels_the_form_with_the_timeout_message_even_when_the_handler_ignores_its_token()
+    {
+        await using var fixture = await QuestionFixture.StartAsync();
+        var interaction = new OpenCodeTurnInteraction(
+            static (_, _) => Task.Delay(Timeout.Infinite).ContinueWith(static _ => (OpenCodeUserInputResponse?)null, TaskScheduler.Default),
+            TimeSpan.FromMilliseconds(300));
+
+        var envelope = await fixture.Client.PromptAsync(fixture.SessionId, OpenCodeSessionPromptRequest.FromText("ask"), interaction);
+
+        envelope.GetTextContent().ShouldContain("cancelled:" + OpenCodeUserInput.TimeoutMessage);
+        var form = fixture.Server.GetForms().Single();
+        form.State.ShouldBe(OpenCodeFormStates.Cancelled);
+        form.Message.ShouldBe(OpenCodeUserInput.TimeoutMessage);
+    }
+
+    [Test]
+    public async Task Form_of_another_session_is_neither_handed_to_the_handler_nor_settled()
+    {
+        await using var fixture = await QuestionFixture.StartAsync(new OpenCodeFixtureQuestionScript
+        {
+            Forms =
+            [
+                new OpenCodeFixtureForm { SessionId = "ses_other_session", Fields = [new OpenCodeFixtureField("Other", "Other session?", false, ["x"])] },
+                SingleQuestionForm("Own?"),
+            ],
+        });
+        var asked = new ConcurrentBag<string>();
+        var interaction = new OpenCodeTurnInteraction(
+            (request, _) =>
+            {
+                asked.Add(request.Questions.Single().Question);
+                return Task.FromResult<OpenCodeUserInputResponse?>(new OpenCodeUserInputResponse(Answers(("Own?", ["yes"]))));
+            },
+            TimeSpan.FromMinutes(5));
+
+        await fixture.Client.PromptAsync(fixture.SessionId, OpenCodeSessionPromptRequest.FromText("ask"), interaction);
+
+        asked.ToArray().ShouldBe(["Own?"]);
+        var forms = fixture.Server.GetForms();
+        forms.Single(static form => form.SessionId == "ses_other_session").State.ShouldBe(OpenCodeFormStates.Pending);
+        forms.Single(static form => form.SessionId != "ses_other_session").State.ShouldBe(OpenCodeFormStates.Replied);
+    }
+
+    [Test]
+    public async Task Mcp_form_is_left_untouched_while_a_question_is_answered()
+    {
+        await using var fixture = await QuestionFixture.StartAsync(new OpenCodeFixtureQuestionScript
+        {
+            Forms = [McpForm("Elicitation", OpenCodeFormKinds.Mcp, type: false), SingleQuestionForm("Own?")],
+        });
+        var asked = new ConcurrentBag<string>();
+        var interaction = new OpenCodeTurnInteraction(
+            (request, _) =>
+            {
+                asked.Add(request.Questions.Single().Question);
+                return Task.FromResult<OpenCodeUserInputResponse?>(new OpenCodeUserInputResponse(Answers(("Own?", ["yes"]))));
+            },
+            TimeSpan.FromMinutes(5));
+
+        await fixture.Client.PromptAsync(fixture.SessionId, OpenCodeSessionPromptRequest.FromText("ask"), interaction);
+
+        asked.ToArray().ShouldBe(["Own?"]);
+        fixture.Server.GetForms().Single(static form => form.Kind == OpenCodeFormKinds.Mcp).State.ShouldBe(OpenCodeFormStates.Pending);
+    }
+
+    [Test]
+    public async Task Turn_that_ends_while_a_question_is_pending_cancels_the_form()
+    {
+        await using var fixture = await QuestionFixture.StartAsync(new OpenCodeFixtureQuestionScript { CompleteWithoutWaiting = true });
+        var interaction = new OpenCodeTurnInteraction(
+            static async (_, token) =>
+            {
+                await Task.Delay(Timeout.Infinite, token);
+                return null;
+            },
+            TimeSpan.FromMinutes(5));
+
+        var envelope = await fixture.Client.PromptAsync(fixture.SessionId, OpenCodeSessionPromptRequest.FromText("ask"), interaction);
+
+        envelope.Parts.ShouldNotBeEmpty();
+        var form = fixture.Server.GetForms().Single();
+        form.State.ShouldBe(OpenCodeFormStates.Cancelled);
+        form.Message.ShouldBe(OpenCodeUserInput.TurnEndedMessage);
+    }
+
+    [Test]
+    public async Task A_slow_answer_past_the_request_timeout_still_succeeds()
+    {
+        await using var fixture = await QuestionFixture.StartAsync(requestTimeout: TimeSpan.FromSeconds(1));
+        var interaction = new OpenCodeTurnInteraction(
+            static async (request, _) =>
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(2500));
+                return new OpenCodeUserInputResponse(AnswerEvery(request, "late"));
+            },
+            TimeSpan.FromMinutes(1));
+
+        var envelope = await fixture.Client.PromptAsync(fixture.SessionId, OpenCodeSessionPromptRequest.FromText("ask"), interaction);
+
+        envelope.GetTextContent().ShouldContain("replied");
+        fixture.Server.GetForms().Single().State.ShouldBe(OpenCodeFormStates.Replied);
+    }
+
+    [Test]
+    public async Task An_agent_that_stalls_after_the_answer_still_times_out()
+    {
+        await using var fixture = await QuestionFixture.StartAsync(
+            new OpenCodeFixtureQuestionScript { StallAfterSettlement = true },
+            requestTimeout: TimeSpan.FromSeconds(1));
+        var interaction = new OpenCodeTurnInteraction(
+            static (request, _) => Task.FromResult<OpenCodeUserInputResponse?>(
+                new OpenCodeUserInputResponse(AnswerEvery(request, "now"))),
+            TimeSpan.FromMinutes(1));
+
+        var started = DateTime.UtcNow;
+        await Should.ThrowAsync<TimeoutException>(async () =>
+            await fixture.Client.PromptAsync(fixture.SessionId, OpenCodeSessionPromptRequest.FromText("ask"), interaction));
+
+        (DateTime.UtcNow - started).ShouldBeLessThan(TimeSpan.FromSeconds(15));
+        fixture.Server.GetForms().Single().State.ShouldBe(OpenCodeFormStates.Replied);
+    }
+
+    [Test]
+    public async Task Cancelling_an_interactive_turn_cancels_the_pending_form_and_interrupts_the_session()
+    {
+        await using var fixture = await QuestionFixture.StartAsync(new OpenCodeFixtureQuestionScript { StallAfterSettlement = true });
+        using var cancel = new CancellationTokenSource();
+        var handlerStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var interaction = new OpenCodeTurnInteraction(
+            async (_, token) =>
+            {
+                handlerStarted.TrySetResult();
+                await Task.Delay(Timeout.Infinite, token);
+                return null;
+            },
+            TimeSpan.FromMinutes(5));
+
+        var prompt = fixture.Client.PromptAsync(fixture.SessionId, OpenCodeSessionPromptRequest.FromText("ask"), interaction, cancel.Token);
+        await handlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await cancel.CancelAsync();
+
+        await Should.ThrowAsync<OperationCanceledException>(async () => await prompt);
+        var form = fixture.Server.GetForms().Single();
+        form.State.ShouldBe(OpenCodeFormStates.Cancelled);
+        form.Message.ShouldBe(OpenCodeUserInput.TurnEndedMessage);
+        fixture.Server.InterruptRequestCount.ShouldBe(1);
+    }
+
+    private static OpenCodeFixtureForm SingleQuestionForm(string question)
+    {
+        return new OpenCodeFixtureForm
+        {
+            Fields = [new OpenCodeFixtureField("Header", question, MultiSelect: false, Options: ["yes", "no"])],
+        };
+    }
+
+    private static OpenCodeFixtureForm McpForm(string header, string kind, bool type)
+    {
+        return new OpenCodeFixtureForm
+        {
+            Kind = kind,
+            Fields = [new OpenCodeFixtureField(header, header + "?", MultiSelect: type, Options: type ? ["Cats", "Hamsters"] : [])],
+        };
+    }
+
+    private static Dictionary<string, object> Answer(params (string Key, object Value)[] values)
+    {
+        return values.ToDictionary(static pair => pair.Key, static pair => pair.Value, StringComparer.Ordinal);
+    }
+
+    private static Dictionary<string, IReadOnlyList<string>> Answers(params (string Question, string[] Values)[] values)
+    {
+        return values.ToDictionary(
+            static pair => pair.Question,
+            static pair => (IReadOnlyList<string>)pair.Values,
+            StringComparer.Ordinal);
+    }
+
+    private static IReadOnlyDictionary<string, IReadOnlyList<string>> AnswerEvery(OpenCodeUserInputRequest request, string answer)
+    {
+        return request.Questions.ToDictionary(
+            static question => question.Question,
+            _ => (IReadOnlyList<string>)[answer],
+            StringComparer.Ordinal);
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (!condition())
+        {
+            if (DateTime.UtcNow > deadline)
+            {
+                throw new TimeoutException("The condition was not reached in time.");
+            }
+
+            await Task.Delay(20);
+        }
+    }
+
+    /// <summary>
+    /// A fixture server whose <c>question-model</c> runs the given script, with a client that has a session on it.
+    /// </summary>
+    private sealed class QuestionFixture : IAsyncDisposable
+    {
+        private readonly HttpClient _http;
+
+        private QuestionFixture(OpenCodeFixtureServerHandle server, HttpClient http, OpenCodeHttpClient client, string sessionId)
+        {
+            Server = server;
+            _http = http;
+            Client = client;
+            SessionId = sessionId;
+        }
+
+        public OpenCodeFixtureServerHandle Server { get; }
+
+        public OpenCodeHttpClient Client { get; }
+
+        public string SessionId { get; }
+
+        public static async Task<QuestionFixture> StartAsync(OpenCodeFixtureQuestionScript? script = null, TimeSpan? requestTimeout = null)
+        {
+            var server = await OpenCodeFixtureServer.StartAsync(new OpenCodeFixtureServerOptions
+            {
+                QuestionModelIds = ["fixture/question-model"],
+                QuestionScript = script ?? new OpenCodeFixtureQuestionScript(),
+            });
+            var http = new HttpClient { BaseAddress = server.BaseUri, Timeout = requestTimeout ?? TimeSpan.FromSeconds(30) };
+            var client = new OpenCodeHttpClient(http, directory: null, workspace: null, server.ServerPassword);
+            var session = await client.CreateSessionAsync("questions");
+            await client.SetSessionModelAsync(session.Id, new OpenCodeModelSelection { ProviderId = "fixture", ModelId = "question-model" });
+            return new QuestionFixture(server, http, client, session.Id);
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            Client.Dispose();
+            _http.Dispose();
+            await Server.DisposeAsync();
+        }
     }
 
     private static string ExpectedBasic()

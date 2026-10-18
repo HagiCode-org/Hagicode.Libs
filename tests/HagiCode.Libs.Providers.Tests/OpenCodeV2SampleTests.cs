@@ -115,6 +115,59 @@ public sealed class OpenCodeV2SampleTests
         }
     }
 
+    [Test]
+    public void Form_created_event_resolves_to_the_session_inside_the_form()
+    {
+        var created = ReadEvents("events-question-reply.jsonl").Single(static envelope => envelope.EventType == "form.created");
+
+        created.Payload.TryGetProperty("sessionID", out _).ShouldBeFalse();
+        created.SessionId.ShouldBe("ses_eb3c4c8ebffeoPuTSmM55ew47v");
+        created.Form.ShouldNotBeNull();
+        created.Form!.Id.ShouldStartWith("frm_");
+        created.Form.SessionId.ShouldBe(created.SessionId);
+        created.Form.Kind.ShouldBe(OpenCodeFormKinds.Question);
+        created.Form.Metadata!.Tool!.Id.ShouldBe("call_97424");
+        created.Form.Fields.Select(static field => field.Key).ShouldBe(["q0", "q1"]);
+        created.Form.Fields[0].Type.ShouldBe("string");
+        created.Form.Fields[0].Title.ShouldBe("Color");
+        created.Form.Fields[0].Description.ShouldBe("Which color do you prefer?");
+        created.Form.Fields[0].Options.Select(static option => option.Label).ShouldBe(["Red", "Blue"]);
+        created.Form.Fields[1].Type.ShouldBe("multiselect");
+        created.Form.Fields[1].Options.Select(static option => option.Label).ShouldBe(["Cats", "Dogs"]);
+    }
+
+    [Test]
+    public void Events_of_an_existing_shape_resolve_their_session_as_before()
+    {
+        var success = ReadEvents("events-success.jsonl");
+        var replied = ReadEvents("events-question-reply.jsonl").Single(static envelope => envelope.EventType == "form.replied");
+        var cancelled = ReadEvents("events-question-cancel.jsonl").Single(static envelope => envelope.EventType == "form.cancelled");
+
+        var turnSession = success.Single(static envelope => envelope.EventType == "session.execution.succeeded").SessionId;
+        turnSession.ShouldNotBeNull();
+        turnSession!.ShouldStartWith("ses_");
+        success.Where(static envelope => envelope.SessionId is not null).Select(static envelope => envelope.SessionId).Distinct().ShouldHaveSingleItem();
+        replied.SessionId.ShouldBe("ses_eb3c4c8ebffeoPuTSmM55ew47v");
+        replied.Form.ShouldBeNull();
+        cancelled.SessionId.ShouldBe("ses_eb3c490a4ffel4SWTzvJhqgvZM");
+        cancelled.Form.ShouldBeNull();
+        cancelled.Payload.GetProperty("id").GetString().ShouldStartWith("frm_");
+    }
+
+    [Test]
+    public void Interrupted_question_turn_ends_with_a_terminal_interrupt_event()
+    {
+        var events = ReadEvents("events-question-interrupt.jsonl");
+        var interrupted = events.Single(static envelope => envelope.EventType == "session.execution.interrupted");
+
+        interrupted.SessionId.ShouldBe("ses_eb3c2ff9effenFhctIrlmRbAZO");
+        interrupted.Payload.GetProperty("reason").GetString().ShouldBe("user");
+        events.Select(static envelope => envelope.EventType).ShouldNotContain("session.execution.succeeded");
+        events.Where(static envelope => envelope.EventType == "form.cancelled")
+            .Select(static envelope => envelope.SessionId)
+            .ShouldBe(["ses_eb3c2ff9effenFhctIrlmRbAZO"]);
+    }
+
     private static string SampleDirectory()
     {
         return Path.Combine(AppContext.BaseDirectory, "Fixtures", "OpenCode", "v2.0.32");

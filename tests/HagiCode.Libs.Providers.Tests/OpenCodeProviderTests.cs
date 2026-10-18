@@ -327,6 +327,67 @@ public sealed class OpenCodeProviderTests
         exception.Message.ShouldNotContain("provider-forward-secret");
     }
 
+    [Test]
+    public async Task ExecuteAsync_with_a_handler_yields_the_question_before_the_assistant_and_terminal_messages()
+    {
+        await using var fixture = await OpenCodeFixtureServer.StartAsync(new OpenCodeFixtureServerOptions
+        {
+            QuestionModelIds = ["fixture/question-model"],
+        });
+        await using var provider = CreateProvider(new MissingExecutableResolver());
+        var handled = new List<OpenCodeUserInputRequest>();
+
+        var messages = await DrainMessagesAsync(provider.ExecuteAsync(
+            new OpenCodeOptions
+            {
+                BaseUrl = fixture.BaseUri.ToString(),
+                ServerPassword = fixture.ServerPassword,
+                Model = "fixture/question-model",
+                UserInputHandler = (request, _) =>
+                {
+                    handled.Add(request);
+                    return Task.FromResult<OpenCodeUserInputResponse?>(new OpenCodeUserInputResponse(new Dictionary<string, IReadOnlyList<string>>
+                    {
+                        ["Which color do you prefer?"] = ["Blue"],
+                        ["Which pets do you like?"] = ["Dogs"],
+                    }));
+                },
+            },
+            "Ask me about my preferences."));
+
+        messages.Select(static message => message.Type).ShouldBe(["session.started", "question", "assistant", "terminal.completed"]);
+        handled.ShouldHaveSingleItem();
+        OpenCodeUserInputRequest.TryFromCliMessage(messages[1], out var question).ShouldBeTrue();
+        question.RequestId.ShouldBe(handled[0].RequestId);
+        question.Questions.Select(static item => item.Question).ShouldBe(["Which color do you prefer?", "Which pets do you like?"]);
+        question.Questions[1].MultiSelect.ShouldBeTrue();
+        messages[2].Content.GetProperty("text").GetString().ShouldContain("replied:{\"q0\":\"Blue\",\"q1\":[\"Dogs\"]}");
+        fixture.GetForms().Single().State.ShouldBe(OpenCodeFormStates.Replied);
+    }
+
+    [Test]
+    public async Task ExecuteAsync_without_a_handler_declines_the_question_and_still_completes()
+    {
+        await using var fixture = await OpenCodeFixtureServer.StartAsync(new OpenCodeFixtureServerOptions
+        {
+            QuestionModelIds = ["fixture/question-model"],
+        });
+        await using var provider = CreateProvider(new MissingExecutableResolver());
+
+        var messages = await DrainMessagesAsync(provider.ExecuteAsync(
+            new OpenCodeOptions
+            {
+                BaseUrl = fixture.BaseUri.ToString(),
+                ServerPassword = fixture.ServerPassword,
+                Model = "fixture/question-model",
+            },
+            "Ask me about my preferences."));
+
+        messages.Select(static message => message.Type).ShouldBe(["session.started", "assistant", "terminal.completed"]);
+        messages[1].Content.GetProperty("text").GetString().ShouldContain("cancelled:" + OpenCodeUserInput.NoHandlerMessage);
+        fixture.GetForms().Single().Message.ShouldBe(OpenCodeUserInput.NoHandlerMessage);
+    }
+
     private static TestOpenCodeProvider CreateProvider(CliExecutableResolver? executableResolver = null)
     {
         return new TestOpenCodeProvider(executableResolver ?? new CliExecutableResolver());

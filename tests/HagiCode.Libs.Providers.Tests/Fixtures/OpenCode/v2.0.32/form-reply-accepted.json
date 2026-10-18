@@ -1,0 +1,11 @@
+{
+  "answer": {
+    "q0": "Purple",
+    "q1": [
+      "Cats",
+      "Hamsters"
+    ]
+  },
+  "status": 204,
+  "body": ""
+}
