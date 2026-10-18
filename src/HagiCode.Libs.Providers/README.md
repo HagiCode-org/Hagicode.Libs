@@ -368,6 +368,81 @@ await foreach (var message in reasonix.ExecuteAsync(options, "Ask me which datab
 - **No handler:** `UserInputHandler` is `null` by default and nothing changes: a question request is answered with its first option like any permission request, no question message is produced, and a warning naming the question is logged. Tool approvals (`gate-*`) are never routed to the handler and are answered as before, with or without one.
 - The question message (`question.request`) carries the raw request in `params` and follows the `tool.call` of the `ask` call; the `ask` call itself (its `tool.call` and its completed or failed `tool.update`) stays an ordinary tool message whose `toolCallId` differs from the question's `RequestId`, so callers hide it by the tool title `ask` (`ReasonixUserInputRequest.QuestionToolName`).
 
+## OpenCode question forms (2.0.32 wire)
+
+The OpenCode `question` tool runs on OpenCode's form service. A live probe against a scratch `opencode serve` (private `HOME`/`XDG_*`, own port) recorded the wire in `tests/HagiCode.Libs.Providers.Tests/Fixtures/OpenCode/v2.0.32/` (`events-question-*.jsonl`, `form-*.json`, `tool-result-*.json`, scrubbed).
+
+- **Gate G1 (confirmed):** a real model called `question`. `form.created` carried the tool's questions as fields `q0` (`string`, single choice) and `q1` (`multiselect`), both `custom: true`. The turn ended with `session.execution.succeeded` after a reply and after a cancel with a message. The model saw `User has answered your questions: ...` after a reply and the tool error `The user declined to answer this question` after a cancel.
+- **Gate G2 (confirmed live in an isolated `opencode serve`):** cancelling the pending question form with a message, then calling `POST /api/session/{id}/interrupt`, returned `{"interrupted":true}`. The event sequence ended with `form.cancelled`, `session.tool.failed` (carrying the cancel message), then `session.execution.interrupted` (`reason: "user"`). The scrubbed capture is `tests/HagiCode.Libs.Providers.Tests/Fixtures/OpenCode/v2.0.32/events-question-cancel-interrupt-probe.jsonl`. A turn loop must treat `session.execution.interrupted` as terminal.
+- **Gate G3 (confirmed):** a list in a `string` field returns `400 FormInvalidAnswerError` ("Expected string for form field: q0"); a string in a `multiselect` field returns `400` ("Expected string array for form field: q1"). A 400 leaves the form pending. Free text is accepted as a string (`string` field) and as an extra list item (`multiselect`). A second reply returns `409 FormAlreadySettledError`.
+- **Gate G4 (live probe attempted; not confirmed):** a scratch MCP server connected to OpenCode 2.0.32 and received `tools/call`, then sent a valid `elicitation/create` request. In headless `serve`, OpenCode did not emit `form.created` or expose a form through `GET /api/session/{id}/form`; the MCP tool call remained pending until the session was interrupted. The fixture test `OpenCodeHttpClientTests.Mcp_form_is_left_untouched_while_a_question_is_answered` confirms that the client ignores and leaves `metadata.kind: "mcp"` forms untouched when such a form is present, but the live G4 wire path could not be verified with this server mode.
+
+## OpenCode interactive questions
+
+The OpenCode `question` tool is answered through the form interface of OpenCode 2.0.32. A run that supplies a handler gets each question as a `question` message; a run without one declines the question at once.
+
+**Handler.** Set `OpenCodeOptions.UserInputHandler` to a `Func<OpenCodeUserInputRequest, CancellationToken, Task<OpenCodeUserInputResponse?>>`. The request carries `RequestId` (the form id, `frm_...`), `SessionId`, `ToolCallId` and `Questions`; each `OpenCodeUserQuestion` has `Question` (the text, also the answer key), `Header`, `MultiSelect` and `Options` (`OpenCodeUserQuestionOption` with `Label` and `Description`). Answer with an `OpenCodeUserInputResponse` whose `Answers` map each question text to the chosen labels or free text. Return `null` to decline.
+
+**Stream.** `OpenCodeProvider.ExecuteAsync` yields one `question` message (`OpenCodeUserInputRequest.MessageType`) per question, in the order the agent asked, before the assistant and terminal messages. The lifecycle message comes first. Without a handler the message sequence is the one documented above.
+
+**Client.** `OpenCodeHttpClient.PromptAsync(sessionId, request, interaction, cancellationToken)` takes an `OpenCodeTurnInteraction(Handler, QuestionTimeout, OnQuestionAsked)`. The raw form routes are `ListFormsAsync`, `ReplyFormAsync` and `CancelFormAsync` (both return an `OpenCodeFormOutcome`, where `AlreadySettled` means the form was closed earlier) and `InterruptSessionAsync`.
+
+**Answer encoding.** A single-choice question takes one string (several values are joined with `, `); a multi-select question takes a list of strings. A question with no answer is left out of the reply, so the agent sees it as unanswered. A reply that OpenCode refuses with `400 FormInvalidAnswerError` leaves the form pending, and the client then declines that question so the run goes on.
+
+**Declines.** The agent receives the following message for each declined form (`OpenCodeUserInput`):
+
+| Case | Constant | Message sent to the agent |
+| --- | --- | --- |
+| Handler returns `null`, throws, or the answer is refused | `DeclinedMessage` | "The user declined to answer this question." |
+| No answer before `QuestionTimeout` | `TimeoutMessage` | "No answer arrived before the question timed out, so the question was closed." |
+| Run has no handler | `NoHandlerMessage` | "The user cannot be asked questions in this run, so the question was closed without an answer." |
+| Run ends while the question is pending | `TurnEndedMessage` | "The run ended before the user answered this question." |
+
+The turn then continues to `session.execution.succeeded`, so a declined question is not a provider failure.
+
+**Timeouts.** `OpenCodeOptions.QuestionTimeout` defaults to `OpenCodeOptions.DefaultQuestionTimeout` (30 minutes). `Timeout.InfiniteTimeSpan` waits without a limit. Any other value that is not positive is rejected with an `ArgumentOutOfRangeException` before a runtime is started. While a question is pending the request timeout is paused; the last answer re-arms it with the time that was left, so a stalled agent still times out.
+
+**Stop.** When the caller cancels an interactive turn, the pending forms are cancelled with `TurnEndedMessage` and the session is interrupted (`POST /api/session/{id}/interrupt`), both on a short token of their own. `session.execution.interrupted` is terminal: a turn that OpenCode interrupts returns an error part with reason `user` instead of waiting for the request timeout.
+
+**Not handled.** Forms whose kind is not `question` (for example MCP elicitation, `OpenCodeFormKinds.Mcp`) are left untouched. Forms of other sessions are ignored. OpenCode permission prompts are not part of this interface.
+
+**Real-CLI test.** `OpenCodeRealCliUserQuestionTests` asks, answers and declines one question against a real `opencode` and model. It runs only when `HAGICODE_LIBS_REAL_CLI_OPENCODE_USER_QUESTION=1` is set; `HAGICODE_LIBS_REAL_CLI_OPENCODE_USER_QUESTION_MODEL` (`<provider>/<model>`) and `HAGICODE_LIBS_REAL_CLI_OPENCODE_USER_QUESTION_EXECUTABLE` are optional. The runs create sessions in the OpenCode data directory of the current user.
+
+## OpenCode agent work
+
+An OpenCode run reports the subagents the agent starts as agent work. Each child session whose `parentID` chain leads to the prompted session is one `subagent` item with the id `opencode:<childSessionId>`. The title is the task description OpenCode gives the child (its session `title`), the summary is the child's last text (or the failure message of a failed child), and `usage` carries the finished tool calls and the duration. Child text never enters the assistant text of the run. Sessions of other clients on a shared server are ignored, even when their events arrive on the same stream.
+
+**Background commands.** A background tool call is listed only when OpenCode reports a timeout for it. OpenCode 2.0.32 reports none for a background call, so no `monitor` item is produced; a foreground call with a `timeout` is awaited by the agent and is not listed either.
+
+**Hold-open rule.** OpenCode can report success for the prompted session while a background subagent still runs, and a subagent's completion then starts a follow-up turn of the prompted session. When the prompted session reports success while a tracked child is still active, the turn stays open: its items carry `blocksCompletion` `true`, the follow-up turn and its text join the same prompt result, and the turn returns once no child is active and the prompted session has been idle for the settle interval. The request timeout does not count the wait.
+
+| Option | Default | Effect |
+| --- | --- | --- |
+| `AgentWorkWaitTimeout` | 10 minutes | Bounds the hold. When it passes, the items still running are reported `stopped`. `Timeout.InfiniteTimeSpan` waits without a limit. Zero or negative values are rejected before a request is sent. |
+| `AgentWorkSettleInterval` | 2 seconds | How long the prompted session must stay idle, with no child active, before the held turn returns. Zero returns at once; negative or infinite values are rejected. |
+| `EmitAgentWorkSnapshots` | `true` | Set to `false` to skip child tracking. The run then returns at the prompted session's own result, as before this capability, and emits no snapshot. |
+
+A parent failure or interruption while children run ends the turn at once and reports the still-active items `stopped`.
+
+**Message type.** When snapshots are on, the provider yields an `agent_work_snapshot` message (`AgentWorkSnapshot.MessageType`, read back with `AgentWorkSnapshot.TryFromCliMessage`) in stream order, next to the agent's output and before the terminal message. A snapshot is yielded only when the list changes, and a run without child sessions yields none. The message carries no raw provider JSON. Consumers that persist or parse the whole stream must skip or handle it.
+
+**Known gap.** A background shell that finishes after the prompted session reported success can also start a follow-up turn. The hold tracks subagents only, so that follow-up is not awaited; it is a separate decision, because untimed background commands are deliberately not listed.
+
+**Probe.** The wire facts above were recorded from OpenCode 2.0.32 (`Fixtures/OpenCode/v2.0.32/events-subagent-background.jsonl`). The completion notice is an inbox item of type `synthetic` (`metadata.source` `subagent`, `childID`, `state` `completed` or `cancelled`), not a `session.synthetic` event.
+
+## Codex agent work
+
+A Codex run reports the subagents it starts as agent work. Each subagent is one `subagent` item with the id `codex:<threadId>`, `blocksCompletion` `false`, and no monitor items. The host does not keep a Codex run open for subagents.
+
+The run emits a `CodexAgentWorkSnapshotEvent` (`EventType` `agent_work_snapshot`) in its event stream, at the position where the change was observed. The event carries the complete `AgentWorkSnapshot` and no raw provider JSON. It is emitted only when the list changes, and an empty list is never the first snapshot, so a run without subagents emits none. `RunAsync` and the other consumers ignore it, so their results are unchanged.
+
+Both transports produce snapshots, with different detail:
+
+- **App-server (interactive) transport:** subagents are reported from `subAgentActivity` items, from the subagent's own thread (its turns and token usage, and its completed tool-like items), and from `collabAgentToolCall` items when the Codex version sends them. Child-thread notifications update the snapshot only; they never add transcript text, tool calls or statistics.
+- **Exec transport (`codex exec --json`):** subagents are reported only from the agent states carried by `collab_tool_call` items. Exec items carry no `usage`.
+
+Limits: notifications that arrive after the main turn's terminal event are not delivered, so the final snapshot shows the last observed state, and the host marks a subagent still running at the end of the run as `stopped`. Titles come from the spawn prompt when the stream carries one; codex-cli 0.163.0 does not, so the title falls back to the subagent's agent path.
+
 ## Vendored Codex SDK notice
 
 The Codex integration vendors source from `ManagedCode.CodexSharpSDK` under `Codex/Vendored/`.
