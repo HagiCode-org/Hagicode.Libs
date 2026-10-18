@@ -14,6 +14,8 @@ public sealed record CopilotCliArgumentBuildResult(
 /// </summary>
 public static class CopilotCliCompatibility
 {
+    private const string NoAskUserFlag = "--no-ask-user";
+
     private static readonly HashSet<string> MaximumAccessSuppressedValueFlags = new(StringComparer.Ordinal)
     {
         "--add-dir",
@@ -124,7 +126,13 @@ public static class CopilotCliCompatibility
         var maximumAccessProfile = HasMaximumAccessProfile(options.Permissions);
 
         AddDerivedArguments(options, args, diagnostics, seenStandaloneFlags, maximumAccessProfile);
-        AddConfiguredArguments(options.AdditionalArgs, args, diagnostics, seenStandaloneFlags, maximumAccessProfile);
+        AddConfiguredArguments(
+            options.AdditionalArgs,
+            args,
+            diagnostics,
+            seenStandaloneFlags,
+            maximumAccessProfile,
+            userInputHandled: options.UserInputHandler is not null);
 
         return new CopilotCliArgumentBuildResult(args, diagnostics);
     }
@@ -207,9 +215,10 @@ public static class CopilotCliCompatibility
             AddStandaloneFlag(args, seenStandaloneFlags, "--allow-all");
         }
 
-        if (options.NoAskUser)
+        // A user-input handler answers the agent's questions, so the flag that disables ask_user is never passed.
+        if (options.NoAskUser && options.UserInputHandler is null)
         {
-            AddStandaloneFlag(args, seenStandaloneFlags, "--no-ask-user");
+            AddStandaloneFlag(args, seenStandaloneFlags, NoAskUserFlag);
         }
 
         if (maximumAccessProfile)
@@ -247,7 +256,8 @@ public static class CopilotCliCompatibility
         List<string> args,
         List<string> diagnostics,
         HashSet<string> seenStandaloneFlags,
-        bool maximumAccessProfile)
+        bool maximumAccessProfile,
+        bool userInputHandled)
     {
         var tokens = additionalArgs
             .Where(static value => !string.IsNullOrWhiteSpace(value))
@@ -306,6 +316,12 @@ public static class CopilotCliCompatibility
                     index += SkipFlagValues(tokens, index, suppressedValueCount);
                 }
 
+                continue;
+            }
+
+            if (userInputHandled && string.Equals(token, NoAskUserFlag, StringComparison.Ordinal))
+            {
+                diagnostics.Add(CreateUserInputSuppressionMessage(token));
                 continue;
             }
 
@@ -398,6 +414,9 @@ public static class CopilotCliCompatibility
 
     private static string CreateRejectedArgumentMessage(string flag, string reason)
         => $"Copilot CLI startup argument '{flag}' was rejected because {reason}.";
+
+    private static string CreateUserInputSuppressionMessage(string flag)
+        => $"Copilot CLI startup argument '{flag}' was ignored because user input is handled by CopilotOptions.UserInputHandler.";
 
     private static string CreateMaximumAccessSuppressionMessage(string flag)
         => $"Copilot CLI startup argument '{flag}' was ignored because maximum-access typed permissions suppress scoped restrictions for this request.";

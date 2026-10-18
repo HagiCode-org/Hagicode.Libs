@@ -165,7 +165,9 @@ public class CopilotProvider : ICliProvider<CopilotOptions>
             IdleTimeout: options.IdleTimeout,
             StartupTimeout: options.StartupTimeout,
             CliArgs: cliArgResult.CliArgs,
-            EnvironmentVariables: BuildEnvironmentVariables(options, runtimeEnvironment));
+            EnvironmentVariables: BuildEnvironmentVariables(options, runtimeEnvironment),
+            UserInputHandler: options.UserInputHandler,
+            QuestionTimeout: options.QuestionTimeout);
     }
 
     internal virtual IReadOnlyDictionary<string, string?> BuildEnvironmentVariables(
@@ -230,6 +232,11 @@ public class CopilotProvider : ICliProvider<CopilotOptions>
         if (options.IdleTimeout <= TimeSpan.Zero)
         {
             throw new InvalidOperationException("CopilotOptions.IdleTimeout must be greater than zero.");
+        }
+
+        if (options.QuestionTimeout != Timeout.InfiniteTimeSpan && options.QuestionTimeout <= TimeSpan.Zero)
+        {
+            throw new InvalidOperationException("CopilotOptions.QuestionTimeout must be greater than zero or Timeout.InfiniteTimeSpan.");
         }
     }
 
@@ -368,6 +375,25 @@ public class CopilotProvider : ICliProvider<CopilotOptions>
                     ["raw_event_type"] = eventData.RawEventType,
                     ["text"] = eventData.Content
                 }),
+            CopilotSdkStreamEventType.QuestionRequested when eventData.QuestionId is not null =>
+                CreateMessage(CopilotUserInputRequest.MessageType, new Dictionary<string, object?>
+                {
+                    ["type"] = CopilotUserInputRequest.MessageType,
+                    ["session_id"] = sessionId,
+                    ["request_id"] = eventData.QuestionId,
+                    ["question"] = eventData.Question,
+                    ["choices"] = eventData.Choices ?? [],
+                    ["allow_freeform"] = eventData.AllowFreeform
+                }),
+            CopilotSdkStreamEventType.QuestionClosed when eventData.QuestionId is not null =>
+                CreateMessage(CopilotUserInputRequest.ClosedMessageType, new Dictionary<string, object?>
+                {
+                    ["type"] = CopilotUserInputRequest.ClosedMessageType,
+                    ["session_id"] = sessionId,
+                    ["request_id"] = eventData.QuestionId
+                }),
+            CopilotSdkStreamEventType.Diagnostic when !string.IsNullOrEmpty(eventData.Content) =>
+                CreateDiagnosticMessage(eventData.Content),
             _ => null
         };
     }

@@ -13,7 +13,10 @@ internal enum CopilotSdkStreamEventType
     ToolExecutionStart = 8,
     ToolExecutionEnd = 9,
     RawEvent = 10,
-    AssistantSnapshot = 11
+    AssistantSnapshot = 11,
+    QuestionRequested = 12,
+    QuestionClosed = 13,
+    Diagnostic = 14
 }
 
 internal sealed record CopilotSdkStreamEvent(
@@ -28,4 +31,8 @@ internal sealed record CopilotSdkStreamEvent(
     string? ReasoningId = null,
     bool IsAuthoritativeReasoningReplay = false,
     double? TotalResponseSizeBytes = null,
-    bool? ToolSucceeded = null);
+    bool? ToolSucceeded = null,
+    string? QuestionId = null,
+    string? Question = null,
+    IReadOnlyList<string>? Choices = null,
+    bool AllowFreeform = false);

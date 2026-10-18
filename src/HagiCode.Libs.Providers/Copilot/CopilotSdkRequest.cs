@@ -13,4 +13,6 @@ internal sealed record CopilotSdkRequest(
     TimeSpan IdleTimeout,
     TimeSpan StartupTimeout,
     IReadOnlyList<string> CliArgs,
-    IReadOnlyDictionary<string, string?> EnvironmentVariables);
+    IReadOnlyDictionary<string, string?> EnvironmentVariables,
+    Func<CopilotUserInputRequest, CancellationToken, Task<CopilotUserInputResponse?>>? UserInputHandler = null,
+    TimeSpan QuestionTimeout = default);

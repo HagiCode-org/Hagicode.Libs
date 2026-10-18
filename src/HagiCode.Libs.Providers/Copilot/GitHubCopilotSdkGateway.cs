@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Threading.Channels;
@@ -12,8 +13,11 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
     private static readonly TimeSpan ResumeRetryBaseDelay = TimeSpan.FromSeconds(2);
     private static readonly int ResumeRetryMaxAttempts = 3;
 
+    private static readonly TimeSpan DefaultIdleWatchdogInterval = TimeSpan.FromSeconds(5);
+
     private readonly ICopilotSdkClientFactory _clientFactory;
     private readonly CopilotSdkEnvironmentLeaseCoordinator _environmentLeaseCoordinator;
+    private readonly TimeSpan _idleWatchdogInterval;
 
     internal GitHubCopilotSdkGateway()
         : this(new GitHubCopilotSdkClientFactory(), SharedEnvironmentLeaseCoordinator)
@@ -22,10 +26,12 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
 
     internal GitHubCopilotSdkGateway(
         ICopilotSdkClientFactory clientFactory,
-        CopilotSdkEnvironmentLeaseCoordinator environmentLeaseCoordinator)
+        CopilotSdkEnvironmentLeaseCoordinator environmentLeaseCoordinator,
+        TimeSpan? idleWatchdogInterval = null)
     {
         _clientFactory = clientFactory ?? throw new ArgumentNullException(nameof(clientFactory));
         _environmentLeaseCoordinator = environmentLeaseCoordinator ?? throw new ArgumentNullException(nameof(environmentLeaseCoordinator));
+        _idleWatchdogInterval = idleWatchdogInterval ?? DefaultIdleWatchdogInterval;
     }
 
     public async Task<ICopilotSdkRuntime> CreateRuntimeAsync(
@@ -38,16 +44,20 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
 
         var environmentLease = await _environmentLeaseCoordinator.AcquireAsync(request, cancellationToken).ConfigureAwait(false);
         ICopilotSdkClient? client = null;
+        CopilotPendingQuestions? pendingQuestions = null;
         try
         {
             client = _clientFactory.Create(clientOptions);
+            pendingQuestions = request.UserInputHandler is null
+                ? null
+                : new CopilotPendingQuestions(request.UserInputHandler, request.QuestionTimeout, cancellationToken);
             ICopilotSdkSession session;
             CopilotSdkStreamEvent lifecycleEvent;
             if (!string.IsNullOrWhiteSpace(request.SessionId))
             {
                 try
                 {
-                    session = await ResumeWithRetryAsync(client, request, startupCancellationTokenSource.Token)
+                    session = await ResumeWithRetryAsync(client, request, pendingQuestions, startupCancellationTokenSource.Token)
                         .ConfigureAwait(false);
                     lifecycleEvent = new CopilotSdkStreamEvent(
                         CopilotSdkStreamEventType.SessionResumed,
@@ -66,7 +76,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
                     // network blip). Fall back to a fresh session so the request still executes.
                     // When an explicit GitHub token is configured, this also recovers auth failures.
                     session = await client.CreateSessionAsync(
-                        BuildSessionConfig(request),
+                        BuildSessionConfig(request, pendingQuestions),
                         startupCancellationTokenSource.Token).ConfigureAwait(false);
                     lifecycleEvent = new CopilotSdkStreamEvent(
                         CopilotSdkStreamEventType.SessionStarted,
@@ -77,17 +87,18 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
             else
             {
                 session = await client.CreateSessionAsync(
-                    BuildSessionConfig(request),
+                    BuildSessionConfig(request, pendingQuestions),
                     startupCancellationTokenSource.Token).ConfigureAwait(false);
                 lifecycleEvent = new CopilotSdkStreamEvent(
                     CopilotSdkStreamEventType.SessionStarted,
                     SessionId: session.SessionId);
             }
 
-            return new PooledCopilotSdkRuntime(client, session, environmentLease, lifecycleEvent);
+            return new PooledCopilotSdkRuntime(client, session, environmentLease, lifecycleEvent, pendingQuestions, _idleWatchdogInterval);
         }
         catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested && startupCancellationTokenSource.IsCancellationRequested)
         {
+            pendingQuestions?.Dispose();
             if (client is not null)
             {
                 await client.DisposeAsync().ConfigureAwait(false);
@@ -100,6 +111,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
         }
         catch
         {
+            pendingQuestions?.Dispose();
             if (client is not null)
             {
                 await client.DisposeAsync().ConfigureAwait(false);
@@ -182,6 +194,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
     private async Task<ICopilotSdkSession> ResumeWithRetryAsync(
         ICopilotSdkClient client,
         CopilotSdkRequest request,
+        CopilotPendingQuestions? pendingQuestions,
         CancellationToken cancellationToken)
     {
         Exception? lastException = null;
@@ -196,7 +209,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
             {
                 return await client.ResumeSessionAsync(
                     request.SessionId!,
-                    BuildResumeSessionConfig(request),
+                    BuildResumeSessionConfig(request, pendingQuestions),
                     cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex) when (!EnumerateExceptionMessages(ex).Any(IsAuthenticationFailure))
@@ -235,7 +248,10 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
         }
     }
 
-    internal static SessionEventDispatchResult DispatchSessionEvent(SessionEvent evt, bool sawDelta)
+    internal static SessionEventDispatchResult DispatchSessionEvent(
+        SessionEvent evt,
+        bool sawDelta,
+        CopilotPendingQuestions? pendingQuestions = null)
     {
         var events = new List<CopilotSdkStreamEvent>();
         string? sessionId = evt switch
@@ -334,6 +350,19 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
                     ErrorMessage: NormalizeFailureMessage(errorEvent.Data.Message)));
                 break;
 
+            // Without a handler these events keep their raw fallback below, as before user-input support.
+            case UserInputRequestedEvent userInputRequestedEvent when pendingQuestions is not null:
+                pendingQuestions.RecordRequested(userInputRequestedEvent.Data);
+                break;
+
+            case UserInputCompletedEvent userInputCompletedEvent when pendingQuestions is not null:
+                if (pendingQuestions.RecordCompleted(userInputCompletedEvent.Data.RequestId) is { } closedEvent)
+                {
+                    events.Add(closedEvent);
+                }
+
+                break;
+
             default:
                 events.Add(new CopilotSdkStreamEvent(
                     CopilotSdkStreamEventType.RawEvent,
@@ -371,7 +400,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
         };
     }
 
-    private static SessionConfig BuildSessionConfig(CopilotSdkRequest request)
+    private static SessionConfig BuildSessionConfig(CopilotSdkRequest request, CopilotPendingQuestions? pendingQuestions)
     {
         return new SessionConfig
         {
@@ -381,11 +410,12 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
             WorkingDirectory = request.WorkingDirectory,
             Streaming = true,
             OnPermissionRequest = PermissionHandler.ApproveAll,
-            Hooks = CreateAllowAllHooks()
+            Hooks = CreateAllowAllHooks(),
+            OnUserInputRequest = pendingQuestions is null ? null : pendingQuestions.HandleAsync
         };
     }
 
-    private static ResumeSessionConfig BuildResumeSessionConfig(CopilotSdkRequest request)
+    private static ResumeSessionConfig BuildResumeSessionConfig(CopilotSdkRequest request, CopilotPendingQuestions? pendingQuestions)
     {
         return new ResumeSessionConfig
         {
@@ -394,7 +424,8 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
             WorkingDirectory = request.WorkingDirectory,
             Streaming = true,
             OnPermissionRequest = PermissionHandler.ApproveAll,
-            Hooks = CreateAllowAllHooks()
+            Hooks = CreateAllowAllHooks(),
+            OnUserInputRequest = pendingQuestions is null ? null : pendingQuestions.HandleAsync
         };
     }
 
@@ -502,7 +533,9 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
         ICopilotSdkClient client,
         ICopilotSdkSession session,
         IAsyncDisposable environmentLease,
-        CopilotSdkStreamEvent lifecycleEvent) : ICopilotSdkRuntime
+        CopilotSdkStreamEvent lifecycleEvent,
+        CopilotPendingQuestions? pendingQuestions,
+        TimeSpan idleWatchdogInterval) : ICopilotSdkRuntime
     {
         private bool _lifecycleEventSent;
         private Task? _shutdownTask;
@@ -548,9 +581,12 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
                     RecordProgress();
                 }
 
+                // Questions are written to the same stream, in the order they arrive, and close the idle clock when they end.
+                pendingQuestions?.Attach(writer, RecordProgress);
+
                 using var subscription = session.On(evt =>
                 {
-                    var dispatchResult = DispatchSessionEvent(evt, sawDelta);
+                    var dispatchResult = DispatchSessionEvent(evt, sawDelta, pendingQuestions);
                     sawDelta = dispatchResult.SawDelta;
 
                     foreach (var mappedEvent in dispatchResult.Events)
@@ -573,9 +609,11 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
                     }
                 });
 
+                // With a user-input handler the SDK waits without a limit; the request deadline is enforced by the watchdog so
+                // that time spent waiting for an answer does not count against it.
                 var sendTask = session.SendAndWaitAsync(
                     new MessageOptions { Prompt = request.Prompt },
-                    request.Timeout,
+                    pendingQuestions is null ? request.Timeout : Timeout.InfiniteTimeSpan,
                     requestCancellationTokenSource.Token);
 
                 var idleWatchdogTask = StartIdleWatchdogAsync(
@@ -585,6 +623,8 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
                     sendTask,
                     forcedShutdownSignal,
                     TryWriteTerminal,
+                    pendingQuestions,
+                    idleWatchdogInterval,
                     idleWatchdogCancellationTokenSource.Token);
 
                 try
@@ -666,6 +706,9 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
 
         private async Task ShutdownTransportCoreAsync()
         {
+            // Pending callbacks return first, so the session can be disposed without waiting for an answer.
+            pendingQuestions?.Dispose();
+
             try
             {
                 await session.DisposeAsync().ConfigureAwait(false);
@@ -698,9 +741,12 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
             Task sendTask,
             TaskCompletionSource<bool> forcedShutdownSignal,
             Func<CopilotSdkStreamEvent, bool> tryWriteTerminal,
+            CopilotPendingQuestions? pendingQuestions,
+            TimeSpan watchdogInterval,
             CancellationToken cancellationToken)
         {
-            using var watchdogTimer = new PeriodicTimer(TimeSpan.FromSeconds(5));
+            using var watchdogTimer = new PeriodicTimer(watchdogInterval);
+            var requestStartedTimestamp = Stopwatch.GetTimestamp();
 
             try
             {
@@ -713,19 +759,37 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
                         return;
                     }
 
-                    var idleFor = DateTimeOffset.UtcNow - getLastEventUtc();
-                    if (idleFor < request.IdleTimeout)
+                    // A pending question pauses both the idle clock and the request deadline. The idle clock restarts
+                    // when the last question closes, because the closing records progress.
+                    if (pendingQuestions is { PendingCount: > 0 })
                     {
                         continue;
+                    }
+
+                    string errorMessage;
+                    if (pendingQuestions is not null &&
+                        Stopwatch.GetElapsedTime(requestStartedTimestamp) - pendingQuestions.PausedDuration >= request.Timeout)
+                    {
+                        errorMessage = $"[request_timeout] GitHub Copilot request exceeded {request.Timeout.TotalSeconds:0} seconds, not counting time spent waiting for an answer.";
+                    }
+                    else
+                    {
+                        var idleFor = DateTimeOffset.UtcNow - getLastEventUtc();
+                        if (idleFor < request.IdleTimeout)
+                        {
+                            continue;
+                        }
+
+                        errorMessage = NormalizeFailureMessage(
+                            rawMessage: null,
+                            idleTimedOut: true,
+                            idleTimeout: request.IdleTimeout);
                     }
 
                     tryWriteTerminal(new CopilotSdkStreamEvent(
                         CopilotSdkStreamEventType.Error,
                         SessionId: SessionId,
-                        ErrorMessage: NormalizeFailureMessage(
-                            rawMessage: null,
-                            idleTimedOut: true,
-                            idleTimeout: request.IdleTimeout)));
+                        ErrorMessage: errorMessage));
 
                     requestCancellationTokenSource.Cancel();
 
@@ -747,5 +811,4 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
             }
         }
     }
-
 }
