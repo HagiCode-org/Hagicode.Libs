@@ -57,6 +57,8 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
     private readonly ConcurrentDictionary<long, TaskCompletionSource<JsonElement>> _pendingRequests = new();
     private readonly CodexAppServerRequestMap _serverRequests = new();
     private readonly ConcurrentDictionary<Task, byte> _questionTasks = new();
+    private readonly CodexAgentWorkTracker _agentWork = new();
+    private readonly object _agentWorkLock = new();
     private long _nextRequestId;
     private Task? _readLoop;
     private ActiveTurn? _activeTurn;
@@ -204,6 +206,9 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
         var turn = BeginTurn(cancellationToken);
         try
         {
+            // A subagent change observed between turns is delivered first, before this turn's events.
+            FlushAgentWork(turn);
+
             var startParameters = new JsonObject(turnParameters.Select(static pair => KeyValuePair.Create(pair.Key, pair.Value?.DeepClone())))
             {
                 ["threadId"] = threadId,
@@ -513,11 +518,16 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
             return;
         }
 
+        // Every notification is observed, including child-thread traffic that the turn filter below drops.
+        ObserveAgentWork(method, parameters);
+
         var turn = _activeTurn;
         if (turn is null)
         {
             return;
         }
+
+        FlushAgentWork(turn);
 
         ThreadEvent? threadEvent;
         try
@@ -533,6 +543,41 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
         if (threadEvent is not null)
         {
             turn.Events.Writer.TryWrite(threadEvent);
+        }
+    }
+
+    private void ObserveAgentWork(string method, JsonElement parameters)
+    {
+        try
+        {
+            lock (_agentWorkLock)
+            {
+                _agentWork.Observe(method, parameters);
+            }
+        }
+        catch (Exception exception)
+        {
+            // Observation is informational: a failure here must not change the transcript or the turn.
+            _logger.LogWarning(exception, "Could not observe codex agent work in notification {Method}.", method);
+        }
+    }
+
+    private void FlushAgentWork(ActiveTurn turn)
+    {
+        try
+        {
+            // The write happens under the lock so snapshots reach the stream in the order they were taken.
+            lock (_agentWorkLock)
+            {
+                if (_agentWork.TakeSnapshot() is { } snapshot)
+                {
+                    turn.Events.Writer.TryWrite(new CodexAgentWorkSnapshotEvent(snapshot));
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Could not build the codex agent work snapshot.");
         }
     }
 

@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
+using HagiCode.Libs.Core.AgentWork;
 using HagiCode.Libs.Providers.Codex;
 using HagiCode.Libs.Providers.Codex.AppServer;
 using ManagedCode.CodexSharpSDK.Configuration;
@@ -374,18 +375,39 @@ public sealed class CodexThread
             CancellationToken = cancellationToken,
         };
 
+        var agentWork = new CodexAgentWorkTracker();
         await foreach (var line in (_exec ?? throw new InvalidOperationException("The exec transport is not available for this thread.")).RunAsync(execArgs)
                            .WithCancellation(cancellationToken)
                            .ConfigureAwait(false))
         {
-            ThreadEvent parsedEvent;
+            // Observed before parsing, so a collaboration item the vendored models cannot represent still reaches the tracker.
+            var agentWorkSnapshot = ObserveExecAgentWork(agentWork, line);
+
+            ThreadEvent? parsedEvent;
             try
             {
                 parsedEvent = ThreadEventParser.Parse(line);
             }
+            catch (Exception exception) when (line.Contains("collab_tool_call", StringComparison.Ordinal))
+            {
+                // The vendored models lack some collaboration values (for example interrupt_agent). The tracker has the item, so
+                // the parser's failure is not allowed to end the run.
+                (_options.Logger ?? NullLogger.Instance).LogDebug(exception, "Skipped a codex exec collaboration item the parser does not know.");
+                parsedEvent = null;
+            }
             catch (Exception exception)
             {
                 throw new InvalidOperationException($"Failed to parse item: {line}", exception);
+            }
+
+            if (agentWorkSnapshot is not null)
+            {
+                yield return new CodexAgentWorkSnapshotEvent(agentWorkSnapshot);
+            }
+
+            if (parsedEvent is null)
+            {
+                continue;
             }
 
             if (parsedEvent is ThreadStartedEvent startedEvent)
@@ -394,6 +416,20 @@ public sealed class CodexThread
             }
 
             yield return parsedEvent;
+        }
+    }
+
+    private AgentWorkSnapshot? ObserveExecAgentWork(CodexAgentWorkTracker agentWork, string line)
+    {
+        try
+        {
+            return agentWork.ObserveExecLine(line);
+        }
+        catch (Exception exception)
+        {
+            // Agent work is informational; a line it cannot read must not end the run.
+            (_options.Logger ?? NullLogger.Instance).LogWarning(exception, "Could not read codex agent work from an exec line.");
+            return null;
         }
     }
 
