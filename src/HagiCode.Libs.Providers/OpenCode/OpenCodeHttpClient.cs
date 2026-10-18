@@ -247,6 +247,54 @@ public sealed class OpenCodeHttpClient : IDisposable
     }
 
     /// <summary>
+    /// Lists the models OpenCode reports with their input capabilities (<c>GET /api/model</c>). A model without a
+    /// <c>capabilities</c> member, or without an <c>input</c> list, has no input capabilities. A failing listing throws
+    /// to the caller and leaves the client usable for later calls.
+    /// </summary>
+    public async Task<IReadOnlyList<OpenCodeModelInfo>> ListModelsAsync(CancellationToken cancellationToken = default)
+    {
+        var root = await SendAsync<JsonElement>(
+            HttpMethod.Get,
+            BuildUri("/api/model"),
+            null,
+            cancellationToken).ConfigureAwait(false);
+
+        var models = new List<OpenCodeModelInfo>();
+        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array)
+        {
+            return models;
+        }
+
+        foreach (var item in data.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var inputCapabilities = new List<string>();
+            if (item.TryGetProperty("capabilities", out var capabilities)
+                && capabilities.ValueKind == JsonValueKind.Object
+                && capabilities.TryGetProperty("input", out var input)
+                && input.ValueKind == JsonValueKind.Array)
+            {
+                inputCapabilities.AddRange(input.EnumerateArray()
+                    .Where(static element => element.ValueKind == JsonValueKind.String)
+                    .Select(static element => element.GetString()!));
+            }
+
+            models.Add(new OpenCodeModelInfo
+            {
+                ProviderId = TryGetString(item, "providerID") ?? string.Empty,
+                Id = TryGetString(item, "modelID") ?? string.Empty,
+                InputCapabilities = inputCapabilities,
+            });
+        }
+
+        return models;
+    }
+
+    /// <summary>
     /// Lists the pending forms of a session (<c>GET /api/session/{id}/form</c>).
     /// </summary>
     public async Task<IReadOnlyList<OpenCodeFormInfo>> ListFormsAsync(

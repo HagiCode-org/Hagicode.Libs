@@ -223,6 +223,7 @@ public sealed class OpenCodeSessionModelRequest
 
 /// <summary>
 /// Body of <c>POST /api/session/{id}/prompt</c> (OpenCode 2.0). The model is set on the session, not on the prompt.
+/// <see cref="Files"/> carries inline attachments and is omitted when there are none.
 /// </summary>
 public sealed class OpenCodeSessionPromptRequest
 {
@@ -237,6 +238,10 @@ public sealed class OpenCodeSessionPromptRequest
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Delivery { get; init; }
 
+    [JsonPropertyName("files")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<OpenCodePromptFile>? Files { get; init; }
+
     public static OpenCodeSessionPromptRequest FromText(string text)
     {
         return new OpenCodeSessionPromptRequest
@@ -244,6 +249,68 @@ public sealed class OpenCodeSessionPromptRequest
             Text = text,
         };
     }
+
+    /// <summary>
+    /// Builds a prompt with inline files. An empty list produces the same request as <see cref="FromText"/>, so no <c>files</c> member is sent.
+    /// </summary>
+    public static OpenCodeSessionPromptRequest FromTextWithFiles(string text, IReadOnlyList<OpenCodePromptFile> files)
+    {
+        ArgumentNullException.ThrowIfNull(files);
+        return new OpenCodeSessionPromptRequest
+        {
+            Text = text,
+            Files = files.Count == 0 ? null : files,
+        };
+    }
+
+    /// <summary>
+    /// Prints the id, the text length and the file count only. The text and the file data never appear.
+    /// </summary>
+    public override string ToString()
+    {
+        return $"OpenCodeSessionPromptRequest {{ Id = {MessageId ?? "(none)"}, Text.Length = {Text.Length}, Files = {Files?.Count ?? 0} }}";
+    }
+}
+
+/// <summary>
+/// One entry of the <c>files</c> array of a prompt (OpenCode 2.0): <c>{ "mime", "uri", "name" }</c>. <see cref="Uri"/> is a
+/// <c>data:&lt;mime&gt;;base64,…</c> URL. OpenCode 2.0 rejects a bare string entry and a <c>url</c> key.
+/// </summary>
+public sealed class OpenCodePromptFile
+{
+    [JsonPropertyName("mime")]
+    public string Mime { get; init; } = string.Empty;
+
+    [JsonPropertyName("uri")]
+    public string Uri { get; init; } = string.Empty;
+
+    [JsonPropertyName("name")]
+    public string Name { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Prints the media type, the name and the length of the data URL. The data URL itself never appears.
+    /// </summary>
+    public override string ToString()
+    {
+        return $"OpenCodePromptFile {{ Mime = {Mime}, Name = {Name}, Uri.Length = {Uri.Length} }}";
+    }
+}
+
+/// <summary>
+/// One entry of <c>GET /api/model</c>: the provider and model ids, and the input kinds the model accepts from
+/// <c>capabilities.input</c>.
+/// </summary>
+public sealed class OpenCodeModelInfo
+{
+    public string ProviderId { get; init; } = string.Empty;
+
+    public string Id { get; init; } = string.Empty;
+
+    /// <summary>The input kinds (for example <c>text</c>, <c>image</c>). Empty when OpenCode reports none.</summary>
+    public IReadOnlyList<string> InputCapabilities { get; init; } = [];
+
+    /// <summary>True when <c>image</c> is among the input kinds.</summary>
+    public bool AcceptsImage => InputCapabilities.Any(static input => string.Equals(input, "image", StringComparison.OrdinalIgnoreCase));
 }
 
 /// <summary>

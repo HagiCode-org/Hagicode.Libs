@@ -56,7 +56,21 @@ public sealed class OpenCodeFixtureServerOptions
 
     /// <summary>The child-session turn the models in <see cref="ChildSessionModelIds"/> run.</summary>
     public OpenCodeFixtureChildSessionScript ChildSessionScript { get; init; } = new();
+
+    /// <summary>The models <c>GET /api/model</c> lists, with their input capabilities.</summary>
+    public IReadOnlyCollection<OpenCodeFixtureModel> Models { get; init; } = Array.Empty<OpenCodeFixtureModel>();
+
+    /// <summary>When <c>true</c>, <c>GET /api/model</c> answers HTTP 500 while the other routes keep working.</summary>
+    public bool FailModelListing { get; init; }
+
+    /// <summary>When set, <c>GET /api/model</c> waits this long before it answers, so a caller's timeout can be exercised.</summary>
+    public TimeSpan? ModelListingDelay { get; init; }
 }
+
+/// <summary>
+/// A model <c>GET /api/model</c> lists. A null <see cref="Input"/> means OpenCode reports no <c>capabilities</c> member.
+/// </summary>
+public sealed record OpenCodeFixtureModel(string ProviderId, string ModelId, IReadOnlyList<string>? Input);
 
 /// <summary>
 /// The script of a question turn: which forms the agent opens, and how the turn reacts to their settlement.
@@ -194,7 +208,9 @@ public static class OpenCodeFixtureServer
             () => state.Forms.Values
                 .Select(static form => new OpenCodeFixtureFormSnapshot(form.Id, form.SessionId, form.Kind, form.State, form.Message, form.AnswerJson))
                 .ToArray(),
-            () => Interlocked.Read(ref state.InterruptRequestCount)));
+            () => Interlocked.Read(ref state.InterruptRequestCount),
+            () => state.LastPromptBody,
+            () => Interlocked.Read(ref state.ModelListingRequestCount)));
     }
 
     private static async Task AcceptLoopAsync(HttpListener listener, FixtureState state, CancellationToken cancellationToken)
@@ -261,6 +277,27 @@ public static class OpenCodeFixtureServer
                     urls = new[] { state.BaseUri.ToString().TrimEnd('/') },
                     paths = new { tmp = "/tmp/opencode" },
                     capabilities = new { persistentPty = true },
+                }, cancellationToken);
+                return;
+            }
+
+            if (method == "GET" && path == "/api/model")
+            {
+                Interlocked.Increment(ref state.ModelListingRequestCount);
+                if (state.Options.ModelListingDelay is { } delay)
+                {
+                    await Task.Delay(delay, cancellationToken);
+                }
+
+                if (state.Options.FailModelListing)
+                {
+                    await WriteJsonAsync(context.Response, 500, new { _tag = "InternalError", message = "model listing failed" }, cancellationToken);
+                    return;
+                }
+
+                await WriteJsonAsync(context.Response, 200, new
+                {
+                    data = state.Options.Models.Select(static model => BuildModelJson(model)).ToArray(),
                 }, cancellationToken);
                 return;
             }
@@ -691,13 +728,21 @@ public static class OpenCodeFixtureServer
         FixtureState state,
         CancellationToken cancellationToken)
     {
-        using var document = JsonDocument.Parse(await ReadBodyAsync(request, cancellationToken));
+        var body = await ReadBodyAsync(request, cancellationToken);
+        state.LastPromptBody = body;
+        using var document = JsonDocument.Parse(body);
         var root = document.RootElement;
         var promptText = TryGetString(root, "text") ?? string.Empty;
         var requestedId = TryGetString(root, "id");
         if (!string.IsNullOrWhiteSpace(requestedId) && !requestedId.StartsWith("msg", StringComparison.Ordinal))
         {
             await WriteJsonAsync(response, 400, new { _tag = "InvalidRequestError", message = $"Invalid string: must start with \"msg\" (id={requestedId})", kind = "Payload" }, cancellationToken);
+            return;
+        }
+
+        if (!TryValidatePromptFiles(root, out var filesError))
+        {
+            await WriteJsonAsync(response, 400, new { _tag = "InvalidRequestError", message = filesError, field = "files" }, cancellationToken);
             return;
         }
 
@@ -901,6 +946,90 @@ public static class OpenCodeFixtureServer
         }
     }
 
+    /// <summary>
+    /// Checks the <c>files</c> array the way OpenCode 2.0 does: every entry is an object whose <c>uri</c> is a base64
+    /// <c>data:</c> URL. The error names the entry and never echoes its data.
+    /// </summary>
+    private static bool TryValidatePromptFiles(JsonElement root, out string? error)
+    {
+        error = null;
+        if (!root.TryGetProperty("files", out var files))
+        {
+            return true;
+        }
+
+        if (files.ValueKind != JsonValueKind.Array)
+        {
+            error = "Expected an array\n  at [\"files\"]";
+            return false;
+        }
+
+        var index = 0;
+        foreach (var file in files.EnumerateArray())
+        {
+            var location = $"[\"files\"][{index++}]";
+            if (file.ValueKind != JsonValueKind.Object)
+            {
+                error = $"Expected PromptInput.FileAttachment\n  at {location}";
+                return false;
+            }
+
+            if (!file.TryGetProperty("uri", out var uriNode) || uriNode.ValueKind != JsonValueKind.String)
+            {
+                error = $"Missing key\n  at {location}[\"uri\"]";
+                return false;
+            }
+
+            var uri = uriNode.GetString() ?? string.Empty;
+            if (!uri.StartsWith("data:", StringComparison.Ordinal))
+            {
+                error = "Unsupported attachment URI: only data: URLs are accepted";
+                return false;
+            }
+
+            var comma = uri.IndexOf(',', StringComparison.Ordinal);
+            if (comma < 0 || !uri[..comma].EndsWith(";base64", StringComparison.Ordinal) || !IsBase64(uri[(comma + 1)..]))
+            {
+                error = $"Invalid attachment data URL: {TryGetString(file, "name") ?? "(unnamed)"}";
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsBase64(string payload)
+    {
+        try
+        {
+            _ = Convert.FromBase64String(payload);
+            return true;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// The JSON of one <c>GET /api/model</c> entry. A model without input capabilities omits the <c>capabilities</c> member.
+    /// </summary>
+    private static Dictionary<string, object?> BuildModelJson(OpenCodeFixtureModel model)
+    {
+        var json = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["id"] = model.ModelId,
+            ["modelID"] = model.ModelId,
+            ["providerID"] = model.ProviderId,
+        };
+        if (model.Input is not null)
+        {
+            json["capabilities"] = new { tools = true, input = model.Input, output = new[] { "text" } };
+        }
+
+        return json;
+    }
+
     private static bool Matches(IReadOnlyCollection<string> configuredValues, string providerId, string modelId)
     {
         if (configuredValues.Count == 0)
@@ -1007,7 +1136,18 @@ The canonical OpenCode console project `HagiCode.Libs.OpenCode.Console` owns the
 
         public long NextSessionId;
 
+        private string? _lastPromptBody;
+
+        /// <summary>The raw body of the last prompt the simulated server received, valid or not.</summary>
+        public string? LastPromptBody
+        {
+            get => Volatile.Read(ref _lastPromptBody);
+            set => Volatile.Write(ref _lastPromptBody, value);
+        }
+
         public long InterruptRequestCount;
+
+        public long ModelListingRequestCount;
 
         public void Subscribe(Channel<string> channel)
         {
@@ -1140,6 +1280,8 @@ public sealed class OpenCodeFixtureServerHandle : IAsyncDisposable
     private readonly string _startupOutput;
     private readonly Func<IReadOnlyList<OpenCodeFixtureFormSnapshot>> _formSnapshot;
     private readonly Func<long> _interruptCount;
+    private readonly Func<string?> _lastPromptBody;
+    private readonly Func<long> _modelListingCount;
     private readonly object _sync = new();
     private int _disposed;
 
@@ -1151,7 +1293,9 @@ public sealed class OpenCodeFixtureServerHandle : IAsyncDisposable
         string serverPassword,
         string startupOutput,
         Func<IReadOnlyList<OpenCodeFixtureFormSnapshot>> formSnapshot,
-        Func<long> interruptCount)
+        Func<long> interruptCount,
+        Func<string?> lastPromptBody,
+        Func<long> modelListingCount)
     {
         _listener = listener;
         BaseUri = baseUri;
@@ -1161,6 +1305,8 @@ public sealed class OpenCodeFixtureServerHandle : IAsyncDisposable
         _startupOutput = startupOutput;
         _formSnapshot = formSnapshot;
         _interruptCount = interruptCount;
+        _lastPromptBody = lastPromptBody;
+        _modelListingCount = modelListingCount;
     }
 
     /// <summary>
@@ -1172,6 +1318,17 @@ public sealed class OpenCodeFixtureServerHandle : IAsyncDisposable
     /// The number of <c>POST /api/session/{id}/interrupt</c> requests the simulated server has received.
     /// </summary>
     public long InterruptRequestCount => _interruptCount();
+
+    /// <summary>
+    /// The raw body of the last <c>POST /api/session/{id}/prompt</c> the simulated server received, or <c>null</c> when none arrived.
+    /// Tests parse it to check the <c>files</c> object that reached the server.
+    /// </summary>
+    public string? LastPromptBody => _lastPromptBody();
+
+    /// <summary>
+    /// The number of <c>GET /api/model</c> requests the simulated server has received.
+    /// </summary>
+    public long ModelListingRequestCount => _modelListingCount();
 
     public Uri BaseUri { get; }
 

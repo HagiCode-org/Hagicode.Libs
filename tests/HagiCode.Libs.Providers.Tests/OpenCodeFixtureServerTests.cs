@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using HagiCode.Libs.Providers.OpenCode;
 using Shouldly;
 
@@ -124,6 +125,93 @@ public sealed class OpenCodeFixtureServerTests
             await client.SetSessionModelAsync(session.Id, new OpenCodeModelSelection { ProviderId = "catalog", ModelId = "missing" }));
 
         exception.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+    }
+
+    [Test]
+    public async Task FixtureServer_lists_models_with_their_input_capabilities_or_none()
+    {
+        await using var fixture = await OpenCodeFixtureServer.StartAsync(new OpenCodeFixtureServerOptions
+        {
+            ServerPassword = FixturePassword,
+            Models =
+            [
+                new OpenCodeFixtureModel("opencode", "text-only", ["text"]),
+                new OpenCodeFixtureModel("opencode", "vision", ["text", "image"]),
+                new OpenCodeFixtureModel("opencode", "bare", null),
+            ],
+        });
+        using var httpClient = new HttpClient { BaseAddress = fixture.BaseUri };
+        using var client = new OpenCodeHttpClient(httpClient, directory: null, workspace: null, serverPassword: fixture.ServerPassword);
+
+        var models = await client.ListModelsAsync();
+
+        models.Select(static model => (model.Id, model.AcceptsImage))
+            .ShouldBe([("text-only", false), ("vision", true), ("bare", false)]);
+        fixture.ModelListingRequestCount.ShouldBe(1);
+    }
+
+    [Test]
+    public async Task FixtureServer_fails_only_the_model_listing_when_asked_to()
+    {
+        await using var fixture = await OpenCodeFixtureServer.StartAsync(new OpenCodeFixtureServerOptions
+        {
+            ServerPassword = FixturePassword,
+            FailModelListing = true,
+        });
+        using var httpClient = new HttpClient { BaseAddress = fixture.BaseUri };
+        using var client = new OpenCodeHttpClient(httpClient, directory: null, workspace: null, serverPassword: fixture.ServerPassword);
+
+        await Should.ThrowAsync<OpenCodeApiException>(async () => await client.ListModelsAsync());
+        var session = await client.CreateSessionAsync("after-failed-listing");
+
+        session.Title.ShouldBe("after-failed-listing");
+    }
+
+    [Test]
+    public async Task FixtureServer_keeps_the_inline_files_of_the_last_prompt()
+    {
+        await using var fixture = await OpenCodeFixtureServer.StartAsync(new OpenCodeFixtureServerOptions
+        {
+            ServerPassword = FixturePassword,
+        });
+        using var httpClient = new HttpClient { BaseAddress = fixture.BaseUri };
+        using var client = new OpenCodeHttpClient(httpClient, directory: null, workspace: null, serverPassword: fixture.ServerPassword);
+        var session = await client.CreateSessionAsync("image-session");
+        var request = OpenCodeSessionPromptRequest.FromTextWithFiles(
+            "Describe the image.",
+            [new OpenCodePromptFile { Mime = "image/png", Uri = "data:image/png;base64,iVBORw0KGgo=", Name = "shot.png" }]);
+
+        await client.PromptAsync(session.Id, request);
+
+        using var document = JsonDocument.Parse(fixture.LastPromptBody!);
+        document.RootElement.GetProperty("text").GetString().ShouldBe("Describe the image.");
+        var file = document.RootElement.GetProperty("files").EnumerateArray().Single();
+        file.GetProperty("mime").GetString().ShouldBe("image/png");
+        file.GetProperty("uri").GetString().ShouldBe("data:image/png;base64,iVBORw0KGgo=");
+        file.GetProperty("name").GetString().ShouldBe("shot.png");
+    }
+
+    [Test]
+    public async Task FixtureServer_answers_a_malformed_attachment_with_the_existing_error_path()
+    {
+        await using var fixture = await OpenCodeFixtureServer.StartAsync(new OpenCodeFixtureServerOptions
+        {
+            ServerPassword = FixturePassword,
+        });
+        using var httpClient = new HttpClient { BaseAddress = fixture.BaseUri };
+        using var client = new OpenCodeHttpClient(httpClient, directory: null, workspace: null, serverPassword: fixture.ServerPassword);
+        var session = await client.CreateSessionAsync("bad-attachment-session");
+        var request = OpenCodeSessionPromptRequest.FromTextWithFiles(
+            "Describe the image.",
+            [new OpenCodePromptFile { Mime = "image/png", Uri = "data:image/png;base64,!!!not-base64", Name = "broken.png" }]);
+
+        var exception = await Should.ThrowAsync<OpenCodeApiException>(async () => await client.PromptAsync(session.Id, request));
+        var followUp = await PromptAndCollectAsync(client, session.Id, "Reply with the single word READY.");
+
+        exception.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        exception.ResponseBody.ShouldContain("Invalid attachment data URL: broken.png");
+        exception.ResponseBody.ShouldNotContain("not-base64");
+        followUp.GetTextContent().ShouldBe("READY");
     }
 
     private static HttpClient CreateAuthenticatedHttpClient(Uri baseUri, string password)

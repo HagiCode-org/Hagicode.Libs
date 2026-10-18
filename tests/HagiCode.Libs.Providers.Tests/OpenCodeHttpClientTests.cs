@@ -667,6 +667,65 @@ public sealed class OpenCodeHttpClientTests
         });
     }
 
+    [Test]
+    public async Task Model_listing_reports_a_text_only_model_as_not_accepting_images()
+    {
+        var handler = new ScriptedHandler(static _ => Json("{\"data\":[{\"id\":\"ll-alpha\",\"modelID\":\"ll-alpha\",\"providerID\":\"opencode\",\"capabilities\":{\"tools\":true,\"input\":[\"text\"],\"output\":[\"text\"]}}]}"));
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("http://stub/") };
+        using var client = new OpenCodeHttpClient(http, directory: null, workspace: null, Password);
+
+        var models = await client.ListModelsAsync();
+
+        handler.Requests.Single().PathAndQuery.ShouldBe("/api/model");
+        var model = models.Single();
+        model.ProviderId.ShouldBe("opencode");
+        model.Id.ShouldBe("ll-alpha");
+        model.InputCapabilities.ShouldBe(["text"]);
+        model.AcceptsImage.ShouldBeFalse();
+    }
+
+    [Test]
+    public async Task Model_listing_reports_an_image_capable_model_as_accepting_images()
+    {
+        var handler = new ScriptedHandler(static _ => Json("{\"data\":[{\"id\":\"nemotron\",\"modelID\":\"nemotron\",\"providerID\":\"opencode\",\"capabilities\":{\"input\":[\"text\",\"image\"]}}]}"));
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("http://stub/") };
+        using var client = new OpenCodeHttpClient(http, directory: null, workspace: null, Password);
+
+        var model = (await client.ListModelsAsync()).Single();
+
+        model.InputCapabilities.ShouldBe(["text", "image"]);
+        model.AcceptsImage.ShouldBeTrue();
+    }
+
+    [Test]
+    public async Task Model_without_a_capabilities_member_has_no_input_capabilities()
+    {
+        var handler = new ScriptedHandler(static _ => Json("{\"data\":[{\"id\":\"bare\",\"modelID\":\"bare\",\"providerID\":\"opencode\"}]}"));
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("http://stub/") };
+        using var client = new OpenCodeHttpClient(http, directory: null, workspace: null, Password);
+
+        var model = (await client.ListModelsAsync()).Single();
+
+        model.InputCapabilities.ShouldBeEmpty();
+        model.AcceptsImage.ShouldBeFalse();
+    }
+
+    [Test]
+    public async Task Failing_model_listing_throws_to_its_caller_and_later_calls_still_work()
+    {
+        var handler = new ScriptedHandler(static request => request.PathAndQuery == "/api/model"
+            ? Status(HttpStatusCode.InternalServerError, "{\"_tag\":\"InternalError\",\"message\":\"model listing failed\"}")
+            : Json("{\"version\":\"2.0.32\",\"pid\":1,\"urls\":[],\"paths\":{\"tmp\":\"/tmp\"}}"));
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("http://stub/") };
+        using var client = new OpenCodeHttpClient(http, directory: null, workspace: null, Password);
+
+        var exception = await Should.ThrowAsync<OpenCodeApiException>(async () => await client.ListModelsAsync());
+        var health = await client.HealthAsync();
+
+        exception.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
+        health.Version.ShouldBe("2.0.32");
+    }
+
     private static HttpResponseMessage Json(string body)
     {
         return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
