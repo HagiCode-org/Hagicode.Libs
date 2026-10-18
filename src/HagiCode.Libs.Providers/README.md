@@ -368,6 +368,55 @@ await foreach (var message in reasonix.ExecuteAsync(options, "Ask me which datab
 - **No handler:** `UserInputHandler` is `null` by default and nothing changes: a question request is answered with its first option like any permission request, no question message is produced, and a warning naming the question is logged. Tool approvals (`gate-*`) are never routed to the handler and are answered as before, with or without one.
 - The question message (`question.request`) carries the raw request in `params` and follows the `tool.call` of the `ask` call; the `ask` call itself (its `tool.call` and its completed or failed `tool.update`) stays an ordinary tool message whose `toolCallId` differs from the question's `RequestId`, so callers hide it by the tool title `ask` (`ReasonixUserInputRequest.QuestionToolName`).
 
+## Copilot interactive questions
+
+Copilot's built-in `ask_user` tool can ask the user a question during a run. Set `CopilotOptions.UserInputHandler` to answer those questions; when it is `null` (the default) the provider is unchanged: the derived `--no-ask-user` flag stays and the agent cannot ask.
+
+```csharp
+var options = new CopilotOptions
+{
+    QuestionTimeout = TimeSpan.FromMinutes(30), // default; Timeout.InfiniteTimeSpan waits without a limit
+    UserInputHandler = async (question, cancellationToken) =>
+    {
+        // question.RequestId, question.Question, question.Choices and question.AllowFreeform describe the question.
+        var answer = await AskTheUserAsync(question, cancellationToken);
+        return new CopilotUserInputResponse(new Dictionary<string, IReadOnlyList<string>>
+        {
+            [question.Question] = [answer]
+        });
+    }
+};
+
+await foreach (var message in copilot.ExecuteAsync(options, "Ask me which color, then reply with it."))
+{
+    if (message.Type == CopilotUserInputRequest.MessageType &&
+        CopilotUserInputRequest.TryFromCliMessage(message, out var asked))
+    {
+        // The question is also yielded here, in stream order, for callers that show it themselves.
+    }
+}
+```
+
+- **Stream messages:** each question is one `question.request` message (`request_id`, `question`, `choices`, `allow_freeform`) in the position it arrived. When Copilot completes a pending question itself, a `question.closed` message (`request_id`) follows. A declined question adds a `diagnostic` message that names the question id and the reason.
+- **Limits:** one question per request, string choices without descriptions, no multi-select and exactly one string answer. A question without choices accepts any one non-empty value. An answer is refused (and the question declined) when it is empty, has more than one value, or is not an offered choice while `AllowFreeform` is `false`.
+- **Question id:** the `ToolCallId` of the matching `user_input.requested` event, else its `RequestId`, else `copilot-input-{sessionId}-{n}`.
+- **Decline:** a `null` response, a refused answer, a timeout, or a throwing handler declines the question (the handler's own exception is not rethrown). The SDK callback then fails for that question, which is how Copilot is told the user gave no answer; the run continues with its own result. The encoding is gate G2 below and is unverified. A session error that Copilot reports after a decline is not yet normalized by the provider and is reported as before.
+- **Deadlines:** while a question is pending, the idle timeout and the request timeout do not run. The request deadline counts only the time with no pending question (a stall still ends with `[idle_timeout]`, a long run with `[request_timeout]`). With a handler the SDK wait has no limit of its own, so the request deadline is enforced by the provider.
+- **Flags:** with a handler, `--no-ask-user` is never passed. An `AdditionalArgs` entry for it is dropped with a diagnostic. Tool approvals are unchanged and never reach the handler.
+- **Stop:** cancelling the caller cancels a pending question and ends the run through the normal cancellation path; nothing is recorded as declined.
+- **Options:** `CopilotOptions.ToString()` does not print `GitHubToken`.
+
+**Verification status (SDK `GitHub.Copilot.SDK` 1.0.0-beta.10, Copilot CLI 1.0.92):**
+
+- The live probe did not run: no Copilot credentials were exported to the environment (`COPILOT_GITHUB_TOKEN`, `GH_TOKEN` and `GITHUB_TOKEN` are unset), and the user's stored login was not copied into a scratch home. Gates G1, G2, G4 and G5 are **unverified**. Export one of the variables and run the opt-in tests below to settle them.
+- G1 (callback and `user_input.requested` order, and whether the question text matches): unverified. The matching queue and the fallback id cover either order.
+- G2 (decline encoding): unverified. The callback fails with an internal `CopilotUserInputDeclinedException` (see `CopilotUserInput.cs`); switching to an empty answer changes only that one place.
+- G3 (infinite timeout): `SendAndWaitAsync` accepts `Timeout.InfiniteTimeSpan`. Checked from the SDK's IL: the timeout is only passed to `CancellationTokenSource.CancelAfter`, with no range check. Whether the CLI caps a long-waiting callback is unverified, so answers after 60 seconds and after several minutes are unverified.
+- G4 (tool name in `ToolExecution*` events): `copilot --help` in CLI 1.0.92 describes `--no-ask-user` as "Disable the ask_user tool", so `ask_user` is the tool name. The event shape is unverified.
+- G5 (resume with an unanswered `ask_user`): unverified.
+
+**Opt-in real-CLI tests:** `ExecuteAsync_real_cli_asks_and_answers_one_question_when_opted_in` and `ExecuteAsync_real_cli_declines_one_question_and_completes_when_opted_in` in `tests/HagiCode.Libs.Providers.Tests/CopilotUserInputTests.cs` run only with `HAGICODE_REAL_CLI_TESTS=1` and `HAGICODE_REAL_CLI_COPILOT_USER_INPUT_TESTS=1` and a logged-in or token-authenticated Copilot CLI. They have not been run.
+
 ## OpenCode question forms (2.0.32 wire)
 
 The OpenCode `question` tool runs on OpenCode's form service. A live probe against a scratch `opencode serve` (private `HOME`/`XDG_*`, own port) recorded the wire in `tests/HagiCode.Libs.Providers.Tests/Fixtures/OpenCode/v2.0.32/` (`events-question-*.jsonl`, `form-*.json`, `tool-result-*.json`, scrubbed).
