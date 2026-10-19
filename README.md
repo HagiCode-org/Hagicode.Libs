@@ -493,6 +493,13 @@ await foreach (var message in copilot.ExecuteAsync(options, "Reply with exactly 
 
 Set `SessionId` when you want provider-native Copilot resume semantics. The provider first attempts SDK resume for that id, falls back to creating a new session pinned to the requested id when nothing persisted yet, and emits `session.started` or `session.resumed` messages accordingly. Requests without `SessionId` stay anonymous and still create a fresh SDK runtime on every attempt. Legacy `PoolSettings` values are ignored for compatibility.
 
+Copilot image attachments are passed in `CopilotOptions.Images` as `CopilotImageAttachment` values (media type, bytes and an optional file name). The list is empty by default, and an empty list leaves the send unchanged. The images travel as inline `UserMessageAttachmentBlob` entries on the one `SendAndWaitAsync` call of a run, whether the session is fresh, resumed, or created after a failed resume. Session creation and resume configuration never carry images.
+
+- `CopilotProvider` validates every image before any SDK client or process starts. A null entry, empty data, or a media type that does not start with `image/` throws an `InvalidOperationException` that names the position and the media type, never the bytes.
+- `CopilotImageAttachment` and `CopilotOptions` print and serialize only the media type, file name, byte length and image count. The base64 string exists only for the SDK call.
+- Each `user.message` echo or other raw event is serialized with image blob data replaced by a fixed marker that keeps the length, so the base64 string never reaches a raw event's `Content`.
+- `ICopilotModelCapabilityReader.GetImageCapabilityAsync(options, model)` reads a model's image capability from the SDK model list. `CopilotProvider` implements it and `AddHagiCodeLibs()` registers it. It returns `CopilotModelImageCapability` (`SupportsVision`, `MaxPromptImages`, `MaxPromptImageSize`, `SupportedMediaTypes`), where a limit Copilot does not report, or reports as zero or negative, is `null`. It returns `null` (unknown) when no model is given, the model is not listed, its vision entry is missing, or the list cannot be read. The read starts a short-lived client and disposes it on every path; only cancellation of the caller's token is thrown.
+
 Codex execution options cover the common CLI settings without forcing raw command lines:
 
 ```csharp

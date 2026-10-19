@@ -258,6 +258,30 @@ await foreach (var message in reasonix.ExecuteAsync(reasonixOptions, "Reply with
 }
 ```
 
+## Claude Code run steering
+
+`ClaudeCodeOptions.Steering` (default `null`, nothing changes) lets the host send follow-up user messages to an execution that is already running. Create one `ClaudeRunSteering` per run and pass it in the options; `SteerAsync` is only meaningful while `ExecuteAsync` is being iterated:
+
+```csharp
+var steering = new ClaudeRunSteering();
+steering.OutcomeObserved += (_, args) => RecordOutcome(args.SteerId, args.Outcome);
+
+var options = new ClaudeCodeOptions
+{
+    Steering = steering,
+    SteerDeliveryTimeout = TimeSpan.FromSeconds(30) // default; must be positive
+};
+
+// While the stream is being read:
+var result = await steering.SteerAsync("steer-1", "switch to lakes"); // Sent or NotSteerable
+```
+
+- The steer is written as a `user` message whose `uuid` is the steer id and whose priority is `next`. The CLI injects it at the next tool boundary, or starts a follow-up turn for it when it was written during text-only generation. The CLI echoes the steer, and the echo is swallowed: it is not yielded as conversation and it does not count as the start of the main prompt.
+- `Sent` means the line was written. Whether the CLI consumed it is reported later through `OutcomeObserved`, exactly once per accepted steer: `Consumed` when the echo arrives, `NotConsumed` when the run ends first. A run ends first on a timeout, on cancellation, when the CLI exits, or when an error result ends it.
+- A `result` does not end the run while an accepted steer is unconsumed. The run waits up to `SteerDeliveryTimeout` for the echo and then ends with the steer reported as `NotConsumed`.
+- `SteerAsync` returns `NotSteerable` and writes nothing when the handle is not attached (the CLI is not connected yet, or the run has ended), a steer with the same id is still outstanding, or the write fails.
+- Only the Claude Code provider supports steering. Priority `now` and images in a steer are not offered.
+
 ## Pi interactive questions
 
 Set `PiOptions.UserInputHandler` and the Pi agent can ask the user multiple-choice questions with the bundled `ask_user_question` tool (the input schema of Claude's `AskUserQuestion`). Without a handler Pi runs as before in `--mode json --print`; with one the provider runs `pi --mode rpc` and loads the extension from an embedded resource, so there is nothing to install.
