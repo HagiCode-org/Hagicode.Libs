@@ -63,6 +63,18 @@ public sealed class ClaudeTurnDeliveryTests
     }
 
     [Test]
+    public void Accept_swallows_a_steer_echo_without_releasing_a_turn_that_is_held_for_the_prompt()
+    {
+        var delivery = new ClaudeTurnDelivery();
+
+        delivery.Accept(Message("system", new { subtype = "init" }), true).ShouldBeEmpty();
+        delivery.Accept(Message("user", new { isReplay = true, uuid = "steer-1" }), true, steerEcho: true).ShouldBeEmpty();
+        delivery.Accept(Message("assistant", new { content = "still held" }), true).ShouldBeEmpty();
+
+        Describe(delivery.Accept(Message("user", new { isReplay = true }), false)).ShouldBe(["system", "assistant"]);
+    }
+
+    [Test]
     public void Drain_returns_a_turn_that_was_still_open_when_the_run_ended()
     {
         var delivery = new ClaudeTurnDelivery();

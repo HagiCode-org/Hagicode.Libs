@@ -85,6 +85,15 @@ internal sealed partial class ClaudeStreamCompletionTracker
     private int _finishedTurns;
     private int _hostPromptsAwaitingStart;
     private int _pendingQuestions;
+    private string? _awaitingPromptText;
+
+    // Steers are registered from the caller's thread and resolved on the receive loop. Every read or write of the fields
+    // below happens under _steerGate, and _completed is set in the same critical section as the pending-steer check, so a
+    // steer is either refused or tracked until it is resolved.
+    private readonly object _steerGate = new();
+    private readonly List<PendingSteer> _pendingSteers = [];
+    private readonly List<ClaudeSteerResolution> _steerResolutions = [];
+    private bool _completed;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ClaudeStreamCompletionTracker" /> class.
@@ -131,6 +140,13 @@ internal sealed partial class ClaudeStreamCompletionTracker
         NotificationTurn,
 
         /// <summary>
+        /// A steer the CLI accepted has not been echoed yet, and nothing else the run waits for is pending. The CLI can hold a
+        /// steer written during a text-only turn until a follow-up turn starts, so the run waits for that echo, bounded by the
+        /// steer delivery timeout.
+        /// </summary>
+        SteerDelivery,
+
+        /// <summary>
         /// An interactive question waits for the user's answer. The other bounds are suspended while it does, because the
         /// agent is blocked on a person; the question timeout is the only bound that applies.
         /// </summary>
@@ -173,7 +189,12 @@ internal sealed partial class ClaudeStreamCompletionTracker
                 return PendingWait.HostPromptStart;
             }
 
-            return _undeliveredNotificationTaskIds.Count > 0 ? PendingWait.NotificationTurn : PendingWait.None;
+            if (_undeliveredNotificationTaskIds.Count > 0)
+            {
+                return PendingWait.NotificationTurn;
+            }
+
+            return HasPendingSteer() ? PendingWait.SteerDelivery : PendingWait.None;
         }
     }
 
@@ -218,9 +239,14 @@ internal sealed partial class ClaudeStreamCompletionTracker
     /// <summary>
     /// Records that a prompt was written to the CLI and has not started its turn yet.
     /// </summary>
-    public void RecordHostPromptSent()
+    /// <param name="promptText">
+    /// The text of the prompt, when known. A steer echo that has no <c>uuid</c> is attributed to the prompt instead of to a
+    /// steer with the same text while the prompt is still awaiting its replay.
+    /// </param>
+    public void RecordHostPromptSent(string? promptText = null)
     {
         _hostPromptsAwaitingStart++;
+        _awaitingPromptText = promptText;
     }
 
     /// <summary>
@@ -257,9 +283,11 @@ internal sealed partial class ClaudeStreamCompletionTracker
     public bool Observe(CliMessage message)
     {
         ArgumentNullException.ThrowIfNull(message);
+        LastMessageWasSteerEcho = false;
 
         if (string.Equals(message.Type, "error", StringComparison.OrdinalIgnoreCase))
         {
+            MarkCompleted();
             return true;
         }
 
@@ -272,6 +300,15 @@ internal sealed partial class ClaudeStreamCompletionTracker
         if (IsTaskNotificationReplay(message))
         {
             MarkNotificationsDelivered(message.Content);
+            return false;
+        }
+
+        // A steer echo is the CLI replaying a follow-up the host wrote, not the prompt. It must not move the prompt's
+        // start, or the prompt would be resent or considered started by a message that is not its own.
+        if (TryMatchSteerEcho(message, out var steerId))
+        {
+            LastMessageWasSteerEcho = true;
+            ResolveSteer(steerId, ClaudeSteerOutcome.Consumed);
             return false;
         }
 
@@ -309,13 +346,198 @@ internal sealed partial class ClaudeStreamCompletionTracker
         }
 
         _finishedTurns++;
-        return IsErrorResult(message.Content)
-               || (_runningSubagentTaskIds.Count == 0
-                   && _subagentOwnedTaskIds.Count == 0
-                   && _runningBoundedTaskIds.Count == 0
-                   && _finishedTurns >= _startedTurns
-                   && _hostPromptsAwaitingStart == 0
-                   && _undeliveredNotificationTaskIds.Count == 0);
+        if (IsErrorResult(message.Content))
+        {
+            MarkCompleted();
+            return true;
+        }
+
+        // The completion conditions and the pending-steer check are decided together with the write of _completed, so a
+        // steer registered after this decision is refused rather than written into a run that is ending.
+        lock (_steerGate)
+        {
+            var complete = _runningSubagentTaskIds.Count == 0
+                           && _subagentOwnedTaskIds.Count == 0
+                           && _runningBoundedTaskIds.Count == 0
+                           && _finishedTurns >= _startedTurns
+                           && _hostPromptsAwaitingStart == 0
+                           && _undeliveredNotificationTaskIds.Count == 0
+                           && _pendingSteers.Count == 0;
+            if (complete)
+            {
+                _completed = true;
+            }
+
+            return complete;
+        }
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether the last message passed to <see cref="Observe" /> was the echo of a steer. Such an
+    /// echo is part of the steer, not of the conversation, so turn delivery swallows it instead of showing it.
+    /// </summary>
+    internal bool LastMessageWasSteerEcho { get; private set; }
+
+    /// <summary>
+    /// Registers a steer before it is written to the CLI, so the CLI's echo can be matched and a result cannot complete the
+    /// run while the steer is outstanding.
+    /// </summary>
+    /// <returns>
+    /// <see langword="false" /> when the run is already complete or closed, or a steer with the same id is outstanding. A
+    /// refused steer must not be written.
+    /// </returns>
+    internal bool TryRegisterSteer(string steerId, string text)
+    {
+        lock (_steerGate)
+        {
+            if (_completed || _pendingSteers.Exists(steer => steer.SteerId == steerId))
+            {
+                return false;
+            }
+
+            _pendingSteers.Add(new PendingSteer(steerId, text));
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Forgets a steer that was registered but could not be written. It is not reported, because it was never accepted.
+    /// </summary>
+    internal void UnregisterSteer(string steerId)
+    {
+        lock (_steerGate)
+        {
+            _pendingSteers.RemoveAll(steer => steer.SteerId == steerId);
+        }
+    }
+
+    /// <summary>
+    /// Returns the outcomes of the steers resolved since the last call, in the order they were resolved.
+    /// </summary>
+    internal IReadOnlyList<ClaudeSteerResolution> TakeSteerResolutions()
+    {
+        lock (_steerGate)
+        {
+            return TakeResolutionsLocked();
+        }
+    }
+
+    /// <summary>
+    /// Closes steering for a run that is ending: no further steer is accepted, every steer still unresolved is reported as not
+    /// consumed, and the outcomes not yet taken are returned.
+    /// </summary>
+    internal IReadOnlyList<ClaudeSteerResolution> CloseSteering()
+    {
+        lock (_steerGate)
+        {
+            _completed = true;
+            foreach (var steer in _pendingSteers)
+            {
+                _steerResolutions.Add(new ClaudeSteerResolution(steer.SteerId, ClaudeSteerOutcome.NotConsumed));
+            }
+
+            _pendingSteers.Clear();
+            return TakeResolutionsLocked();
+        }
+    }
+
+    private void MarkCompleted()
+    {
+        lock (_steerGate)
+        {
+            _completed = true;
+        }
+    }
+
+    private bool HasPendingSteer()
+    {
+        lock (_steerGate)
+        {
+            return _pendingSteers.Count > 0;
+        }
+    }
+
+    private IReadOnlyList<ClaudeSteerResolution> TakeResolutionsLocked()
+    {
+        var resolutions = _steerResolutions.ToArray();
+        _steerResolutions.Clear();
+        return resolutions;
+    }
+
+    private void ResolveSteer(string steerId, ClaudeSteerOutcome outcome)
+    {
+        lock (_steerGate)
+        {
+            if (_pendingSteers.RemoveAll(steer => steer.SteerId == steerId) > 0)
+            {
+                _steerResolutions.Add(new ClaudeSteerResolution(steerId, outcome));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Reports whether the message is the CLI echoing an outstanding steer, and which one. The echo is matched by the
+    /// <c>uuid</c> the steer was written with. Only when the echo has no <c>uuid</c> is its text compared with the steers,
+    /// and then only if it cannot be the awaited prompt, whose text it may share.
+    /// </summary>
+    private bool TryMatchSteerEcho(CliMessage message, out string steerId)
+    {
+        steerId = string.Empty;
+        if (!IsReplay(message) || IsTaskNotificationOrigin(message.Content))
+        {
+            return false;
+        }
+
+        lock (_steerGate)
+        {
+            if (_pendingSteers.Count == 0)
+            {
+                return false;
+            }
+
+            if (GetString(message.Content, "uuid") is { } uuid)
+            {
+                if (_pendingSteers.Find(steer => steer.SteerId == uuid) is not { } byId)
+                {
+                    return false;
+                }
+
+                steerId = byId.SteerId;
+                return true;
+            }
+
+            var text = GetUserText(message.Content);
+            if (text is null || (_hostPromptsAwaitingStart > 0 && string.Equals(text, _awaitingPromptText, StringComparison.Ordinal)))
+            {
+                return false;
+            }
+
+            if (_pendingSteers.Find(steer => string.Equals(steer.Text, text, StringComparison.Ordinal)) is not { } byText)
+            {
+                return false;
+            }
+
+            steerId = byText.SteerId;
+            return true;
+        }
+    }
+
+    private static string? GetUserText(JsonElement content)
+    {
+        if (content.ValueKind != JsonValueKind.Object
+            || !content.TryGetProperty("message", out var message)
+            || message.ValueKind != JsonValueKind.Object
+            || !message.TryGetProperty("content", out var body))
+        {
+            return null;
+        }
+
+        return body.ValueKind switch
+        {
+            JsonValueKind.String => body.GetString(),
+            JsonValueKind.Array => string.Concat(body.EnumerateArray().Select(static block => GetString(block, "text"))),
+            _ => null
+        };
     }
 
     /// <summary>
@@ -839,6 +1061,11 @@ internal sealed partial class ClaudeStreamCompletionTracker
         string? Command,
         TimeSpan? DeclaredTimeout,
         bool IsUntimedBackgroundCommand = false);
+
+    /// <summary>A steer the host wrote and the CLI has not echoed or closed yet.</summary>
+    /// <param name="SteerId">The <c>uuid</c> the steer was written with.</param>
+    /// <param name="Text">The text the steer carries, used to match an echo that has no <c>uuid</c>.</param>
+    private sealed record PendingSteer(string SteerId, string Text);
 
     private sealed class WorkRecord(string taskId, string kind, DateTimeOffset startedAt)
     {

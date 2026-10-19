@@ -131,6 +131,14 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
                 "QuestionTimeout must be positive or Timeout.InfiniteTimeSpan.");
         }
 
+        if (options.SteerDeliveryTimeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.SteerDeliveryTimeout,
+                "SteerDeliveryTimeout must be positive.");
+        }
+
         var runtimeEnvironment = await ResolveRuntimeEnvironmentAsync(cancellationToken);
         var executablePath = ResolveExecutablePath(options, runtimeEnvironment)
             ?? throw new FileNotFoundException("Unable to locate the Claude Code executable.");
@@ -501,8 +509,12 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
         using var pendingQuestions = options.UserInputHandler is { } userInputHandler
             ? new ClaudePendingQuestions(userInputHandler, options.QuestionTimeout, writer, completionTracker, cancellationToken)
             : null;
-        completionTracker.RecordHostPromptSent();
+        completionTracker.RecordHostPromptSent(prompt);
         await writer.SendAsync(promptMessage, cancellationToken).ConfigureAwait(false);
+
+        // The handle is attached only for the stream below, so every steer is refused once the run's own finally has
+        // closed the tracker and detached it.
+        var steering = options.Steering;
 
         // Each wait the run can idle on is bounded. Giving up cancels the receive loop. A C# iterator cannot yield inside
         // a try block that has a catch, so the stream is driven by hand and messages are yielded outside any try.
@@ -516,6 +528,9 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
         // message, so a consumer sees the cause first. When the cause is still held back by the turn delivery, the
         // snapshot waits for the next delivery; only the newest snapshot matters because each one is complete.
         AgentWorkSnapshot? pendingSnapshot = null;
+
+        steering?.Attach((steerId, text, steerCancellation) =>
+            SendSteerAsync(completionTracker, writer, options, steerId, text, steerCancellation));
 
         // try/finally is allowed around a yield, unlike catch. Whichever way the run ends, the questions that still wait are
         // released, and a deny that a cancellation started is given a moment to reach the CLI before the transport goes.
@@ -589,12 +604,21 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
                 }
 
                 var complete = completionTracker.Observe(message);
+                var steerEcho = completionTracker.LastMessageWasSteerEcho;
                 pendingSnapshot = completionTracker.TakeSnapshot() ?? pendingSnapshot;
                 var delivered = false;
-                foreach (var deliverable in turnDelivery.Accept(message, completionTracker.HostPromptAwaitingStart))
+                foreach (var deliverable in turnDelivery.Accept(message, completionTracker.HostPromptAwaitingStart, steerEcho))
                 {
                     delivered = true;
                     yield return EnrichMessageWithDebugMetadata(deliverable, debugContext);
+                }
+
+                if (steering is not null)
+                {
+                    foreach (var resolution in completionTracker.TakeSteerResolutions())
+                    {
+                        steering.Report(resolution);
+                    }
                 }
 
                 if (pendingSnapshot is not null && (delivered || complete))
@@ -616,6 +640,53 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
                 pendingQuestions.CancelOutstanding();
                 await pendingQuestions.WaitForOutstandingAsync(QuestionDrainTimeout).ConfigureAwait(false);
             }
+
+            // Closing first means no steer can be accepted after this point; whatever the CLI did not echo is handed back
+            // as not consumed, and the handle is detached so a late SteerAsync finds nothing to write to.
+            if (steering is not null)
+            {
+                foreach (var resolution in completionTracker.CloseSteering())
+                {
+                    steering.Report(resolution);
+                }
+
+                steering.Detach();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Registers a steer with the run's tracker and writes it to the CLI. The registration comes first, so the CLI's echo
+    /// cannot arrive before the steer is known, and a run that has already completed refuses it.
+    /// </summary>
+    private static async Task<ClaudeSteerResult> SendSteerAsync(
+        ClaudeStreamCompletionTracker completionTracker,
+        ClaudeStdinWriter writer,
+        ClaudeCodeOptions options,
+        string steerId,
+        string text,
+        CancellationToken cancellationToken)
+    {
+        if (!completionTracker.TryRegisterSteer(steerId, text))
+        {
+            return ClaudeSteerResult.NotSteerable;
+        }
+
+        try
+        {
+            await writer.SendAsync(CreateSteerMessage(steerId, text, options), cancellationToken).ConfigureAwait(false);
+            return ClaudeSteerResult.Sent;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            completionTracker.UnregisterSteer(steerId);
+            throw;
+        }
+        catch (Exception)
+        {
+            // The transport is gone, so the CLI cannot take the message. It was never accepted, so nothing is reported for it.
+            completionTracker.UnregisterSteer(steerId);
+            return ClaudeSteerResult.NotSteerable;
         }
     }
 
@@ -669,6 +740,7 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
             ClaudeStreamCompletionTracker.PendingWait.MainAgentBackgroundWork => completionTracker.RemainingBackgroundWork,
             ClaudeStreamCompletionTracker.PendingWait.HostPromptStart => options.PromptStartTimeout,
             ClaudeStreamCompletionTracker.PendingWait.NotificationTurn => options.NotificationTurnTimeout,
+            ClaudeStreamCompletionTracker.PendingWait.SteerDelivery => options.SteerDeliveryTimeout,
 
             // The agent is blocked on a person; the question timeout of the pending question is the only bound.
             ClaudeStreamCompletionTracker.PendingWait.UserQuestion => Timeout.InfiniteTimeSpan,
@@ -775,6 +847,28 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
                 ["content"] = content
             },
             ["session_id"] = options.SessionId
+        });
+
+        return new CliMessage("user", payload);
+    }
+
+    /// <summary>
+    /// Builds a follow-up user message for a running execution. Its <c>uuid</c> is the steer id, which is how the CLI's echo
+    /// is matched, and its priority is <c>next</c>, so the CLI injects it at the next tool boundary. Text only.
+    /// </summary>
+    internal static CliMessage CreateSteerMessage(string steerId, string text, ClaudeCodeOptions options)
+    {
+        var payload = JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+        {
+            ["type"] = "user",
+            ["message"] = new Dictionary<string, object?>
+            {
+                ["role"] = "user",
+                ["content"] = text
+            },
+            ["session_id"] = options.SessionId,
+            ["uuid"] = steerId,
+            ["priority"] = "next"
         });
 
         return new CliMessage("user", payload);

@@ -24,8 +24,17 @@ internal sealed class ClaudeTurnDelivery
     /// </summary>
     /// <param name="message">The message that was just received.</param>
     /// <param name="hostPromptAwaitingStart">Whether a prompt written to the CLI has not been replayed yet.</param>
-    public IReadOnlyList<CliMessage> Accept(CliMessage message, bool hostPromptAwaitingStart)
+    /// <param name="steerEcho">
+    /// Whether the message is the echo of a steer. The echo is dropped, because the backend records the steer itself, but it
+    /// does not start or finish the prompt's turn, so held messages stay held.
+    /// </param>
+    public IReadOnlyList<CliMessage> Accept(CliMessage message, bool hostPromptAwaitingStart, bool steerEcho = false)
     {
+        if (steerEcho)
+        {
+            return [];
+        }
+
         if (ClaudeStreamCompletionTracker.IsPromptReplay(message))
         {
             return Release();

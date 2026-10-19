@@ -222,4 +222,26 @@ public sealed record ClaudeCodeOptions
     /// The default value of <see cref="QuestionTimeout" />.
     /// </summary>
     public static readonly TimeSpan DefaultQuestionTimeout = TimeSpan.FromMinutes(30);
+
+    /// <summary>
+    /// Gets or sets the handle that injects follow-up user messages into this execution while it runs. It is
+    /// <see langword="null" /> by default, which keeps the execution exactly as it was.
+    /// </summary>
+    /// <remarks>
+    /// A handle is bound to one execution: create a new one for each run. See <see cref="ClaudeRunSteering" />.
+    /// </remarks>
+    public ClaudeRunSteering? Steering { get; init; }
+
+    /// <summary>
+    /// Gets or sets how long the run stays open after the CLI's last <c>result</c> while a steer it accepted has not been
+    /// echoed back yet. The CLI can hold a steer that arrived during a text-only turn until a follow-up turn starts, and
+    /// the run waits for that echo here. When the limit passes the steer is reported as not consumed and the run ends with
+    /// the results already received. The default is 30 seconds and the value must be positive.
+    /// </summary>
+    public TimeSpan SteerDeliveryTimeout { get; init; } = DefaultSteerDeliveryTimeout;
+
+    /// <summary>
+    /// The default value of <see cref="SteerDeliveryTimeout" />.
+    /// </summary>
+    public static readonly TimeSpan DefaultSteerDeliveryTimeout = TimeSpan.FromSeconds(30);
 }
