@@ -98,6 +98,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICliProvider<ClaudeCodeOptions>>(serviceProvider => serviceProvider.GetRequiredService<ClaudeCodeProvider>());
         services.AddSingleton<ICliProvider<CodebuddyOptions>>(serviceProvider => serviceProvider.GetRequiredService<CodebuddyProvider>());
         services.AddSingleton<ICliProvider<CopilotOptions>>(serviceProvider => serviceProvider.GetRequiredService<CopilotProvider>());
+        services.AddSingleton<ICopilotModelCapabilityReader>(serviceProvider => serviceProvider.GetRequiredService<CopilotProvider>());
         services.AddSingleton<ICliProvider<DeepAgentsOptions>>(serviceProvider => serviceProvider.GetRequiredService<DeepAgentsProvider>());
         services.AddSingleton<ICliProvider<GeminiOptions>>(serviceProvider => serviceProvider.GetRequiredService<GeminiProvider>());
         services.AddSingleton<ICliProvider<JunieOptions>>(serviceProvider => serviceProvider.GetRequiredService<JunieProvider>());

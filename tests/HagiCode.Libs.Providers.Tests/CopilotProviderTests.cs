@@ -1330,6 +1330,11 @@ public sealed class CopilotProviderTests
 
         public List<CopilotSdkRequest> CreateRequests { get; } = [];
 
+        public Task<IReadOnlyList<CopilotSdkModelInfo>> ListModelsAsync(
+            CopilotSdkRequest request,
+            CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
         public Task<ICopilotSdkRuntime> CreateRuntimeAsync(
             CopilotSdkRequest request,
             CancellationToken cancellationToken = default)
@@ -1400,6 +1405,9 @@ public sealed class CopilotProviderTests
 
         public Task<ICopilotSdkSession> ResumeSessionAsync(string sessionId, ResumeSessionConfig config, CancellationToken cancellationToken)
             => throw new InvalidOperationException(resumeErrorMessage);
+
+        public Task<IReadOnlyList<CopilotSdkModelInfo>> ListModelsAsync(CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<CopilotSdkModelInfo>>([]);
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
@@ -1578,6 +1586,9 @@ public sealed class CopilotProviderTests
                 return Task.FromResult<ICopilotSdkSession>(new ControlledCopilotSdkSession(sessionId, owner._promptHandler, invocation.ObservedEnvironment));
             }
 
+            public Task<IReadOnlyList<CopilotSdkModelInfo>> ListModelsAsync(CancellationToken cancellationToken)
+                => Task.FromResult<IReadOnlyList<CopilotSdkModelInfo>>([]);
+
             public ValueTask DisposeAsync() => ValueTask.CompletedTask;
         }
 
@@ -1666,6 +1677,9 @@ public sealed class CopilotProviderTests
                 owner.ResumeAttemptCount++;
                 return Task.FromException<ICopilotSdkSession>(resumeFailure);
             }
+
+            public Task<IReadOnlyList<CopilotSdkModelInfo>> ListModelsAsync(CancellationToken cancellationToken)
+                => Task.FromResult<IReadOnlyList<CopilotSdkModelInfo>>([]);
 
             public ValueTask DisposeAsync() => ValueTask.CompletedTask;
         }

@@ -127,11 +127,18 @@ public sealed record CopilotOptions
     public static readonly TimeSpan DefaultQuestionTimeout = TimeSpan.FromMinutes(30);
 
     /// <summary>
-    /// Formats the options without exposing <see cref="GitHubToken" /> or <see cref="EnvironmentVariables" />.
+    /// Gets or sets the images sent with the prompt as inline blob attachments on the single send of the run. The list is
+    /// empty by default, and an empty list leaves the send exactly as it was before this property existed. Each image is
+    /// validated before any SDK client starts; see <see cref="CopilotImageAttachment" />.
+    /// </summary>
+    public IReadOnlyList<CopilotImageAttachment> Images { get; init; } = [];
+
+    /// <summary>
+    /// Formats the options without exposing <see cref="GitHubToken" />, <see cref="EnvironmentVariables" /> or image bytes.
     /// </summary>
     public override string ToString()
     {
-        return $"CopilotOptions {{ ExecutablePath = {ExecutablePath}, Model = {Model}, WorkingDirectory = {WorkingDirectory}, SessionId = {SessionId}, Timeout = {Timeout}, IdleTimeout = {IdleTimeout}, StartupTimeout = {StartupTimeout}, AuthSource = {AuthSource}, GitHubToken = {(string.IsNullOrEmpty(GitHubToken) ? "null" : "set")}, CliUrl = {CliUrl}, NoAskUser = {NoAskUser}, UserInputHandler = {(UserInputHandler is null ? "null" : "set")}, QuestionTimeout = {QuestionTimeout} }}";
+        return $"CopilotOptions {{ ExecutablePath = {ExecutablePath}, Model = {Model}, WorkingDirectory = {WorkingDirectory}, SessionId = {SessionId}, Timeout = {Timeout}, IdleTimeout = {IdleTimeout}, StartupTimeout = {StartupTimeout}, AuthSource = {AuthSource}, GitHubToken = {(string.IsNullOrEmpty(GitHubToken) ? "null" : "set")}, CliUrl = {CliUrl}, NoAskUser = {NoAskUser}, UserInputHandler = {(UserInputHandler is null ? "null" : "set")}, QuestionTimeout = {QuestionTimeout}, Images = {Images.Count} }}";
     }
 }
 

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Threading.Channels;
 using GitHub.Copilot;
 
@@ -191,6 +192,33 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
         return messages.Any(IsResumeFailure);
     }
 
+    public async Task<IReadOnlyList<CopilotSdkModelInfo>> ListModelsAsync(
+        CopilotSdkRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var clientOptions = BuildClientOptions(request);
+        using var startupCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        startupCancellationTokenSource.CancelAfter(request.StartupTimeout);
+
+        var environmentLease = await _environmentLeaseCoordinator.AcquireAsync(request, cancellationToken).ConfigureAwait(false);
+        ICopilotSdkClient? client = null;
+        try
+        {
+            client = _clientFactory.Create(clientOptions);
+            return await client.ListModelsAsync(startupCancellationTokenSource.Token).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (client is not null)
+            {
+                await client.DisposeAsync().ConfigureAwait(false);
+            }
+
+            await environmentLease.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
     private async Task<ICopilotSdkSession> ResumeWithRetryAsync(
         ICopilotSdkClient client,
         CopilotSdkRequest request,
@@ -367,7 +395,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
                 events.Add(new CopilotSdkStreamEvent(
                     CopilotSdkStreamEventType.RawEvent,
                     SessionId: sessionId,
-                    Content: SerializeForDiagnostics(evt),
+                    Content: SerializeEventForDiagnostics(evt),
                     RawEventType: evt.GetType().Name));
                 break;
         }
@@ -527,6 +555,109 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
         }
     }
 
+    // Raw events are serialized whole, and a user.message echo repeats the sent attachments, so image blob data is replaced
+    // before the text leaves the gateway. An event without image blobs keeps its original serialization.
+    private static string? SerializeEventForDiagnostics(object value)
+    {
+        JsonNode? node;
+        try
+        {
+            node = JsonSerializer.SerializeToNode(value);
+        }
+        catch
+        {
+            return SerializeForDiagnostics(value);
+        }
+
+        return RedactBlobAttachmentData(node) ? JsonSerializer.Serialize(node) : SerializeForDiagnostics(value);
+    }
+
+    // A blob attachment is recognized by its type, or by its place in an attachments list, because the SDK's echo does not
+    // always carry the type discriminator on the attachment itself.
+    private static bool RedactBlobAttachmentData(JsonNode? node, bool inAttachments = false)
+    {
+        switch (node)
+        {
+            case JsonArray array:
+            {
+                var redacted = false;
+                foreach (var item in array)
+                {
+                    redacted |= RedactBlobAttachmentData(item, inAttachments);
+                }
+
+                return redacted;
+            }
+
+            case JsonObject obj:
+            {
+                var redacted = false;
+                if ((inAttachments || IsBlobAttachment(obj))
+                    && FindPropertyName(obj, "data") is { } dataName
+                    && obj[dataName] is JsonValue dataValue
+                    && dataValue.TryGetValue<string>(out var data))
+                {
+                    obj[dataName] = $"[redacted base64 image data, {data.Length} characters]";
+                    redacted = true;
+                }
+
+                foreach (var child in obj)
+                {
+                    redacted |= RedactBlobAttachmentData(
+                        child.Value,
+                        string.Equals(child.Key, "attachments", StringComparison.OrdinalIgnoreCase));
+                }
+
+                return redacted;
+            }
+
+            default:
+                return false;
+        }
+    }
+
+    private static bool IsBlobAttachment(JsonObject obj)
+    {
+        return FindPropertyName(obj, "type") is { } typeName
+               && obj[typeName] is JsonValue typeValue
+               && typeValue.TryGetValue<string>(out var type)
+               && string.Equals(type, "blob", StringComparison.Ordinal);
+    }
+
+    private static string? FindPropertyName(JsonObject obj, string name)
+    {
+        return obj
+            .Select(static entry => entry.Key)
+            .FirstOrDefault(key => string.Equals(key, name, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static MessageOptions BuildMessageOptions(CopilotSdkRequest request)
+    {
+        return new MessageOptions
+        {
+            Prompt = request.Prompt,
+            Attachments = BuildAttachments(request.Images)
+        };
+    }
+
+    // Images travel only on the one send of a run, as inline blobs. The base64 string exists only for this call.
+    private static List<UserMessageAttachment>? BuildAttachments(IReadOnlyList<CopilotImageAttachment>? images)
+    {
+        if (images is null or { Count: 0 })
+        {
+            return null;
+        }
+
+        return images
+            .Select(static image => (UserMessageAttachment)new UserMessageAttachmentBlob
+            {
+                Data = Convert.ToBase64String(image.Data.Span),
+                MimeType = image.MediaType,
+                DisplayName = image.FileName ?? "image"
+            })
+            .ToList();
+    }
+
     internal sealed record SessionEventDispatchResult(bool SawDelta, IReadOnlyList<CopilotSdkStreamEvent> Events);
 
     private sealed class PooledCopilotSdkRuntime(
@@ -612,7 +743,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
                 // With a user-input handler the SDK waits without a limit; the request deadline is enforced by the watchdog so
                 // that time spent waiting for an answer does not count against it.
                 var sendTask = session.SendAndWaitAsync(
-                    new MessageOptions { Prompt = request.Prompt },
+                    BuildMessageOptions(request),
                     pendingQuestions is null ? request.Timeout : Timeout.InfiniteTimeSpan,
                     requestCancellationTokenSource.Token);
 

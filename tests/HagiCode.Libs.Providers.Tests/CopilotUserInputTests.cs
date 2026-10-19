@@ -952,6 +952,9 @@ public sealed class CopilotUserInputTests
         public Task<ICopilotSdkRuntime> CreateRuntimeAsync(CopilotSdkRequest request, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 
+        public Task<IReadOnlyList<CopilotSdkModelInfo>> ListModelsAsync(CopilotSdkRequest request, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
         public async IAsyncEnumerable<CopilotSdkStreamEvent> SendPromptAsync(
             CopilotSdkRequest request,
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -1006,6 +1009,9 @@ public sealed class CopilotUserInputTests
 
                 return Task.FromResult<ICopilotSdkSession>(new ScriptedSession(sessionId, owner.Script, config.OnUserInputRequest));
             }
+
+            public Task<IReadOnlyList<CopilotSdkModelInfo>> ListModelsAsync(CancellationToken cancellationToken)
+                => Task.FromResult<IReadOnlyList<CopilotSdkModelInfo>>([]);
 
             public ValueTask DisposeAsync() => ValueTask.CompletedTask;
         }

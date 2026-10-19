@@ -7,6 +7,8 @@ internal interface ICopilotSdkClient : IAsyncDisposable
     Task<ICopilotSdkSession> CreateSessionAsync(SessionConfig config, CancellationToken cancellationToken);
 
     Task<ICopilotSdkSession> ResumeSessionAsync(string sessionId, ResumeSessionConfig config, CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<CopilotSdkModelInfo>> ListModelsAsync(CancellationToken cancellationToken);
 }
 
 internal interface ICopilotSdkSession : IAsyncDisposable
@@ -41,6 +43,20 @@ internal sealed class GitHubCopilotSdkClientFactory : ICopilotSdkClientFactory
         public async Task<ICopilotSdkSession> ResumeSessionAsync(string sessionId, ResumeSessionConfig config, CancellationToken cancellationToken)
         {
             return new CopilotSdkSessionAdapter(await client.ResumeSessionAsync(sessionId, config, cancellationToken).ConfigureAwait(false));
+        }
+
+        public async Task<IReadOnlyList<CopilotSdkModelInfo>> ListModelsAsync(CancellationToken cancellationToken)
+        {
+            await client.StartAsync(cancellationToken).ConfigureAwait(false);
+            var models = await client.ListModelsAsync(cancellationToken).ConfigureAwait(false);
+            return models
+                .Select(static model => new CopilotSdkModelInfo(
+                    model.Id,
+                    model.Capabilities?.Supports?.Vision,
+                    model.Capabilities?.Limits?.Vision?.MaxPromptImages,
+                    model.Capabilities?.Limits?.Vision?.MaxPromptImageSize,
+                    model.Capabilities?.Limits?.Vision?.SupportedMediaTypes?.ToList()))
+                .ToList();
         }
 
         public ValueTask DisposeAsync() => client.DisposeAsync();

@@ -10,9 +10,12 @@ namespace HagiCode.Libs.Providers.Copilot;
 /// <summary>
 /// Implements GitHub Copilot integration through the SDK-managed Copilot session path.
 /// </summary>
-public class CopilotProvider : ICliProvider<CopilotOptions>
+public class CopilotProvider : ICliProvider<CopilotOptions>, ICopilotModelCapabilityReader
 {
     private static readonly string[] DefaultExecutableCandidates = ["copilot"];
+
+    // ListModels does not start a session, so this text is never sent. BuildSdkRequest only requires a non-empty prompt.
+    private const string CapabilityReadPlaceholderPrompt = "Copilot model capability read; no prompt is sent.";
 
     private readonly CliExecutableResolver _executableResolver;
     private readonly CliProcessManager _processManager;
@@ -167,7 +170,8 @@ public class CopilotProvider : ICliProvider<CopilotOptions>
             CliArgs: cliArgResult.CliArgs,
             EnvironmentVariables: BuildEnvironmentVariables(options, runtimeEnvironment),
             UserInputHandler: options.UserInputHandler,
-            QuestionTimeout: options.QuestionTimeout);
+            QuestionTimeout: options.QuestionTimeout,
+            Images: options.Images);
     }
 
     internal virtual IReadOnlyDictionary<string, string?> BuildEnvironmentVariables(
@@ -238,7 +242,89 @@ public class CopilotProvider : ICliProvider<CopilotOptions>
         {
             throw new InvalidOperationException("CopilotOptions.QuestionTimeout must be greater than zero or Timeout.InfiniteTimeSpan.");
         }
+
+        ValidateImages(options.Images);
     }
+
+    // The messages name the position and the media type only, never the bytes.
+    private static void ValidateImages(IReadOnlyList<CopilotImageAttachment> images)
+    {
+        for (var index = 0; index < images.Count; index++)
+        {
+            var image = images[index];
+            if (image is null)
+            {
+                throw new InvalidOperationException($"CopilotOptions.Images[{index}] is null.");
+            }
+
+            if (image.Data.IsEmpty)
+            {
+                throw new InvalidOperationException($"CopilotOptions.Images[{index}] has no data.");
+            }
+
+            if (string.IsNullOrWhiteSpace(image.MediaType) || !image.MediaType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException($"CopilotOptions.Images[{index}] has media type '{image.MediaType}', which is not an image media type.");
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<CopilotModelImageCapability?> GetImageCapabilityAsync(
+        CopilotOptions options,
+        string? model,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        if (string.IsNullOrWhiteSpace(model))
+        {
+            return null;
+        }
+
+        try
+        {
+            var runtimeEnvironment = await ResolveRuntimeEnvironmentAsync(cancellationToken).ConfigureAwait(false);
+            var executablePath = ResolveExecutablePath(options, runtimeEnvironment);
+            if (executablePath is null)
+            {
+                return null;
+            }
+
+            var request = BuildSdkRequest(
+                options with { Model = model, Images = [] },
+                CapabilityReadPlaceholderPrompt,
+                executablePath,
+                runtimeEnvironment);
+            var models = await _gateway.ListModelsAsync(request, cancellationToken).ConfigureAwait(false);
+            return MapImageCapability(models, model);
+        }
+        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            return null;
+        }
+    }
+
+    private static CopilotModelImageCapability? MapImageCapability(IReadOnlyList<CopilotSdkModelInfo> models, string model)
+    {
+        var entry = models.FirstOrDefault(candidate => string.Equals(candidate.Id, model, StringComparison.Ordinal));
+        if (entry?.SupportsVision is not { } supportsVision)
+        {
+            return null;
+        }
+
+        if (!supportsVision)
+        {
+            return new CopilotModelImageCapability(SupportsVision: false);
+        }
+
+        return new CopilotModelImageCapability(
+            SupportsVision: true,
+            MaxPromptImages: PositiveOrNull(entry.MaxPromptImages),
+            MaxPromptImageSize: PositiveOrNull(entry.MaxPromptImageSize),
+            SupportedMediaTypes: entry.SupportedMediaTypes is { Count: > 0 } mediaTypes ? mediaTypes : null);
+    }
+
+    private static int? PositiveOrNull(int? value) => value is > 0 ? value : null;
 
     private async Task<IReadOnlyDictionary<string, string?>> ResolveRuntimeEnvironmentAsync(CancellationToken cancellationToken)
     {

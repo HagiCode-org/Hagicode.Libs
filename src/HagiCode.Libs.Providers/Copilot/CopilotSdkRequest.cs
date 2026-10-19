@@ -15,4 +15,5 @@ internal sealed record CopilotSdkRequest(
     IReadOnlyList<string> CliArgs,
     IReadOnlyDictionary<string, string?> EnvironmentVariables,
     Func<CopilotUserInputRequest, CancellationToken, Task<CopilotUserInputResponse?>>? UserInputHandler = null,
-    TimeSpan QuestionTimeout = default);
+    TimeSpan QuestionTimeout = default,
+    IReadOnlyList<CopilotImageAttachment>? Images = null);

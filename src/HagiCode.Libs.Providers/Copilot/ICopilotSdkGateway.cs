@@ -9,4 +9,8 @@ internal interface ICopilotSdkGateway
     IAsyncEnumerable<CopilotSdkStreamEvent> SendPromptAsync(
         CopilotSdkRequest request,
         CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<CopilotSdkModelInfo>> ListModelsAsync(
+        CopilotSdkRequest request,
+        CancellationToken cancellationToken = default);
 }
