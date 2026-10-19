@@ -1,0 +1,26 @@
+[
+  {
+    "t": 0.0,
+    "msg": {
+      "type": "user",
+      "message": {
+        "role": "user",
+        "content": "Run this exact Bash command and nothing else: sleep 25 && echo done-A. After it finishes, reply with the word FINISHED."
+      },
+      "session_id": ""
+    }
+  },
+  {
+    "t": 6.463,
+    "msg": {
+      "type": "user",
+      "message": {
+        "role": "user",
+        "content": "STEER: also end your final reply with the word BANANA."
+      },
+      "session_id": "",
+      "uuid": "steer-bash-1",
+      "priority": "next"
+    }
+  }
+]

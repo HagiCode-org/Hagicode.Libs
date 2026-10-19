@@ -11,6 +11,7 @@
     <None Include="Fixtures\Codex\AppServer\*.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Fixtures\OpenCode\v2.0.32\*" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Fixtures\ToolCalls\**\*.jsonl" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Fixtures\ClaudeCode\steer\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <!-- Copied fixtures of a renamed or removed provider directory would otherwise stay in the output and keep the coverage check green. -->

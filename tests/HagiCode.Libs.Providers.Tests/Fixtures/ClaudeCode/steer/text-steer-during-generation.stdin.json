@@ -1,0 +1,26 @@
+[
+  {
+    "t": 0.0,
+    "msg": {
+      "type": "user",
+      "message": {
+        "role": "user",
+        "content": "Write a long essay of at least 600 words about rivers. No tools."
+      },
+      "session_id": ""
+    }
+  },
+  {
+    "t": 2.0,
+    "msg": {
+      "type": "user",
+      "message": {
+        "role": "user",
+        "content": "STEER: switch the topic to lakes in your remaining text."
+      },
+      "session_id": "",
+      "uuid": "steer-text-1",
+      "priority": "next"
+    }
+  }
+]

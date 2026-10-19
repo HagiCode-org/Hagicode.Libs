@@ -1,0 +1,26 @@
+[
+  {
+    "t": 0.0,
+    "msg": {
+      "type": "user",
+      "message": {
+        "role": "user",
+        "content": "Reply with the single word OK. No tools."
+      },
+      "session_id": ""
+    }
+  },
+  {
+    "t": 3.054,
+    "msg": {
+      "type": "user",
+      "message": {
+        "role": "user",
+        "content": "STEER: now reply with the single word LATE."
+      },
+      "session_id": "",
+      "uuid": "steer-late-1",
+      "priority": "next"
+    }
+  }
+]
