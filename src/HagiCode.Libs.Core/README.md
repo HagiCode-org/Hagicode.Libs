@@ -79,6 +79,8 @@ Console.WriteLine(result.IsFound ? $"{result.ResolvedPath} {result.Version}" : "
 
 The [discovery guide](https://github.com/HagiCode-org/Hagicode.Libs/blob/main/docs/agent-cli-discovery-guide.md) covers the resolution order, install-kind attribution, and the mapping from the backend's discovery symbols.
 
+On Windows, `ClaudeCode`, `Copilot`, and `Codex` resolve only to a native `.exe` (or the packaged binary of their npm package). When only a command script exists, the result is not found with `NotFoundReason = NativeExecutableMissing`, and `SkippedCommandScripts` lists the scripts. A `.cmd` or `.bat` is started through `cmd.exe` only when it is the resolved path of an agent that allows it, or when a caller configures it explicitly. Its arguments are checked before launch, and an argument that could change what `cmd.exe` runs is rejected with `CliCommandScriptArgumentException`, which never shows the value. The [discovery guide](https://github.com/HagiCode-org/Hagicode.Libs/blob/main/docs/agent-cli-discovery-guide.md#windows-executable-policy) has the per-agent table and the rules.
+
 ## Adoption boundaries
 
 - Use `CliExecutionFacade` when you want typed requests, policy evaluation, normalized diagnostics, and structured success/failure/timeout handling.
