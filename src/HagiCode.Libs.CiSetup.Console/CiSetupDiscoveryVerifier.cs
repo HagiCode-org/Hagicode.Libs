@@ -20,7 +20,10 @@ public enum CiSetupVerdict
     VersionMismatch,
 
     /// <summary>The observed install kind differs from the expected install kind.</summary>
-    InstallKindMismatch
+    InstallKindMismatch,
+
+    /// <summary>The resolved path does not end in the expected file extension.</summary>
+    ExtensionMismatch
 }
 
 /// <summary>
@@ -29,10 +32,12 @@ public enum CiSetupVerdict
 /// <param name="ExpectedVersion">The exact version to assert, or <see langword="null" /> to accept any well-formed version.</param>
 /// <param name="ExpectedInstallKind">The install kind to assert, or <see langword="null" /> to skip the assertion.</param>
 /// <param name="RequireWellKnownSource">Whether the executable must come from a well-known location (used for off-PATH lanes).</param>
+/// <param name="ExpectedExtension">The file extension the resolved path must end in, such as <c>.exe</c>, or <see langword="null" /> to skip the assertion.</param>
 public sealed record CiSetupExpectations(
     string? ExpectedVersion,
     CliInstallKind? ExpectedInstallKind,
-    bool RequireWellKnownSource);
+    bool RequireWellKnownSource,
+    string? ExpectedExtension = null);
 
 /// <summary>
 /// The result of evaluating a discovery result against expectations.
@@ -52,6 +57,7 @@ public sealed record CiSetupVerification(CiSetupVerdict Verdict, string Summary,
         CiSetupVerdict.VersionUnavailable => 4,
         CiSetupVerdict.VersionMismatch => 5,
         CiSetupVerdict.InstallKindMismatch => 6,
+        CiSetupVerdict.ExtensionMismatch => 7,
         _ => 1
     };
 }
@@ -89,6 +95,14 @@ public static class CiSetupDiscoveryVerifier
             return Fail(
                 CiSetupVerdict.NotFound,
                 $"not found: resolved through {result.Source}, but the install directory was removed from PATH and only the well-known location was expected.");
+        }
+
+        if (expectations.ExpectedExtension is { } expectedExtension
+            && !string.Equals(Path.GetExtension(result.ResolvedPath), expectedExtension, StringComparison.OrdinalIgnoreCase))
+        {
+            return Fail(
+                CiSetupVerdict.ExtensionMismatch,
+                $"extension mismatch: expected {expectedExtension}, resolved {result.ResolvedPath}.");
         }
 
         if (string.IsNullOrWhiteSpace(result.Version))

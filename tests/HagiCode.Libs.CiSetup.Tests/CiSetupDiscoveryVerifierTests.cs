@@ -24,6 +24,49 @@ public sealed class CiSetupDiscoveryVerifierTests
     }
 
     [Test]
+    public void Passes_when_the_resolved_path_ends_in_the_expected_extension_case_insensitively()
+    {
+        var result = new CliDiscoveryResult("ClaudeCode")
+        {
+            ResolvedPath = @"C:\Users\u\AppData\Roaming\npm\node_modules\@anthropic-ai\claude-code-win32-x64\claude.EXE",
+            Source = CliDiscoverySource.Path,
+            InstallKind = CliInstallKind.Npm,
+            Version = "2.1.168",
+            VersionFailure = CliVersionProbeFailure.None
+        };
+
+        var verification = CiSetupDiscoveryVerifier.Evaluate(
+            ClaudeCode,
+            NpmStrategy,
+            new CiSetupExpectations(null, null, RequireWellKnownSource: false, ExpectedExtension: ".exe"),
+            result);
+
+        verification.Verdict.ShouldBe(CiSetupVerdict.Passed);
+    }
+
+    [Test]
+    public void Reports_extension_mismatch_when_a_command_script_is_resolved_for_a_native_lane()
+    {
+        var result = new CliDiscoveryResult("ClaudeCode")
+        {
+            ResolvedPath = @"C:\Users\u\AppData\Roaming\npm\claude.cmd",
+            Source = CliDiscoverySource.Path,
+            InstallKind = CliInstallKind.Npm,
+            Version = "2.1.168",
+            VersionFailure = CliVersionProbeFailure.None
+        };
+
+        var verification = CiSetupDiscoveryVerifier.Evaluate(
+            ClaudeCode,
+            NpmStrategy,
+            new CiSetupExpectations(null, null, RequireWellKnownSource: false, ExpectedExtension: ".exe"),
+            result);
+
+        verification.Verdict.ShouldBe(CiSetupVerdict.ExtensionMismatch);
+        verification.ExitCode.ShouldBe(7);
+    }
+
+    [Test]
     public void Reports_not_found_when_nothing_resolves()
     {
         var verification = Evaluate(new CliDiscoveryResult("ClaudeCode"), NativeStrategy);

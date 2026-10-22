@@ -19,6 +19,16 @@ public sealed class CiSetupArgumentParserTests
     }
 
     [Test]
+    public void Parse_reads_expect_extension()
+    {
+        var parsed = CiSetupArgumentParser.Parse(
+            ["--verify-discovery", "--provider", "Copilot", "--expect-extension", ".exe"]);
+
+        parsed.ExpectExtension.ShouldBe(".exe");
+        parsed.Errors.ShouldBeEmpty();
+    }
+
+    [Test]
     public void Parse_reads_provider_strategy_and_expectations()
     {
         var parsed = CiSetupArgumentParser.Parse(

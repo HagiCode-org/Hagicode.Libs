@@ -75,7 +75,7 @@ public sealed class CiSetupRunner(CiSetupEnvironment environment)
         _environment.Error.WriteLine("  --install --provider <name> --strategy <npm|native|homebrew|winget>");
         _environment.Error.WriteLine("             Install one provider through one install strategy");
         _environment.Error.WriteLine("  --verify-discovery [--provider <name>] [--strategy <kind>] [--expect-version <v>]");
-        _environment.Error.WriteLine("                     [--expect-install-kind <kind>] [--without-install-dir-on-path]");
+        _environment.Error.WriteLine("                     [--expect-install-kind <kind>] [--expect-extension <.ext>] [--without-install-dir-on-path]");
         _environment.Error.WriteLine("             Resolve each CLI through discovery and assert path, source, kind, and version");
     }
 
@@ -211,7 +211,7 @@ public sealed class CiSetupRunner(CiSetupEnvironment environment)
 
         foreach (var descriptor in CliInstallRegistry.PubliclyInstallable)
         {
-            var path = resolver.ResolveFirstAvailablePath(descriptor.ExecutableCandidates);
+            var path = resolver.ResolveProviderExecutable(descriptor.ProviderName, descriptor.ExecutableCandidates).ResolvedPath;
             if (path is not null)
             {
                 _environment.Output.WriteLine($"  [OK] {descriptor.ProviderName} found at: {path} (candidates: {string.Join(", ", descriptor.ExecutableCandidates)})");
@@ -234,9 +234,10 @@ public sealed class CiSetupRunner(CiSetupEnvironment environment)
     private async Task<int> VerifyDiscoveryAsync(CiSetupArguments parsed, CancellationToken cancellationToken)
     {
         if (parsed.Provider is null && (parsed.Strategy is not null || parsed.ExpectVersion is not null
-                                        || parsed.ExpectInstallKind is not null || parsed.WithoutInstallDirOnPath))
+                                        || parsed.ExpectInstallKind is not null || parsed.ExpectExtension is not null
+                                        || parsed.WithoutInstallDirOnPath))
         {
-            _environment.Error.WriteLine($"  [FAIL] --strategy, --expect-version, --expect-install-kind, and --without-install-dir-on-path require {ProviderFlag}.");
+            _environment.Error.WriteLine($"  [FAIL] --strategy, --expect-version, --expect-install-kind, --expect-extension, and --without-install-dir-on-path require {ProviderFlag}.");
             return 1;
         }
 
@@ -348,7 +349,8 @@ public sealed class CiSetupRunner(CiSetupEnvironment environment)
         var expectations = new CiSetupExpectations(
             parsed.ExpectVersion,
             expectedKind,
-            RequireWellKnownSource: parsed.WithoutInstallDirOnPath);
+            RequireWellKnownSource: parsed.WithoutInstallDirOnPath,
+            ExpectedExtension: parsed.ExpectExtension);
         var verification = CiSetupDiscoveryVerifier.Evaluate(descriptor, strategy, expectations, result);
 
         if (result.IsFound)

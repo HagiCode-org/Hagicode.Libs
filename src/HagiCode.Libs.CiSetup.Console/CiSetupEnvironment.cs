@@ -31,6 +31,11 @@ public sealed record CiSetupEnvironment(
     Func<string?> ResolveNpm)
 {
     /// <summary>
+    /// The npm executable names probed on the host, in order. A native <c>.exe</c> is tried before the <c>.cmd</c> shim.
+    /// </summary>
+    internal static readonly string[] NpmExecutableCandidates = ["npm", "npm.exe", "npm.cmd", "npm.bat"];
+
+    /// <summary>
     /// Creates the environment used by the real console.
     /// </summary>
     /// <param name="output">Standard output writer.</param>
@@ -46,7 +51,7 @@ public sealed record CiSetupEnvironment(
             (descriptor, options, cancellationToken) => discovery.DiscoverAsync(descriptor, options, cancellationToken),
             CurrentPlatform(),
             ReadProcessEnvironment(),
-            static () => new CliExecutableResolver().ResolveFirstAvailablePath(["npm", "npm.cmd", "npm.exe", "npm.bat"]));
+            static () => new CliExecutableResolver().ResolveFirstAvailablePath(NpmExecutableCandidates));
     }
 
     private static CliPlatform CurrentPlatform()

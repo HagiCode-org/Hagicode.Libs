@@ -26,6 +26,9 @@ public sealed record CiSetupArguments
     /// <summary>Gets the explicit expected install kind from <c>--expect-install-kind</c>.</summary>
     public string? ExpectInstallKind { get; init; }
 
+    /// <summary>Gets the expected file extension of the resolved path from <c>--expect-extension</c>, such as <c>.exe</c>.</summary>
+    public string? ExpectExtension { get; init; }
+
     /// <summary>Gets a value indicating whether <c>--without-install-dir-on-path</c> was supplied.</summary>
     public bool WithoutInstallDirOnPath { get; init; }
 
@@ -55,6 +58,7 @@ public static class CiSetupArgumentParser
         string? strategy = null;
         string? expectVersion = null;
         string? expectInstallKind = null;
+        string? expectExtension = null;
         var install = false;
         var verify = false;
         var verifyDiscovery = false;
@@ -89,6 +93,9 @@ public static class CiSetupArgumentParser
                 case "--expect-install-kind":
                     expectInstallKind = ReadValue(args, ref index, token, errors);
                     break;
+                case "--expect-extension":
+                    expectExtension = ReadValue(args, ref index, token, errors);
+                    break;
             }
         }
 
@@ -101,6 +108,7 @@ public static class CiSetupArgumentParser
             Strategy = strategy,
             ExpectVersion = expectVersion,
             ExpectInstallKind = expectInstallKind,
+            ExpectExtension = expectExtension,
             WithoutInstallDirOnPath = withoutInstallDir,
             Errors = errors
         };
