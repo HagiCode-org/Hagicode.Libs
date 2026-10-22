@@ -44,7 +44,7 @@ The sample is compiled and run by `Readme_usage_sample_runs_as_documented` in `t
 | Current branch | `GetCurrentBranchAsync` | Read from `HEAD`. Detached returns `HEAD`. Unborn returns its name. |
 | Branch exists | `BranchExistsAsync` | Local branches, and remote-tracking branches by short name. |
 | Branch name | `IsBranchNameValidAsync` | `git check-ref-format refs/heads/<name>`. |
-| Dirty probe | `ProbeDirtyAsync` | Boolean and branch only, with no file list. |
+| Dirty probe | `ProbeDirtyAsync` | One `git status` process: boolean, branch and upstream tracking, with no file list. Inconclusive when git cannot finish. |
 | Status | `GetStatusAsync` | `git status --porcelain=2 -z`: staged, unstaged, untracked, renamed, conflicted. Ignored paths are omitted. |
 | Stage / unstage | `StageAsync`, `UnstageAsync` | One path. Paths outside the repository are rejected. |
 | Stage all / unstage all | `StageAllAsync`, `UnstageAllAsync` | Return the number of paths targeted. |
