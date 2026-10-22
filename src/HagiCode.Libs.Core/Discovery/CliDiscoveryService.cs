@@ -72,10 +72,19 @@ public sealed class CliDiscoveryService
         var probedLocations = BuildProbedLocations(options, executableNames, environment, strategies, comparer);
 
         var candidates = CollectCandidates(options, executableNames, environment, strategies, comparer);
+        var skippedScripts = new List<string>();
+        candidates = ApplyWindowsExecutablePolicy(descriptor, platform, environment, candidates, comparer, skippedScripts);
         candidates = ApplyProviderPolicy(descriptor.ProviderName, options, candidates, comparer);
         if (candidates.Count == 0)
         {
-            return new CliDiscoveryResult(descriptor.ProviderName) { ProbedLocations = probedLocations };
+            return new CliDiscoveryResult(descriptor.ProviderName)
+            {
+                ProbedLocations = probedLocations,
+                NotFoundReason = skippedScripts.Count > 0
+                    ? CliExecutableNotFoundReason.NativeExecutableMissing
+                    : CliExecutableNotFoundReason.NotInstalled,
+                SkippedCommandScripts = skippedScripts,
+            };
         }
 
         var attributed = candidates
@@ -87,7 +96,7 @@ public sealed class CliDiscoveryService
 
         if (!options.VerifyVersion)
         {
-            return BuildResult(descriptor, attributed, winnerIndex: 0, version: null, versionFailure: null, failures: new CliVersionProbeFailure?[attributed.Length], probedLocations);
+            return BuildResult(descriptor, attributed, winnerIndex: 0, version: null, versionFailure: null, failures: new CliVersionProbeFailure?[attributed.Length], probedLocations, skippedScripts);
         }
 
         var probe = new CliVersionProbe(_processManager, options.VersionProbeTimeout);
@@ -103,12 +112,12 @@ public sealed class CliDiscoveryService
             failures[index] = probeResult.Failure;
             if (!string.IsNullOrWhiteSpace(probeResult.Version))
             {
-                return BuildResult(descriptor, attributed, index, probeResult.Version, CliVersionProbeFailure.None, failures, probedLocations);
+                return BuildResult(descriptor, attributed, index, probeResult.Version, CliVersionProbeFailure.None, failures, probedLocations, skippedScripts);
             }
         }
 
         // Every probe failed: the first candidate is reported as the path, and the last attempt decides the category.
-        return BuildResult(descriptor, attributed, winnerIndex: 0, version: null, versionFailure: failures[^1], failures, probedLocations);
+        return BuildResult(descriptor, attributed, winnerIndex: 0, version: null, versionFailure: failures[^1], failures, probedLocations, skippedScripts);
     }
 
     /// <summary>
@@ -270,6 +279,80 @@ public sealed class CliDiscoveryService
         }
     }
 
+    /// <summary>
+    /// Applies the Windows executable policy of a descriptor. Only command scripts found by the standard lookup or the install
+    /// directories are affected. An explicitly configured path is kept as given.
+    /// </summary>
+    private List<Candidate> ApplyWindowsExecutablePolicy(
+        CliInstallDescriptor descriptor,
+        CliPlatform platform,
+        IReadOnlyDictionary<string, string?> environment,
+        List<Candidate> candidates,
+        StringComparer comparer,
+        List<string> skippedScripts)
+    {
+        if (platform != CliPlatform.Windows || !CliExecutableResolver.HasWindowsPolicy(descriptor))
+        {
+            return candidates;
+        }
+
+        var scripts = candidates
+            .Where(static candidate => candidate.Source != CliDiscoverySource.Configured && !IsNativeExecutable(candidate.Path))
+            .ToList();
+        var requireNative = descriptor.WindowsExecutablePolicy == CliWindowsExecutablePolicy.RequireNative;
+        var result = requireNative
+            ? candidates.Where(candidate => !scripts.Contains(candidate)).ToList()
+            : candidates.ToList();
+
+        if (requireNative)
+        {
+            skippedScripts.AddRange(scripts.Select(static candidate => candidate.Path));
+        }
+
+        if (descriptor.PackagedBinaryLayout is not { } layout)
+        {
+            return result;
+        }
+
+        // A packaged binary is looked for beside every shim that was found, and in the npm global prefix.
+        var packaged = new List<Candidate>();
+        var seenPackaged = new HashSet<string>(comparer);
+        foreach (var script in scripts)
+        {
+            var directory = Path.GetDirectoryName(script.Path);
+            if (directory is not null && _executableResolver.FindPackagedBinary(layout, directory) is { } binary)
+            {
+                AddCandidate(packaged, seenPackaged, binary, script.Source);
+            }
+        }
+
+        foreach (var npmDirectory in _executableResolver.GetNpmPrefixDirectories(descriptor, environment))
+        {
+            if (_executableResolver.FindPackagedBinary(layout, npmDirectory) is { } binary)
+            {
+                AddCandidate(packaged, seenPackaged, binary, CliDiscoverySource.WellKnownLocation);
+            }
+        }
+
+        // A packaged binary is native, so it is listed with the native candidates. For a PreferNative agent it goes before the scripts.
+        var insertAt = requireNative
+            ? result.Count
+            : result.FindIndex(static candidate => candidate.Source != CliDiscoverySource.Configured && !IsNativeExecutable(candidate.Path));
+        if (insertAt < 0)
+        {
+            insertAt = result.Count;
+        }
+
+        var existing = result.Select(static candidate => candidate.Path).ToHashSet(comparer);
+        result.InsertRange(insertAt, packaged.Where(candidate => !existing.Contains(candidate.Path)));
+        return result;
+    }
+
+    private static bool IsNativeExecutable(string path)
+    {
+        return string.Equals(Path.GetExtension(path), ".exe", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static List<Candidate> ApplyProviderPolicy(
         string providerName,
         CliDiscoveryOptions options,
@@ -313,6 +396,12 @@ public sealed class CliDiscoveryService
         var separator = platform == CliPlatform.Windows ? '\\' : '/';
         var linkTarget = ResolveFinalLinkTarget(path);
 
+        // A packaged binary of an npm layout sits under node_modules/<platform package>, which the main-package check below does not match.
+        if (descriptor.PackagedBinaryLayout is { } layout && IsInsideLayoutPlatformPackage(path, layout, comparison))
+        {
+            return CliInstallKind.Npm;
+        }
+
         foreach (var applicable in strategies)
         {
             foreach (var directory in applicable.Directories)
@@ -332,6 +421,16 @@ public sealed class CliDiscoveryService
         }
 
         return CliInstallKind.Unknown;
+    }
+
+    private static bool IsInsideLayoutPlatformPackage(string path, CliPackagedBinaryLayout layout, StringComparison comparison)
+    {
+        return layout.Targets.Any(target =>
+        {
+            var segments = target.PlatformPackage.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            var marker = "node_modules" + Path.DirectorySeparatorChar + string.Join(Path.DirectorySeparatorChar, segments) + Path.DirectorySeparatorChar;
+            return path.Contains(marker, comparison);
+        });
     }
 
     private static bool IsNpmInstall(
@@ -509,7 +608,8 @@ public sealed class CliDiscoveryService
         string? version,
         CliVersionProbeFailure? versionFailure,
         IReadOnlyList<CliVersionProbeFailure?> failures,
-        IReadOnlyList<string> probedLocations)
+        IReadOnlyList<string> probedLocations,
+        IReadOnlyList<string> skippedScripts)
     {
         var winner = candidates[winnerIndex];
         var shadowed = new List<CliShadowedInstall>();
@@ -532,7 +632,8 @@ public sealed class CliDiscoveryService
             Version = version,
             VersionFailure = versionFailure,
             ProbedLocations = probedLocations,
-            ShadowedInstalls = shadowed
+            ShadowedInstalls = shadowed,
+            SkippedCommandScripts = skippedScripts
         };
     }
 

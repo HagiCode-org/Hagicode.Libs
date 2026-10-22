@@ -80,4 +80,15 @@ public sealed record CliDiscoveryResult(string ProviderName)
     /// Gets the other executables that matched but were not selected, in probe order.
     /// </summary>
     public IReadOnlyList<CliShadowedInstall> ShadowedInstalls { get; init; } = [];
+
+    /// <summary>
+    /// Gets why nothing was found. <see langword="null" /> when an executable was found.
+    /// <see cref="CliExecutableNotFoundReason.NativeExecutableMissing" /> means the agent requires its native executable on Windows and only command scripts exist.
+    /// </summary>
+    public CliExecutableNotFoundReason? NotFoundReason { get; init; }
+
+    /// <summary>
+    /// Gets the command scripts that were found but not selected because the agent requires its native executable, in probe order.
+    /// </summary>
+    public IReadOnlyList<string> SkippedCommandScripts { get; init; } = [];
 }
