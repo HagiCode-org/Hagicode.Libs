@@ -61,6 +61,7 @@ jobs:
             blocking: true
             install_dir: ''
             off_path: false
+            expect_extension: ''
           - lane: claude-npm
             os: macos-latest
             provider: ClaudeCode
@@ -69,6 +70,7 @@ jobs:
             blocking: true
             install_dir: ''
             off_path: false
+            expect_extension: ''
           - lane: claude-npm
             os: windows-latest
             provider: ClaudeCode
@@ -77,6 +79,7 @@ jobs:
             blocking: true
             install_dir: ''
             off_path: false
+            expect_extension: '.exe'
 
           # Claude Code, native installer. Non-blocking until a green run on each OS promotes it.
           - lane: claude-native
@@ -87,6 +90,7 @@ jobs:
             blocking: false
             install_dir: home-local-bin
             off_path: true
+            expect_extension: ''
           - lane: claude-native
             os: macos-latest
             provider: ClaudeCode
@@ -95,6 +99,7 @@ jobs:
             blocking: false
             install_dir: home-local-bin
             off_path: true
+            expect_extension: ''
           - lane: claude-native
             os: windows-latest
             provider: ClaudeCode
@@ -103,6 +108,7 @@ jobs:
             blocking: false
             install_dir: home-local-bin
             off_path: true
+            expect_extension: ''
 
           # Claude Code, package managers. Non-blocking: the cask has no documented pin, and the WinGet Links directory is unconfirmed.
           - lane: claude-homebrew
@@ -113,6 +119,7 @@ jobs:
             blocking: false
             install_dir: homebrew-bin
             off_path: true
+            expect_extension: ''
           - lane: claude-winget
             os: windows-latest
             provider: ClaudeCode
@@ -121,6 +128,7 @@ jobs:
             blocking: false
             install_dir: winget-links
             off_path: true
+            expect_extension: ''
 
           # Copilot and Codex, npm at their pinned versions (blocking).
           - lane: copilot-npm
@@ -131,6 +139,7 @@ jobs:
             blocking: true
             install_dir: ''
             off_path: false
+            expect_extension: ''
           - lane: copilot-npm
             os: macos-latest
             provider: Copilot
@@ -139,6 +148,7 @@ jobs:
             blocking: true
             install_dir: ''
             off_path: false
+            expect_extension: ''
           - lane: copilot-npm
             os: windows-latest
             provider: Copilot
@@ -147,6 +157,7 @@ jobs:
             blocking: true
             install_dir: ''
             off_path: false
+            expect_extension: '.exe'
           - lane: codex-npm
             os: ubuntu-latest
             provider: Codex
@@ -155,6 +166,7 @@ jobs:
             blocking: true
             install_dir: ''
             off_path: false
+            expect_extension: ''
           - lane: codex-npm
             os: macos-latest
             provider: Codex
@@ -163,6 +175,7 @@ jobs:
             blocking: true
             install_dir: ''
             off_path: false
+            expect_extension: ''
           - lane: codex-npm
             os: windows-latest
             provider: Codex
@@ -171,6 +184,7 @@ jobs:
             blocking: true
             install_dir: ''
             off_path: false
+            expect_extension: '.exe'
 
     defaults:
       run:
@@ -230,7 +244,8 @@ jobs:
         run: |
           dotnet run --project src/HagiCode.Libs.CiSetup.Console -- \
             --verify-discovery --provider "${{ matrix.provider }}" --strategy "${{ matrix.install_strategy }}" \
-            --expect-install-kind "${{ matrix.kind }}"
+            --expect-install-kind "${{ matrix.kind }}" \
+            ${{ matrix.expect_extension != '' && format('--expect-extension {0}', matrix.expect_extension) || '' }}
 
       - name: Verify discovery without the install directory on PATH
         if: matrix.off_path
