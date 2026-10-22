@@ -1,9 +1,19 @@
+using System.Globalization;
+
 namespace HagiCode.Libs.Git.Internal;
 
 /// <summary>The parsed output of <c>git status --porcelain=2 -z --branch</c>.</summary>
 /// <param name="Branch">The branch from <c># branch.head</c>, or <see langword="null" /> when detached.</param>
 /// <param name="Entries">Every reported path, in git's order.</param>
-internal sealed record PorcelainStatus(string? Branch, IReadOnlyList<GitStatusEntry> Entries);
+/// <param name="Upstream">The upstream from <c># branch.upstream</c>, or <see langword="null" /> when none is configured.</param>
+/// <param name="Ahead">The commit count from <c># branch.ab</c>, or <see langword="null" /> when git printed no counts (no upstream, or the upstream ref is gone).</param>
+/// <param name="Behind">The behind count from <c># branch.ab</c>, or <see langword="null" /> when git printed no counts.</param>
+internal sealed record PorcelainStatus(
+    string? Branch,
+    IReadOnlyList<GitStatusEntry> Entries,
+    string? Upstream = null,
+    int? Ahead = null,
+    int? Behind = null);
 
 /// <summary>
 /// Parses porcelain v2 output with NUL separators. Only machine formats are read, so the result does not depend on the
@@ -21,6 +31,9 @@ internal static class GitPorcelainV2Parser
         }
 
         string? branch = null;
+        string? upstream = null;
+        int? ahead = null;
+        int? behind = null;
         var entries = new List<GitStatusEntry>();
         var segments = output.Split(Nul, StringSplitOptions.RemoveEmptyEntries);
 
@@ -37,6 +50,15 @@ internal static class GitPorcelainV2Parser
                     {
                         branch = value;
                     }
+                }
+                else if (segment.StartsWith("# branch.upstream ", StringComparison.Ordinal))
+                {
+                    var value = segment["# branch.upstream ".Length..].Trim();
+                    upstream = value.Length > 0 ? value : null;
+                }
+                else if (segment.StartsWith("# branch.ab ", StringComparison.Ordinal))
+                {
+                    (ahead, behind) = ParseAheadBehind(segment["# branch.ab ".Length..]);
                 }
 
                 continue;
@@ -76,7 +98,21 @@ internal static class GitPorcelainV2Parser
             }
         }
 
-        return new PorcelainStatus(branch, entries);
+        return new PorcelainStatus(branch, entries, upstream, ahead, behind);
+    }
+
+    /// <summary>Reads <c>+ahead -behind</c>. Returns no counts when the value does not have that shape.</summary>
+    private static (int? Ahead, int? Behind) ParseAheadBehind(string value)
+    {
+        var parts = value.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length != 2 || parts[0][0] != '+' || parts[1][0] != '-')
+        {
+            return (null, null);
+        }
+
+        var parsedAhead = int.TryParse(parts[0].AsSpan(1), NumberStyles.None, CultureInfo.InvariantCulture, out var ahead);
+        var parsedBehind = int.TryParse(parts[1].AsSpan(1), NumberStyles.None, CultureInfo.InvariantCulture, out var behind);
+        return parsedAhead && parsedBehind ? (ahead, behind) : (null, null);
     }
 
     /// <summary>

@@ -25,11 +25,11 @@ public sealed class ProcessWorkloadTests : GitTestBase
         _traced = new GitClient(new GitClientOptions { EnvironmentVariables = variables });
     }
 
-    [TestCase("clean", new[] { "diff-index", "diff-files", "ls-files" })]
-    [TestCase("staged-only", new[] { "diff-index" })]
-    [TestCase("unstaged-only", new[] { "diff-index" })]  // diff-index HEAD also sees working-tree changes, so it settles the probe
-    [TestCase("untracked-only", new[] { "diff-index", "diff-files", "ls-files" })]
-    public async Task ProbeDirty_runs_the_cheapest_checks_and_stops_at_the_first_positive(string shape, string[] expected)
+    [TestCase("clean", new[] { "status" })]
+    [TestCase("staged-only", new[] { "status" })]
+    [TestCase("unstaged-only", new[] { "status" })]
+    [TestCase("untracked-only", new[] { "status" })]
+    public async Task ProbeDirty_runs_one_status_process_whatever_the_state(string shape, string[] expected)
     {
         var repository = NewRepositoryWithCommit();
         if (shape == "staged-only")
@@ -49,7 +49,6 @@ public sealed class ProcessWorkloadTests : GitTestBase
         var commands = await Trace(() => _traced.ProbeDirtyAsync(repository));
 
         Assert.That(commands, Is.EqualTo(expected));
-        Assert.That(commands.Any(command => command.Contains("status")), Is.False, "the probe never runs git status");
     }
 
     [Test]

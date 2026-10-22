@@ -52,12 +52,16 @@ internal sealed class GitProcessRunner
     private static readonly TimeSpan StreamDrainTimeout = TimeSpan.FromSeconds(10);
 
     private readonly IReadOnlyDictionary<string, string?>? _environmentOverrides;
+    private int _startedCount;
 
     /// <summary>Initializes a runner that applies <paramref name="environmentOverrides" /> to every child process.</summary>
     public GitProcessRunner(IReadOnlyDictionary<string, string?>? environmentOverrides)
     {
         _environmentOverrides = environmentOverrides;
     }
+
+    /// <summary>Gets the number of git processes this runner has tried to start. Tests use it to count process cost.</summary>
+    public int StartedCount => Volatile.Read(ref _startedCount);
 
     /// <summary>Runs one git command and returns its captured output.</summary>
     /// <exception cref="OperationCanceledException">The caller's token was cancelled. The process tree has been terminated.</exception>
@@ -88,6 +92,7 @@ internal sealed class GitProcessRunner
         ApplyEnvironment(startInfo.Environment, request.ReadOnly);
 
         using var process = new System.Diagnostics.Process { StartInfo = startInfo };
+        Interlocked.Increment(ref _startedCount);
         try
         {
             if (!process.Start())

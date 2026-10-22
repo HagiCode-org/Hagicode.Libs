@@ -31,12 +31,12 @@ public sealed partial class GitClient : IGitClient
     {
     }
 
-    internal GitClient(GitClientOptions options, CliExecutableResolver? resolver)
+    internal GitClient(GitClientOptions options, CliExecutableResolver? resolver, GitProcessRunner? runner = null)
     {
         ArgumentNullException.ThrowIfNull(options);
 
         _options = options;
-        _runner = new GitProcessRunner(options.EnvironmentVariables);
+        _runner = runner ?? new GitProcessRunner(options.EnvironmentVariables);
 
         var locator = new GitExecutableLocator(resolver);
         _executable = new Lazy<GitExecutableResolution>(() => locator.Resolve(options.GitExecutablePath, options.EnvironmentVariables));

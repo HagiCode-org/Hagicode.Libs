@@ -67,4 +67,10 @@ public sealed record GitStatus(string Branch, IReadOnlyList<GitStatusEntry> Entr
 /// <param name="Branch">The current branch name, or <c>HEAD</c> when detached; <see langword="null" /> when unknown.</param>
 /// <param name="IsConclusive">False when the probe could not reach a positive or negative answer. <see cref="HasChanges" /> is then not a claim that the tree is clean.</param>
 /// <param name="Message">Explains an inconclusive probe.</param>
-public sealed record GitDirtyProbe(bool HasChanges, string? Branch, bool IsConclusive = true, string? Message = null);
+/// <param name="Tracking">The upstream and ahead/behind counts from the same status read, or <see langword="null" /> when the branch has no usable upstream.</param>
+public sealed record GitDirtyProbe(
+    bool HasChanges,
+    string? Branch,
+    bool IsConclusive = true,
+    string? Message = null,
+    GitTrackingInfo? Tracking = null);

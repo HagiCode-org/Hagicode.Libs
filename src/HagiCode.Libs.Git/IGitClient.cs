@@ -45,8 +45,9 @@ public interface IGitClient
     Task<GitResult<bool>> IsBranchNameValidAsync(string repositoryPath, string branchName, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Cheap change probe: a boolean and the branch, with no file list. Git decides the boolean through
-    /// <c>diff-index</c>, <c>diff-files</c> and <c>ls-files --others --exclude-standard</c>, so ignore rules are honored.
+    /// Cheap change probe: a boolean, the branch and the upstream tracking, with no file list. One <c>git status</c> process
+    /// decides all of them, so ignore rules are honored. A timeout, a launch error or a non-zero exit is reported as
+    /// inconclusive (<see cref="GitDirtyProbe.IsConclusive" /> is false) and never as a clean tree.
     /// </summary>
     Task<GitResult<GitDirtyProbe>> ProbeDirtyAsync(string repositoryPath, CancellationToken cancellationToken = default);
 

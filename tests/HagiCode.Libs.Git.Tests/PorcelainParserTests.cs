@@ -117,4 +117,53 @@ public sealed class PorcelainParserTests
 
         Assert.That(targets, Is.EqualTo(new[] { "index-only.txt", "both.txt", "renamed.txt" }));
     }
+
+    [Test]
+    public void Parse_reads_upstream_and_ahead_behind_counts()
+    {
+        var status = GitPorcelainV2Parser.Parse("# branch.oid abc\0# branch.head main\0# branch.upstream origin/main\0# branch.ab +2 -1\0");
+
+        Assert.That(status.Upstream, Is.EqualTo("origin/main"));
+        Assert.That(status.Ahead, Is.EqualTo(2));
+        Assert.That(status.Behind, Is.EqualTo(1));
+    }
+
+    [Test]
+    public void Parse_reports_an_upstream_without_counts_when_branch_ab_is_absent()
+    {
+        var status = GitPorcelainV2Parser.Parse("# branch.oid abc\0# branch.head main\0# branch.upstream origin/gone\0");
+
+        Assert.That(status.Upstream, Is.EqualTo("origin/gone"));
+        Assert.That(status.Ahead, Is.Null);
+        Assert.That(status.Behind, Is.Null);
+    }
+
+    [Test]
+    public void Parse_reports_no_upstream_when_none_is_configured()
+    {
+        var status = GitPorcelainV2Parser.Parse("# branch.oid abc\0# branch.head main\0");
+
+        Assert.That(status.Upstream, Is.Null);
+        Assert.That(status.Ahead, Is.Null);
+        Assert.That(status.Behind, Is.Null);
+    }
+
+    [Test]
+    public void Parse_reads_an_unborn_branch_name_without_an_oid()
+    {
+        var status = GitPorcelainV2Parser.Parse("# branch.oid (initial)\0# branch.head main\0");
+
+        Assert.That(status.Branch, Is.EqualTo("main"));
+        Assert.That(status.Upstream, Is.Null);
+        Assert.That(status.Entries, Is.Empty);
+    }
+
+    [Test]
+    public void Parse_reports_a_detached_head_with_no_branch_and_no_upstream()
+    {
+        var status = GitPorcelainV2Parser.Parse("# branch.oid abc\0# branch.head (detached)\0");
+
+        Assert.That(status.Branch, Is.Null);
+        Assert.That(status.Upstream, Is.Null);
+    }
 }
