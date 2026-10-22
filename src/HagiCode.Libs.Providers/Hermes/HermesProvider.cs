@@ -52,7 +52,7 @@ public class HermesProvider : ICliProvider<HermesOptions>
     public string Name => "hermes";
 
     /// <inheritdoc />
-    public bool IsAvailable => _executableResolver.ResolveFirstAvailablePath(DefaultExecutableCandidates) is not null;
+    public bool IsAvailable => _executableResolver.ResolveProviderExecutable("Hermes", DefaultExecutableCandidates).IsFound;
 
     /// <inheritdoc />
     public async IAsyncEnumerable<CliMessage> ExecuteAsync(
@@ -156,7 +156,7 @@ public class HermesProvider : ICliProvider<HermesOptions>
         try
         {
             var runtimeEnvironment = await ResolveRuntimeEnvironmentAsync(cancellationToken).ConfigureAwait(false);
-            var executablePath = _executableResolver.ResolveFirstAvailablePath(DefaultExecutableCandidates, runtimeEnvironment);
+            var executablePath = _executableResolver.ResolveProviderExecutable("Hermes", DefaultExecutableCandidates, runtimeEnvironment).ResolvedPath;
             if (executablePath is null)
             {
                 return new CliProviderTestResult
@@ -367,7 +367,7 @@ public class HermesProvider : ICliProvider<HermesOptions>
             return _executableResolver.ResolveExecutablePath(options.ExecutablePath, runtimeEnvironment);
         }
 
-        return _executableResolver.ResolveFirstAvailablePath(DefaultExecutableCandidates, runtimeEnvironment);
+        return _executableResolver.ResolveProviderExecutable("Hermes", DefaultExecutableCandidates, runtimeEnvironment).ResolvedPath;
     }
 
     private static string ResolveWorkingDirectory(string? workingDirectory)

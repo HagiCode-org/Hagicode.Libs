@@ -39,7 +39,7 @@ public sealed class CodexProvider : ICodexProvider
     public string Name => "codex";
 
     /// <inheritdoc />
-    public bool IsAvailable => _executableResolver.ResolveFirstAvailablePath(DefaultExecutableCandidates) is not null;
+    public bool IsAvailable => _executableResolver.ResolveProviderExecutable("Codex", DefaultExecutableCandidates).IsFound;
 
     /// <inheritdoc />
     public async Task<CodexSessionHandle> CreateSessionAsync(
@@ -50,8 +50,10 @@ public sealed class CodexProvider : ICodexProvider
 
         var runtimeEnvironment = await ResolveRuntimeEnvironmentAsync(cancellationToken).ConfigureAwait(false);
         var executablePath = ResolveExecutablePath(options, runtimeEnvironment)
-            ?? throw new FileNotFoundException(
-                "Unable to locate the Codex executable. Set CodexSessionOptions.ExecutablePath or ensure 'codex' is on PATH.");
+            ?? throw new FileNotFoundException(CliExecutableNotFoundMessage.Describe(
+                "Unable to locate the Codex executable. Set CodexSessionOptions.ExecutablePath or ensure 'codex' is on PATH.",
+                "Codex",
+                _executableResolver.ResolveProviderExecutable("Codex", DefaultExecutableCandidates, runtimeEnvironment)));
 
         var sdkOptions = new CodexOptions
         {
@@ -168,14 +170,18 @@ public sealed class CodexProvider : ICodexProvider
         try
         {
             var runtimeEnvironment = await ResolveRuntimeEnvironmentAsync(cancellationToken).ConfigureAwait(false);
-            var executablePath = _executableResolver.ResolveFirstAvailablePath(DefaultExecutableCandidates, runtimeEnvironment);
+            var lookup = _executableResolver.ResolveProviderExecutable("Codex", DefaultExecutableCandidates, runtimeEnvironment);
+            var executablePath = lookup.ResolvedPath;
             if (executablePath is null)
             {
                 return new CliProviderTestResult
                 {
                     ProviderName = Name,
                     Success = false,
-                    ErrorMessage = "Codex executable was not found. Install Codex or set CodexSessionOptions.ExecutablePath."
+                    ErrorMessage = CliExecutableNotFoundMessage.Describe(
+                        "Codex executable was not found. Install Codex or set CodexSessionOptions.ExecutablePath.",
+                        "Codex",
+                        lookup)
                 };
             }
 
@@ -231,7 +237,7 @@ public sealed class CodexProvider : ICodexProvider
             return _executableResolver.ResolveExecutablePath(explicitPath, runtimeEnvironment) ?? explicitPath;
         }
 
-        return _executableResolver.ResolveFirstAvailablePath(DefaultExecutableCandidates, runtimeEnvironment);
+        return _executableResolver.ResolveProviderExecutable("Codex", DefaultExecutableCandidates, runtimeEnvironment).ResolvedPath;
     }
 
     private static IReadOnlyDictionary<string, string> BuildEnvironmentVariables(

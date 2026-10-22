@@ -6,11 +6,12 @@ namespace HagiCode.Libs.Providers.DeepAgents;
 internal sealed class DeepAgentsLaunchResolver
 {
     private static readonly string[] DirectExecutableCandidates = ["deepagents"];
-    private static readonly string[] UvxExecutableCandidates = ["uvx", "uvx.cmd", "uvx.exe", "uvx.bat"];
+    private static readonly string[] UvxExecutableCandidates = ["uvx", "uvx.exe", "uvx.cmd", "uvx.bat"];
     private const string BootstrapArgument = "--acp";
     private const string UvxFromArgument = "--from";
     private const string UvxPackageName = "deepagents-cli";
     private const string DeepAgentsCommandName = "deepagents";
+    private const string ProviderName = "DeepAgents";
 
     private readonly CliExecutableResolver _executableResolver;
 
@@ -41,13 +42,13 @@ internal sealed class DeepAgentsLaunchResolver
                     UsesFallbackLauncher: false);
         }
 
-        var directExecutable = _executableResolver.ResolveFirstAvailablePath(DirectExecutableCandidates, runtimeEnvironment);
+        var directExecutable = _executableResolver.ResolveProviderExecutable(ProviderName, DirectExecutableCandidates, runtimeEnvironment).ResolvedPath;
         if (directExecutable is not null)
         {
             return CreateManagedLauncher(directExecutable, managedArguments, "deepagents --acp", UsesFallbackLauncher: false);
         }
 
-        var uvxExecutable = _executableResolver.ResolveFirstAvailablePath(UvxExecutableCandidates, runtimeEnvironment);
+        var uvxExecutable = _executableResolver.ResolveProviderExecutable(ProviderName, UvxExecutableCandidates, runtimeEnvironment).ResolvedPath;
         if (uvxExecutable is null)
         {
             return null;

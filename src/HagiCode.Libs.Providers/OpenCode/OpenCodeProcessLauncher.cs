@@ -3,6 +3,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Text.RegularExpressions;
 using HagiCode.Libs.Core.Discovery;
+using HagiCode.Libs.Core.Process;
 
 namespace HagiCode.Libs.Providers.OpenCode;
 
@@ -22,10 +23,17 @@ public sealed class OpenCodeProcessLauncher
     private static readonly TimeSpan PasswordLineGrace = TimeSpan.FromSeconds(1);
 
     private readonly CliExecutableResolver _executableResolver;
+    private readonly Func<bool> _isWindows;
 
     public OpenCodeProcessLauncher(CliExecutableResolver executableResolver)
+        : this(executableResolver, static () => OperatingSystem.IsWindows())
+    {
+    }
+
+    internal OpenCodeProcessLauncher(CliExecutableResolver executableResolver, Func<bool> isWindows)
     {
         _executableResolver = executableResolver ?? throw new ArgumentNullException(nameof(executableResolver));
+        _isWindows = isWindows ?? throw new ArgumentNullException(nameof(isWindows));
     }
 
     public async Task<OpenCodeProcessHandle> StartAsync(
@@ -53,53 +61,7 @@ public sealed class OpenCodeProcessLauncher
 
         var port = GetFreeTcpPort();
         var startupTimeout = options.StartupTimeout ?? TimeSpan.FromSeconds(15);
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = executablePath,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            WorkingDirectory = string.IsNullOrWhiteSpace(options.WorkingDirectory)
-                ? Directory.GetCurrentDirectory()
-                : options.WorkingDirectory.Trim()
-        };
-
-        startInfo.ArgumentList.Add("serve");
-        startInfo.ArgumentList.Add("--hostname=127.0.0.1");
-        startInfo.ArgumentList.Add($"--port={port}");
-        foreach (var argument in options.ExtraArguments)
-        {
-            var normalized = argument?.Trim();
-            if (string.IsNullOrWhiteSpace(normalized) || string.Equals(normalized, "serve", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            startInfo.ArgumentList.Add(normalized);
-        }
-
-        foreach (var (key, value) in runtimeEnvironment)
-        {
-            if (value is null)
-            {
-                startInfo.Environment.Remove(key);
-                continue;
-            }
-
-            startInfo.Environment[key] = value;
-        }
-
-        foreach (var (key, value) in options.EnvironmentVariables)
-        {
-            if (value is null)
-            {
-                startInfo.Environment.Remove(key);
-                continue;
-            }
-
-            startInfo.Environment[key] = value;
-        }
+        var startInfo = CreateStartInfo(executablePath, options, runtimeEnvironment, port);
 
         var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         var output = new StringBuilder();
@@ -159,7 +121,73 @@ public sealed class OpenCodeProcessLauncher
             return _executableResolver.ResolveExecutablePath(options.ExecutablePath.Trim(), runtimeEnvironment) ?? options.ExecutablePath.Trim();
         }
 
-        return _executableResolver.ResolveFirstAvailablePath(["opencode"], runtimeEnvironment);
+        return _executableResolver.ResolveProviderExecutable("OpenCode", ["opencode"], runtimeEnvironment).ResolvedPath;
+    }
+
+    /// <summary>
+    /// Builds the start information for an OpenCode server. A Windows command script runs through the verified <c>cmd.exe</c> launch,
+    /// and every other executable keeps <c>FileName</c> and <c>ArgumentList</c>.
+    /// </summary>
+    internal ProcessStartInfo CreateStartInfo(
+        string executablePath,
+        OpenCodeStandaloneServerOptions options,
+        IReadOnlyDictionary<string, string?> runtimeEnvironment,
+        int port)
+    {
+        var arguments = new List<string>
+        {
+            "serve",
+            "--hostname=127.0.0.1",
+            $"--port={port}"
+        };
+
+        foreach (var argument in options.ExtraArguments)
+        {
+            var normalized = argument?.Trim();
+            if (string.IsNullOrWhiteSpace(normalized) || string.Equals(normalized, "serve", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            arguments.Add(normalized);
+        }
+
+        var startInfo = new ProcessStartInfo
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WorkingDirectory = string.IsNullOrWhiteSpace(options.WorkingDirectory)
+                ? Directory.GetCurrentDirectory()
+                : options.WorkingDirectory.Trim()
+        };
+
+        WindowsCommandScriptLaunch.ConfigureExecutable(startInfo, executablePath, arguments, _isWindows());
+
+        foreach (var (key, value) in runtimeEnvironment)
+        {
+            if (value is null)
+            {
+                startInfo.Environment.Remove(key);
+                continue;
+            }
+
+            startInfo.Environment[key] = value;
+        }
+
+        foreach (var (key, value) in options.EnvironmentVariables)
+        {
+            if (value is null)
+            {
+                startInfo.Environment.Remove(key);
+                continue;
+            }
+
+            startInfo.Environment[key] = value;
+        }
+
+        return startInfo;
     }
 
     public static bool TryParseListeningUrl(string line, out Uri? baseUri)

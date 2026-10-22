@@ -33,7 +33,7 @@ public class OpenCodeProvider : ICliProvider<OpenCodeOptions>
     public string Name => "opencode";
 
     /// <inheritdoc />
-    public bool IsAvailable => _executableResolver.ResolveFirstAvailablePath(["opencode"]) is not null;
+    public bool IsAvailable => _executableResolver.ResolveProviderExecutable("OpenCode", ["opencode"]).IsFound;
 
     /// <inheritdoc />
     public async IAsyncEnumerable<CliMessage> ExecuteAsync(

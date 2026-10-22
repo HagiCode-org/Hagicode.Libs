@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using HagiCode.Libs.Core.Process;
 
 namespace HagiCode.Libs.Providers.Codex.AppServer;
 
@@ -43,7 +44,7 @@ internal sealed class CodexAppServerProcess : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(environment);
 
         var effectiveLogger = logger ?? NullLogger.Instance;
-        var startInfo = new ProcessStartInfo(executablePath)
+        var startInfo = new ProcessStartInfo
         {
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
@@ -54,7 +55,9 @@ internal sealed class CodexAppServerProcess : IAsyncDisposable
             UseShellExecute = false,
             CreateNoWindow = true
         };
-        startInfo.ArgumentList.Add(AppServerArgument);
+
+        // A command script given as the Codex path runs through the verified cmd.exe launch, never as FileName.
+        WindowsCommandScriptLaunch.ConfigureExecutable(startInfo, executablePath, [AppServerArgument], OperatingSystem.IsWindows());
 
         if (!string.IsNullOrWhiteSpace(workingDirectory) && Directory.Exists(workingDirectory))
         {

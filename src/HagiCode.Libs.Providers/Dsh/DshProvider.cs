@@ -43,7 +43,7 @@ public class DshProvider : ICliProvider<DshOptions>
     public string Name => "dsh";
 
     /// <inheritdoc />
-    public bool IsAvailable => _executableResolver.ResolveFirstAvailablePath(DefaultExecutableCandidates) is not null;
+    public bool IsAvailable => _executableResolver.ResolveProviderExecutable("Dsh", DefaultExecutableCandidates).IsFound;
 
     /// <inheritdoc />
     public async IAsyncEnumerable<CliMessage> ExecuteAsync(
@@ -106,7 +106,7 @@ public class DshProvider : ICliProvider<DshOptions>
         try
         {
             var runtimeEnvironment = await ResolveRuntimeEnvironmentAsync(cancellationToken).ConfigureAwait(false);
-            var executablePath = _executableResolver.ResolveFirstAvailablePath(DefaultExecutableCandidates, runtimeEnvironment);
+            var executablePath = _executableResolver.ResolveProviderExecutable("Dsh", DefaultExecutableCandidates, runtimeEnvironment).ResolvedPath;
             if (executablePath is null)
             {
                 return CreatePingFailure("dsh executable was not found. Install DeepSeek Harness locally or set DshOptions.ExecutablePath.");
@@ -444,7 +444,7 @@ public class DshProvider : ICliProvider<DshOptions>
             return _executableResolver.ResolveExecutablePath(options.ExecutablePath, runtimeEnvironment);
         }
 
-        return _executableResolver.ResolveFirstAvailablePath(DefaultExecutableCandidates, runtimeEnvironment);
+        return _executableResolver.ResolveProviderExecutable("Dsh", DefaultExecutableCandidates, runtimeEnvironment).ResolvedPath;
     }
 
     private static IReadOnlyDictionary<string, string?> BuildEnvironmentVariables(

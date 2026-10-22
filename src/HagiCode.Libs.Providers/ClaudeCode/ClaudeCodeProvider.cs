@@ -70,7 +70,7 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
     public string Name => "claude-code";
 
     /// <inheritdoc />
-    public bool IsAvailable => _executableResolver.ResolveFirstAvailablePath(DefaultExecutableCandidates) is not null;
+    public bool IsAvailable => _executableResolver.ResolveProviderExecutable("ClaudeCode", DefaultExecutableCandidates).IsFound;
 
     /// <inheritdoc />
     public async IAsyncEnumerable<CliMessage> ExecuteAsync(
@@ -141,7 +141,10 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
 
         var runtimeEnvironment = await ResolveRuntimeEnvironmentAsync(cancellationToken);
         var executablePath = ResolveExecutablePath(options, runtimeEnvironment)
-            ?? throw new FileNotFoundException("Unable to locate the Claude Code executable.");
+            ?? throw new FileNotFoundException(CliExecutableNotFoundMessage.Describe(
+                "Unable to locate the Claude Code executable.",
+                "ClaudeCode",
+                _executableResolver.ResolveProviderExecutable("ClaudeCode", DefaultExecutableCandidates, runtimeEnvironment)));
 
         var arguments = BuildCommandArguments(options);
         if (ExecutablesRejectingThinkingDisplay.ContainsKey(executablePath))
@@ -173,14 +176,15 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
         try
         {
             var runtimeEnvironment = await ResolveRuntimeEnvironmentAsync(cancellationToken);
-            var executablePath = _executableResolver.ResolveFirstAvailablePath(DefaultExecutableCandidates, runtimeEnvironment);
+            var lookup = _executableResolver.ResolveProviderExecutable("ClaudeCode", DefaultExecutableCandidates, runtimeEnvironment);
+            var executablePath = lookup.ResolvedPath;
             if (executablePath is null)
             {
                 return new CliProviderTestResult
                 {
                     ProviderName = Name,
                     Success = false,
-                    ErrorMessage = "Claude Code executable was not found."
+                    ErrorMessage = CliExecutableNotFoundMessage.Describe("Claude Code executable was not found.", "ClaudeCode", lookup)
                 };
             }
 
@@ -803,7 +807,7 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
             return _executableResolver.ResolveExecutablePath(options.ExecutablePath, runtimeEnvironment);
         }
 
-        return _executableResolver.ResolveFirstAvailablePath(DefaultExecutableCandidates, runtimeEnvironment);
+        return _executableResolver.ResolveProviderExecutable("ClaudeCode", DefaultExecutableCandidates, runtimeEnvironment).ResolvedPath;
     }
 
     /// <summary>

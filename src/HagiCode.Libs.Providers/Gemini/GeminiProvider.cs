@@ -42,7 +42,7 @@ public class GeminiProvider : ICliProvider<GeminiOptions>
     public string Name => "gemini";
 
     /// <inheritdoc />
-    public bool IsAvailable => _executableResolver.ResolveFirstAvailablePath(DefaultExecutableCandidates) is not null;
+    public bool IsAvailable => _executableResolver.ResolveProviderExecutable("Gemini", DefaultExecutableCandidates).IsFound;
 
     /// <inheritdoc />
     public async IAsyncEnumerable<CliMessage> ExecuteAsync(
@@ -80,7 +80,7 @@ public class GeminiProvider : ICliProvider<GeminiOptions>
         try
         {
             var runtimeEnvironment = await ResolveRuntimeEnvironmentAsync(cancellationToken).ConfigureAwait(false);
-            var executablePath = _executableResolver.ResolveFirstAvailablePath(DefaultExecutableCandidates, runtimeEnvironment);
+            var executablePath = _executableResolver.ResolveProviderExecutable("Gemini", DefaultExecutableCandidates, runtimeEnvironment).ResolvedPath;
             if (executablePath is null)
             {
                 return new CliProviderTestResult
@@ -261,7 +261,7 @@ public class GeminiProvider : ICliProvider<GeminiOptions>
             return _executableResolver.ResolveExecutablePath(options.ExecutablePath, runtimeEnvironment);
         }
 
-        return _executableResolver.ResolveFirstAvailablePath(DefaultExecutableCandidates, runtimeEnvironment);
+        return _executableResolver.ResolveProviderExecutable("Gemini", DefaultExecutableCandidates, runtimeEnvironment).ResolvedPath;
     }
 
     private static string ResolveWorkingDirectory(string? workingDirectory)

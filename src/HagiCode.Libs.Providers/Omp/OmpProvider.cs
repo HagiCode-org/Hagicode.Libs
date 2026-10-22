@@ -60,7 +60,7 @@ public class OmpProvider : ICliProvider<OmpOptions>
     public string Name => "omp";
 
     /// <inheritdoc />
-    public bool IsAvailable => _executableResolver.ResolveFirstAvailablePath(DefaultExecutableCandidates) is not null;
+    public bool IsAvailable => _executableResolver.ResolveProviderExecutable("Omp", DefaultExecutableCandidates).IsFound;
 
     /// <inheritdoc />
     public async IAsyncEnumerable<CliMessage> ExecuteAsync(
@@ -155,7 +155,7 @@ public class OmpProvider : ICliProvider<OmpOptions>
         try
         {
             var runtimeEnvironment = await ResolveRuntimeEnvironmentAsync(cancellationToken).ConfigureAwait(false);
-            var executablePath = _executableResolver.ResolveFirstAvailablePath(DefaultExecutableCandidates, runtimeEnvironment);
+            var executablePath = _executableResolver.ResolveProviderExecutable("Omp", DefaultExecutableCandidates, runtimeEnvironment).ResolvedPath;
             if (executablePath is null)
             {
                 return new CliProviderTestResult
@@ -556,7 +556,7 @@ public class OmpProvider : ICliProvider<OmpOptions>
             return _executableResolver.ResolveExecutablePath(explicitExecutable, runtimeEnvironment);
         }
 
-        return _executableResolver.ResolveFirstAvailablePath(DefaultExecutableCandidates, runtimeEnvironment);
+        return _executableResolver.ResolveProviderExecutable("Omp", DefaultExecutableCandidates, runtimeEnvironment).ResolvedPath;
     }
 
     private static string? ResolveWorkingDirectory(OmpOptions options)

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 using ManagedCode.CodexSharpSDK.Models;
+using HagiCode.Libs.Core.Process;
 
 namespace ManagedCode.CodexSharpSDK.Internal;
 
@@ -286,14 +287,16 @@ internal static class CodexCliMetadataReader
 
     private static string ReadInstalledVersion(string executablePath)
     {
-        var startInfo = new ProcessStartInfo(executablePath)
+        var startInfo = new ProcessStartInfo
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true,
         };
-        startInfo.ArgumentList.Add(VersionFlag);
+
+        // A command script given as the Codex path runs through the verified cmd.exe launch, never as FileName.
+        WindowsCommandScriptLaunch.ConfigureExecutable(startInfo, executablePath, [VersionFlag], OperatingSystem.IsWindows());
 
         using var process = new Process { StartInfo = startInfo };
         try
@@ -325,6 +328,8 @@ internal static class CodexCliMetadataReader
 
     private static LatestVersionProbe ProbeLatestPublishedVersion()
     {
+        // The npm name is bare and is never a script path. On Windows it starts only when npm.exe is on PATH, so a
+        // npm.cmd-only install is not reached here and this launch needs no cmd.exe route.
         var startInfo = new ProcessStartInfo(NpmExecutableName)
         {
             RedirectStandardOutput = true,

@@ -33,12 +33,11 @@ internal static class CodexCliLocator
     internal const string CodexWindowsCommandName = CodexExecutableName + CmdScriptExtension;
     internal const string CodexWindowsBatchName = CodexExecutableName + BatScriptExtension;
 
+    // Only the native executable is a PATH fallback on Windows. A codex.cmd or codex.bat is an npm launcher for a Node script,
+    // so it is never selected here. The npm-package lookup above runs first and finds the native binary.
     private static readonly string[] WindowsPathExecutableCandidates =
     [
         CodexWindowsExecutableName,
-        CodexWindowsCommandName,
-        CodexWindowsBatchName,
-        CodexExecutableName,
     ];
 
     private static readonly string[] UnixPathExecutableCandidates =

@@ -65,7 +65,10 @@ public class CopilotProvider : ICliProvider<CopilotOptions>, ICopilotModelCapabi
 
         var runtimeEnvironment = await ResolveRuntimeEnvironmentAsync(cancellationToken);
         var executablePath = ResolveExecutablePath(options, runtimeEnvironment)
-            ?? throw new FileNotFoundException("Unable to locate a Copilot executable. Install @github/copilot and ensure the CLI or a VS Code Copilot Chat shim is on PATH.");
+            ?? throw new FileNotFoundException(CliExecutableNotFoundMessage.Describe(
+                "Unable to locate a Copilot executable. Install @github/copilot and ensure the CLI or a VS Code Copilot Chat shim is on PATH.",
+                "Copilot",
+                _executableResolver.ResolveProviderExecutable("Copilot", DefaultExecutableCandidates, runtimeEnvironment)));
         var sdkRequest = BuildSdkRequest(options, prompt, executablePath, runtimeEnvironment);
 
         foreach (var diagnostic in CopilotCliCompatibility.BuildCliArgs(options).Diagnostics)
@@ -207,13 +210,9 @@ public class CopilotProvider : ICliProvider<CopilotOptions>, ICopilotModelCapabi
     private string? ResolvePreferredDiscoveredExecutablePath(
         IReadOnlyDictionary<string, string?>? environmentVariables)
     {
-        var resolvedPaths = new List<string>();
-        foreach (var executableCandidate in DefaultExecutableCandidates)
-        {
-            resolvedPaths.AddRange(_executableResolver.ResolveExecutablePaths(executableCandidate, environmentVariables));
-        }
-
-        return CopilotExecutablePathPolicy.SelectPreferredPath(resolvedPaths);
+        // The registry policy decides which installs are accepted (on Windows only a native executable). The shim preference then picks among them.
+        var lookup = _executableResolver.ResolveProviderExecutable("Copilot", DefaultExecutableCandidates, environmentVariables);
+        return CopilotExecutablePathPolicy.SelectPreferredPath(lookup.AcceptedPaths);
     }
 
     private static void ValidateOptions(CopilotOptions options)

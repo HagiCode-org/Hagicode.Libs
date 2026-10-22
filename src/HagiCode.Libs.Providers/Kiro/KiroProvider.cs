@@ -546,7 +546,7 @@ public class KiroProvider : ICliProvider<KiroOptions>
 
     private string? ResolveImplicitExecutablePath(IReadOnlyDictionary<string, string?>? runtimeEnvironment = null)
     {
-        return _executableResolver.ResolveFirstAvailablePath(DefaultExecutableCandidates, runtimeEnvironment);
+        return _executableResolver.ResolveProviderExecutable("Kiro", DefaultExecutableCandidates, runtimeEnvironment).ResolvedPath;
     }
 
     private static bool IsSupportedExecutablePath(string executablePath)

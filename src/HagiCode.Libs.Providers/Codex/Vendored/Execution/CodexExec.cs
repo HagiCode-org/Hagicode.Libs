@@ -7,6 +7,7 @@ using ManagedCode.CodexSharpSDK.Client;
 using ManagedCode.CodexSharpSDK.Internal;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using HagiCode.Libs.Core.Process;
 
 namespace ManagedCode.CodexSharpSDK.Execution;
 
@@ -426,9 +427,9 @@ internal sealed class DefaultCodexProcessRunner : ICodexProcessRunner
 {
     private static readonly UTF8Encoding Utf8NoBom = new(false);
 
-    internal static ProcessStartInfo CreateStartInfo(CodexProcessInvocation invocation)
+    internal static ProcessStartInfo CreateStartInfo(CodexProcessInvocation invocation, bool? isWindows = null)
     {
-        var startInfo = new ProcessStartInfo(invocation.ExecutablePath)
+        var startInfo = new ProcessStartInfo
         {
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
@@ -440,10 +441,8 @@ internal sealed class DefaultCodexProcessRunner : ICodexProcessRunner
             CreateNoWindow = true,
         };
 
-        foreach (var argument in invocation.Arguments)
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
+        // A command script given as the Codex path runs through the verified cmd.exe launch, never as FileName.
+        WindowsCommandScriptLaunch.ConfigureExecutable(startInfo, invocation.ExecutablePath, invocation.Arguments, isWindows ?? OperatingSystem.IsWindows());
 
         startInfo.Environment.Clear();
         foreach (var (key, value) in invocation.Environment)

@@ -41,7 +41,7 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
     public string Name => "codebuddy";
 
     /// <inheritdoc />
-    public bool IsAvailable => _executableResolver.ResolveFirstAvailablePath(DefaultExecutableCandidates) is not null;
+    public bool IsAvailable => _executableResolver.ResolveProviderExecutable("Codebuddy", DefaultExecutableCandidates).IsFound;
 
     /// <inheritdoc />
     public async IAsyncEnumerable<CliMessage> ExecuteAsync(
@@ -79,7 +79,7 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
         try
         {
             var runtimeEnvironment = await ResolveRuntimeEnvironmentAsync(cancellationToken).ConfigureAwait(false);
-            var executablePath = _executableResolver.ResolveFirstAvailablePath(DefaultExecutableCandidates, runtimeEnvironment);
+            var executablePath = _executableResolver.ResolveProviderExecutable("Codebuddy", DefaultExecutableCandidates, runtimeEnvironment).ResolvedPath;
             if (executablePath is null)
             {
                 return new CliProviderTestResult
@@ -236,7 +236,7 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
             return _executableResolver.ResolveExecutablePath(options.ExecutablePath, runtimeEnvironment);
         }
 
-        return _executableResolver.ResolveFirstAvailablePath(DefaultExecutableCandidates, runtimeEnvironment);
+        return _executableResolver.ResolveProviderExecutable("Codebuddy", DefaultExecutableCandidates, runtimeEnvironment).ResolvedPath;
     }
 
     private static string ResolveWorkingDirectory(string? workingDirectory)
