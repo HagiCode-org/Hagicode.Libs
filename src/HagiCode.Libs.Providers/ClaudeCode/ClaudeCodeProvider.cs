@@ -140,11 +140,12 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
         }
 
         var runtimeEnvironment = await ResolveRuntimeEnvironmentAsync(cancellationToken);
-        var executablePath = ResolveExecutablePath(options, runtimeEnvironment)
+        var lookup = CliLaunchLookup.Resolve(_executableResolver, "ClaudeCode", DefaultExecutableCandidates, options.ExecutablePath, runtimeEnvironment);
+        var executablePath = lookup.ResolvedPath
             ?? throw new FileNotFoundException(CliExecutableNotFoundMessage.Describe(
                 "Unable to locate the Claude Code executable.",
                 "ClaudeCode",
-                _executableResolver.ResolveProviderExecutable("ClaudeCode", DefaultExecutableCandidates, runtimeEnvironment)));
+                lookup));
 
         var arguments = BuildCommandArguments(options);
         if (ExecutablesRejectingThinkingDisplay.ContainsKey(executablePath))
@@ -798,16 +799,6 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
         }
 
         return await _runtimeEnvironmentResolver.ResolveAsync(cancellationToken);
-    }
-
-    private string? ResolveExecutablePath(ClaudeCodeOptions options, IReadOnlyDictionary<string, string?> runtimeEnvironment)
-    {
-        if (!string.IsNullOrWhiteSpace(options.ExecutablePath))
-        {
-            return _executableResolver.ResolveExecutablePath(options.ExecutablePath, runtimeEnvironment);
-        }
-
-        return _executableResolver.ResolveProviderExecutable("ClaudeCode", DefaultExecutableCandidates, runtimeEnvironment).ResolvedPath;
     }
 
     /// <summary>

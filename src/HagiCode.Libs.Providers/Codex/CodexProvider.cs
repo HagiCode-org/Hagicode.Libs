@@ -49,11 +49,12 @@ public sealed class CodexProvider : ICodexProvider
         ArgumentNullException.ThrowIfNull(options);
 
         var runtimeEnvironment = await ResolveRuntimeEnvironmentAsync(cancellationToken).ConfigureAwait(false);
-        var executablePath = ResolveExecutablePath(options, runtimeEnvironment)
+        var lookup = ResolveLaunchLookup(options, runtimeEnvironment);
+        var executablePath = lookup.ResolvedPath
             ?? throw new FileNotFoundException(CliExecutableNotFoundMessage.Describe(
                 "Unable to locate the Codex executable. Set CodexSessionOptions.ExecutablePath or ensure 'codex' is on PATH.",
                 "Codex",
-                _executableResolver.ResolveProviderExecutable("Codex", DefaultExecutableCandidates, runtimeEnvironment)));
+                lookup));
 
         var sdkOptions = new CodexOptions
         {
@@ -227,17 +228,21 @@ public sealed class CodexProvider : ICodexProvider
         return await _runtimeEnvironmentResolver.ResolveAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private string? ResolveExecutablePath(
+    /// <summary>
+    /// Returns the lookup the launch uses. An explicit path is launched as given when it does not resolve, so the launch fails in the process.
+    /// </summary>
+    private CliExecutableLookupResult ResolveLaunchLookup(
         CodexSessionOptions options,
         IReadOnlyDictionary<string, string?> runtimeEnvironment)
     {
         var explicitPath = NormalizeOptional(options.ExecutablePath);
-        if (explicitPath is not null)
+        if (explicitPath is null)
         {
-            return _executableResolver.ResolveExecutablePath(explicitPath, runtimeEnvironment) ?? explicitPath;
+            return _executableResolver.ResolveProviderExecutable("Codex", DefaultExecutableCandidates, runtimeEnvironment);
         }
 
-        return _executableResolver.ResolveProviderExecutable("Codex", DefaultExecutableCandidates, runtimeEnvironment).ResolvedPath;
+        var resolved = _executableResolver.ResolveExecutablePath(explicitPath, runtimeEnvironment) ?? explicitPath;
+        return new CliExecutableLookupResult(resolved, null, []) { AcceptedPaths = [resolved] };
     }
 
     private static IReadOnlyDictionary<string, string> BuildEnvironmentVariables(
