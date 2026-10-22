@@ -8,6 +8,7 @@ public sealed class CliProcessHandle : IAsyncDisposable
     private bool _disposed;
     private CliOwnedProcessState? _ownedProcessState;
     private readonly Func<CliOwnedProcessState, ValueTask>? _ownedProcessCleanup;
+    private readonly string? _resolvedExecutablePath;
 
     internal CliProcessHandle(
         System.Diagnostics.Process process,
@@ -15,12 +16,14 @@ public sealed class CliProcessHandle : IAsyncDisposable
         StreamReader standardOutput,
         StreamReader standardError,
         CliOwnedProcessState? ownedProcessState = null,
-        Func<CliOwnedProcessState, ValueTask>? ownedProcessCleanup = null)
+        Func<CliOwnedProcessState, ValueTask>? ownedProcessCleanup = null,
+        string? resolvedExecutablePath = null)
     {
         Process = process;
         StandardInput = standardInput;
         StandardOutput = standardOutput;
         StandardError = standardError;
+        _resolvedExecutablePath = resolvedExecutablePath;
         _ownedProcessState = ownedProcessState;
         _ownedProcessCleanup = ownedProcessCleanup;
     }
@@ -44,6 +47,11 @@ public sealed class CliProcessHandle : IAsyncDisposable
     /// Gets the redirected standard error stream.
     /// </summary>
     public StreamReader StandardError { get; }
+
+    /// <summary>
+    /// Gets the path of the CLI that was resolved. For a command script this is the script, not <c>cmd.exe</c> that runs it.
+    /// </summary>
+    public string ResolvedExecutablePath => _resolvedExecutablePath ?? Process.StartInfo.FileName;
 
     /// <summary>
     /// Gets a value indicating whether the process is still running.

@@ -130,8 +130,9 @@ public sealed class SubprocessTransportTests
 
         messages.Select(static message => message.Type).ShouldBe(["assistant", "result"]);
         manager.LastStartInfo.ShouldNotBeNull();
-        manager.LastStartInfo.FileName.ShouldBe(@"C:\Program Files\Anthropic\claude.cmd");
-        manager.LastStartInfo.ArgumentList.ShouldBe(["--output-format", "stream-json", "--append-system-prompt", "reply in Chinese"]);
+        manager.LastStartInfo.FileName.ShouldBe(Path.Combine(System.Environment.SystemDirectory, "cmd.exe"));
+        manager.LastStartInfo.Arguments.ShouldBe("/d /v:off /s /c \"\"C:\\Program Files\\Anthropic\\claude.cmd\" --output-format stream-json --append-system-prompt \"reply in Chinese\"\"");
+        manager.LastStartInfo.ArgumentList.ShouldBeEmpty();
         manager.LastStartInfo.StandardErrorEncoding.ShouldNotBeNull();
         manager.LastStartInfo.StandardErrorEncoding.WebName.ShouldBe(Encoding.Unicode.WebName);
     }

@@ -134,7 +134,7 @@ public sealed class CliProcessManagerTests
     }
 
     [Test]
-    public void CreateStartInfo_on_windows_uses_resolved_batch_files_directly_after_resolution()
+    public void CreateStartInfo_on_windows_runs_resolved_batch_files_through_cmd_exe()
     {
         var manager = new TestCliProcessManager(@"C:\tools\npm.cmd");
         var startInfo = manager.CreateStartInfo(new ProcessStartContext
@@ -143,8 +143,9 @@ public sealed class CliProcessManagerTests
             Arguments = ["install", "--global", "@openai/codex"]
         });
 
-        startInfo.FileName.ShouldBe(@"C:\tools\npm.cmd");
-        startInfo.ArgumentList.ShouldBe(["install", "--global", "@openai/codex"]);
+        startInfo.FileName.ShouldBe(Path.Combine(System.Environment.SystemDirectory, "cmd.exe"));
+        startInfo.Arguments.ShouldBe("/d /v:off /s /c \"\"C:\\tools\\npm.cmd\" install --global @openai/codex\"");
+        startInfo.ArgumentList.ShouldBeEmpty();
         startInfo.StandardInputEncoding.ShouldNotBeNull();
         startInfo.StandardInputEncoding.WebName.ShouldBe(Encoding.UTF8.WebName);
         startInfo.StandardErrorEncoding.ShouldNotBeNull();
@@ -152,7 +153,7 @@ public sealed class CliProcessManagerTests
     }
 
     [Test]
-    public void CreateStartInfo_on_windows_preserves_batch_paths_with_spaces_and_argument_order()
+    public void CreateStartInfo_on_windows_keeps_spaced_batch_paths_and_argument_order_through_cmd_exe()
     {
         var manager = new TestCliProcessManager(@"C:\Program Files\Anthropic\claude.cmd");
         var startInfo = manager.CreateStartInfo(new ProcessStartContext
@@ -161,10 +162,55 @@ public sealed class CliProcessManagerTests
             Arguments = ["--output-format", "stream-json", "--append-system-prompt", "reply in Chinese"]
         });
 
-        startInfo.FileName.ShouldBe(@"C:\Program Files\Anthropic\claude.cmd");
-        startInfo.ArgumentList.ShouldBe(["--output-format", "stream-json", "--append-system-prompt", "reply in Chinese"]);
+        startInfo.FileName.ShouldBe(Path.Combine(System.Environment.SystemDirectory, "cmd.exe"));
+        startInfo.Arguments.ShouldBe("/d /v:off /s /c \"\"C:\\Program Files\\Anthropic\\claude.cmd\" --output-format stream-json --append-system-prompt \"reply in Chinese\"\"");
+        startInfo.ArgumentList.ShouldBeEmpty();
         startInfo.StandardErrorEncoding.ShouldNotBeNull();
         startInfo.StandardErrorEncoding.WebName.ShouldBe(Encoding.Unicode.WebName);
+    }
+
+    [Test]
+    public void CreateStartInfo_on_windows_refuses_an_injected_argument_before_any_start()
+    {
+        var manager = new TestCliProcessManager(@"C:\tools\claude.cmd");
+
+        var exception = Should.Throw<CliCommandScriptArgumentException>(() => manager.CreateStartInfo(new ProcessStartContext
+        {
+            ExecutablePath = "claude",
+            Arguments = ["--system-prompt", "x\" & echo SECRETVALUE & \"y"]
+        }));
+
+        exception.ArgumentIndex.ShouldBe(1);
+        exception.Message.ShouldNotContain("SECRETVALUE");
+    }
+
+    [Test]
+    public void CreateStartPlan_reports_the_script_path_while_the_start_info_names_cmd_exe()
+    {
+        var manager = new TestCliProcessManager(@"C:\Program Files\Anthropic\claude.cmd");
+        var plan = manager.CreateStartPlan(new ProcessStartContext
+        {
+            ExecutablePath = "claude",
+            Arguments = ["--output-format", "stream-json"]
+        });
+
+        plan.ResolvedExecutablePath.ShouldBe(@"C:\Program Files\Anthropic\claude.cmd");
+        plan.StartInfo.FileName.ShouldBe(Path.Combine(System.Environment.SystemDirectory, "cmd.exe"));
+    }
+
+    [Test]
+    public void CreateStartPlan_on_windows_keeps_the_direct_executable_as_its_own_resolved_path()
+    {
+        var manager = new TestCliProcessManager(@"C:\Program Files\Anthropic\claude.exe");
+        var plan = manager.CreateStartPlan(new ProcessStartContext
+        {
+            ExecutablePath = "claude",
+            Arguments = ["--output-format", "stream-json"]
+        });
+
+        plan.ResolvedExecutablePath.ShouldBe(@"C:\Program Files\Anthropic\claude.exe");
+        plan.StartInfo.FileName.ShouldBe(@"C:\Program Files\Anthropic\claude.exe");
+        plan.StartInfo.ArgumentList.ShouldBe(["--output-format", "stream-json"]);
     }
 
     [Test]

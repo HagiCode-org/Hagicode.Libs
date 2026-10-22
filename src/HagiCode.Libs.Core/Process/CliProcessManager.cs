@@ -86,30 +86,7 @@ public class CliProcessManager
     /// <returns>The configured start info.</returns>
     public virtual ProcessStartInfo CreateStartInfo(ProcessStartContext context)
     {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentException.ThrowIfNullOrWhiteSpace(context.ExecutablePath);
-
-        var resolvedExecutablePath = ResolveExecutablePath(context.ExecutablePath, context.EnvironmentVariables);
-        var startInfo = new ProcessStartInfo
-        {
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            StandardInputEncoding = context.InputEncoding,
-            StandardOutputEncoding = context.OutputEncoding,
-            StandardErrorEncoding = context.OutputEncoding,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-
-        if (!string.IsNullOrWhiteSpace(context.WorkingDirectory))
-        {
-            startInfo.WorkingDirectory = context.WorkingDirectory;
-        }
-
-        ConfigureExecutable(startInfo, context, resolvedExecutablePath);
-        ApplyEnvironmentVariables(startInfo, context.EnvironmentVariables);
-        return startInfo;
+        return CreateStartPlan(context).StartInfo;
     }
 
     /// <summary>
@@ -123,7 +100,8 @@ public class CliProcessManager
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(context);
 
-        var process = new System.Diagnostics.Process { StartInfo = CreateStartInfo(context) };
+        var plan = CreateStartPlan(context);
+        var process = new System.Diagnostics.Process { StartInfo = plan.StartInfo };
         CliOwnedProcessState? ownedProcessState = null;
         try
         {
@@ -132,14 +110,15 @@ public class CliProcessManager
                 throw new InvalidOperationException($"Failed to start process '{context.ExecutablePath}'.");
             }
 
-            ownedProcessState = await RegisterOwnedProcessAsync(process, context, cancellationToken).ConfigureAwait(false);
+            ownedProcessState = await RegisterOwnedProcessAsync(process, context, plan.ResolvedExecutablePath, cancellationToken).ConfigureAwait(false);
             return new CliProcessHandle(
                 process,
                 process.StandardInput,
                 process.StandardOutput,
                 process.StandardError,
                 ownedProcessState,
-                RemoveOwnedProcessRecordAsync);
+                RemoveOwnedProcessRecordAsync,
+                plan.ResolvedExecutablePath);
         }
         catch
         {
@@ -210,7 +189,7 @@ public class CliProcessManager
         {
             TimedOut = timedOut,
             CommandPreview = CommandPreviewFormatter.Format(context.ExecutablePath, context.Arguments),
-            ResolvedExecutablePath = handle.Process.StartInfo.FileName,
+            ResolvedExecutablePath = handle.ResolvedExecutablePath,
             StartedAtUtc = startedAtUtc,
             CompletedAtUtc = completedAtUtc,
             CapturedOutput = capturedOutput.ToArray()
@@ -339,11 +318,46 @@ public class CliProcessManager
         return TryResolveWindowsBatchStandardErrorEncoding() ?? fallbackEncoding;
     }
 
+    internal CliProcessStartPlan CreateStartPlan(ProcessStartContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentException.ThrowIfNullOrWhiteSpace(context.ExecutablePath);
+
+        var resolvedExecutablePath = ResolveExecutablePath(context.ExecutablePath, context.EnvironmentVariables);
+        var startInfo = new ProcessStartInfo
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardInputEncoding = context.InputEncoding,
+            StandardOutputEncoding = context.OutputEncoding,
+            StandardErrorEncoding = context.OutputEncoding,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        if (!string.IsNullOrWhiteSpace(context.WorkingDirectory))
+        {
+            startInfo.WorkingDirectory = context.WorkingDirectory;
+        }
+
+        ConfigureExecutable(startInfo, context, resolvedExecutablePath);
+        ApplyEnvironmentVariables(startInfo, context.EnvironmentVariables);
+        return new CliProcessStartPlan(startInfo, resolvedExecutablePath);
+    }
+
     private void ConfigureExecutable(ProcessStartInfo startInfo, ProcessStartContext context, string resolvedExecutablePath)
     {
         if (IsWindows() && IsBatchFile(resolvedExecutablePath))
         {
             startInfo.StandardErrorEncoding = ResolveWindowsBatchStandardErrorEncoding(context.OutputEncoding);
+
+            // A command script runs through cmd.exe with a command line that is built and verified here. ArgumentList is not used,
+            // because it would re-quote the arguments and break the /s /c form.
+            var launch = WindowsCommandScriptLaunch.Create(resolvedExecutablePath, context.Arguments);
+            startInfo.FileName = launch.FileName;
+            startInfo.Arguments = launch.Arguments;
+            return;
         }
 
         startInfo.FileName = resolvedExecutablePath;
@@ -562,6 +576,7 @@ public class CliProcessManager
     private async ValueTask<CliOwnedProcessState?> RegisterOwnedProcessAsync(
         System.Diagnostics.Process process,
         ProcessStartContext context,
+        string resolvedExecutablePath,
         CancellationToken cancellationToken)
     {
         if (!IsOwnershipPersistenceEnabled() || context.Ownership is null)
@@ -578,7 +593,7 @@ public class CliProcessManager
         var state = new CliOwnedProcessState(
             process.Id,
             startedAtUtc,
-            process.StartInfo.FileName,
+            resolvedExecutablePath,
             context.WorkingDirectory,
             context.Ownership.ProviderName,
             _timeProvider.GetUtcNow());
@@ -604,6 +619,8 @@ public class CliProcessManager
         }
     }
 
+    // Identity is the recorded Pid plus StartedAtUtc. ExecutablePath is never compared, so a record that names a resolved
+    // command script still matches the live cmd.exe that runs it.
     private bool MatchesOwnedProcessIdentity(System.Diagnostics.Process process, CliOwnedProcessState state)
     {
         if (process.HasExited)
