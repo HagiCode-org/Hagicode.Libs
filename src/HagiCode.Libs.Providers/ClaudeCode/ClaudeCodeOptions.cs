@@ -103,6 +103,12 @@ public sealed record ClaudeCodeOptions
     public IReadOnlyList<string> AddDirectories { get; init; } = [];
 
     /// <summary>
+    /// Gets or sets plugin directories Claude loads for this run, each sent as its own <c>--plugin-dir &lt;path&gt;</c>.
+    /// <see cref="ExtraArgs" /> cannot carry more than one, because its keys are unique.
+    /// </summary>
+    public IReadOnlyList<string> PluginDirectories { get; init; } = [];
+
+    /// <summary>
     /// Gets or sets extra CLI arguments expressed as flag/value pairs.
     /// A <see langword="null" /> value adds a switch without a value, while non-null values are boundary-trimmed and ignored when empty after trimming.
     /// </summary>

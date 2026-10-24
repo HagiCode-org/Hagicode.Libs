@@ -336,6 +336,15 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
             arguments.AddRange(["--mcp-config", JsonSerializer.Serialize(new { mcpServers = options.McpServers })]);
         }
 
+        foreach (var pluginDirectory in options.PluginDirectories)
+        {
+            var normalizedDirectory = ArgumentValueNormalizer.NormalizeOptionalValue(pluginDirectory);
+            if (normalizedDirectory is not null)
+            {
+                arguments.AddRange(["--plugin-dir", normalizedDirectory]);
+            }
+        }
+
         foreach (var extraArgument in options.ExtraArgs)
         {
             if (string.Equals(extraArgument.Key, "continue", StringComparison.OrdinalIgnoreCase))

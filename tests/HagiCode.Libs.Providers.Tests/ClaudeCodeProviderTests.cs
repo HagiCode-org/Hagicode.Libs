@@ -2460,6 +2460,23 @@ public sealed partial class ClaudeCodeProviderTests
             .ToList();
     }
 
+    [Test]
+    public void BuildCommandArguments_sends_one_plugin_dir_per_plugin_directory_and_skips_blank_entries()
+    {
+        var provider = CreateProvider();
+
+        var arguments = provider.BuildCommandArguments(new ClaudeCodeOptions
+        {
+            PluginDirectories = ["/plugins/a", "  ", " /plugins/b "],
+            ExtraArgs = new Dictionary<string, string?> { ["plugin-dir"] = "/plugins/raw" }
+        });
+
+        arguments.Where(static argument => argument == "--plugin-dir").Count().ShouldBe(3);
+        arguments.ShouldContain("/plugins/a");
+        arguments.ShouldContain("/plugins/b");
+        arguments.ShouldContain("/plugins/raw");
+    }
+
     private static TestClaudeCodeProvider CreateProvider(
         CliExecutableResolver? executableResolver = null,
         CliProcessManager? processManager = null,
