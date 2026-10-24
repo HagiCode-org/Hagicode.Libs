@@ -730,6 +730,23 @@ public sealed class OmpProviderTests
         RealCliInvocationTestHarness.AssertActionableFailure("omp", failureMessage);
     }
 
+    [Test]
+    public void BuildCommandArguments_sends_one_plugin_dir_per_plugin_directory_in_print_and_rpc_modes()
+    {
+        var provider = CreateProvider();
+        var options = new OmpOptions { PluginDirectories = ["/plugins/a", " ", " /plugins/b "] };
+
+        var printArguments = provider.BuildCommandArguments(options, "hello");
+        var rpcArguments = provider.BuildRpcCommandArguments(options);
+
+        foreach (var arguments in new[] { printArguments, rpcArguments })
+        {
+            arguments.Where(static argument => argument == "--plugin-dir").Count().ShouldBe(2);
+            arguments.ShouldContain("/plugins/a");
+            arguments.ShouldContain("/plugins/b");
+        }
+    }
+
     private static OmpProvider CreateProvider(
         CliExecutableResolver? executableResolver = null,
         CliProcessManager? processManager = null,

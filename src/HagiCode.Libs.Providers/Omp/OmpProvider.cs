@@ -312,6 +312,11 @@ public class OmpProvider : ICliProvider<OmpOptions>
             AddJoinedOption(arguments, "--tools", addQuestionTool ? WithQuestionTool(options.AllowedTools) : options.AllowedTools);
         }
 
+        foreach (var pluginDirectory in options.PluginDirectories)
+        {
+            AddOption(arguments, "--plugin-dir", pluginDirectory);
+        }
+
         foreach (var extraArgument in options.ExtraArguments)
         {
             var normalizedArgument = ArgumentValueNormalizer.NormalizeOptionalValue(extraArgument);

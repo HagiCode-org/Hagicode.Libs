@@ -66,6 +66,11 @@ public sealed record OmpOptions
     public IReadOnlyList<string> ExcludedTools { get; init; } = [];
 
     /// <summary>
+    /// Gets or sets plugin directories OMP loads for this run, each sent as its own <c>--plugin-dir &lt;path&gt;</c>.
+    /// </summary>
+    public IReadOnlyList<string> PluginDirectories { get; init; } = [];
+
+    /// <summary>
     /// Gets or sets the OMP thinking level.
     /// </summary>
     public string? Thinking { get; init; }
