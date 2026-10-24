@@ -61,7 +61,8 @@ public static class CopilotCliCompatibility
         ["--disable-mcp-server"] = 1,
         ["--excluded-tools"] = 1,
         ["--log-dir"] = 1,
-        ["--log-level"] = 1
+        ["--log-level"] = 1,
+        ["--plugin-dir"] = 1
     };
 
     private static readonly Dictionary<string, string> RejectedFlags = new(StringComparer.Ordinal)
@@ -108,7 +109,8 @@ public static class CopilotCliCompatibility
             ["--excluded-tools"] = "Remove specific tools from the available set.",
             ["--config-dir"] = "Use a custom Copilot configuration directory.",
             ["--log-dir"] = "Write logs to a custom directory.",
-            ["--log-level"] = "Set Copilot CLI log verbosity."
+            ["--log-level"] = "Set Copilot CLI log verbosity.",
+            ["--plugin-dir"] = "Load a plugin from a local directory (repeatable)."
         };
 
     /// <summary>

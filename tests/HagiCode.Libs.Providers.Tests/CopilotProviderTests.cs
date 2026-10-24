@@ -19,6 +19,20 @@ public sealed class CopilotProviderTests
 {
     private const string RealCliTestsEnvironmentVariable = "HAGICODE_REAL_CLI_TESTS";
     private const string RealCopilotSessionTestsEnvironmentVariable = "HAGICODE_REAL_CLI_COPILOT_SESSION_TESTS";
+    [Test]
+    public void BuildCliArgs_keeps_every_plugin_dir_and_does_not_swallow_the_next_flag()
+    {
+        var result = CopilotCliCompatibility.BuildCliArgs(new CopilotOptions
+        {
+            NoAskUser = false,
+            AdditionalArgs = ["--plugin-dir", "/plugins/a", "--plugin-dir=/plugins/b", "--plugin-dir", "--log-level", "debug"]
+        });
+
+        result.CliArgs.ShouldBe(["--plugin-dir", "/plugins/a", "--plugin-dir", "/plugins/b", "--log-level", "debug"]);
+        result.Diagnostics.ShouldHaveSingleItem();
+        result.Diagnostics[0].ShouldContain("missing its required value");
+    }
+
     private static readonly string[] CopilotExecutableCandidates = ["copilot"];
     private static readonly TimeSpan RealCopilotRequestTimeout = TimeSpan.FromSeconds(45);
     private static readonly TimeSpan RealCopilotStartupTimeout = TimeSpan.FromSeconds(20);
