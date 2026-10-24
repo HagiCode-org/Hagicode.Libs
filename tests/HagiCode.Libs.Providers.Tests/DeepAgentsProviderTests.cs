@@ -660,6 +660,22 @@ public sealed class DeepAgentsProviderTests
         result.ErrorMessage.ShouldBeNullOrWhiteSpace();
     }
 
+    [TestCase(true)]
+    [TestCase(false)]
+    public void BuildCommandArguments_rejects_a_path_with_a_comma_instead_of_splitting_it(bool inSkills)
+    {
+        var provider = CreateProvider();
+        var path = Path.Combine(Path.GetTempPath(), "skills,extra");
+
+        var exception = Should.Throw<ArgumentException>(() => provider.BuildCommandArguments(new DeepAgentsOptions
+        {
+            SkillsDirectories = inSkills ? [path] : [],
+            MemoryFiles = inSkills ? [] : [path]
+        }));
+
+        exception.Message.ShouldContain("skills,extra");
+    }
+
     private static TestDeepAgentsProvider CreateProvider(
         CliExecutableResolver? executableResolver = null,
         FakeAcpSessionClient? sessionClient = null)

@@ -322,6 +322,16 @@ public class DeepAgentsProvider : ICliProvider<DeepAgentsOptions>
             .Cast<string>()
             .Select(Path.GetFullPath)
             .ToArray();
+
+        // The CLI splits the value on commas and has no escape, so a comma inside a path would silently become two paths.
+        var pathWithComma = normalizedPaths.FirstOrDefault(static path => path.Contains(','));
+        if (pathWithComma is not null)
+        {
+            throw new ArgumentException(
+                $"DeepAgents cannot load '{pathWithComma}' for {flag}: the CLI takes a comma-separated list and paths must not contain a comma.",
+                nameof(paths));
+        }
+
         if (normalizedPaths.Length == 0)
         {
             return;
