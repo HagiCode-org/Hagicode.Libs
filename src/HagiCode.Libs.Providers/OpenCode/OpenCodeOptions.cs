@@ -64,6 +64,14 @@ public sealed record OpenCodeOptions
     public IReadOnlyDictionary<string, string?> EnvironmentVariables { get; init; } = new Dictionary<string, string?>();
 
     /// <summary>
+    /// Gets or sets skill directories added to <c>skills.paths</c> of the inline configuration
+    /// (<c>OPENCODE_CONFIG_CONTENT</c>) of a launched runtime. A value already in
+    /// <see cref="EnvironmentVariables" />, or else in this process's environment, is extended, never replaced.
+    /// An attached runtime (<see cref="BaseUrl" />) reads no environment of ours, so it ignores this.
+    /// </summary>
+    public IReadOnlyList<string> SkillPaths { get; init; } = [];
+
+    /// <summary>
     /// Gets or sets extra arguments appended to <c>opencode serve</c>.
     /// </summary>
     public IReadOnlyList<string> ExtraArguments { get; init; } = [];

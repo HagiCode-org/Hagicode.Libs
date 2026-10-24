@@ -288,7 +288,7 @@ public class OpenCodeProvider : ICliProvider<OpenCodeOptions>
             Workspace = options.Workspace,
             StartupTimeout = options.StartupTimeout,
             RequestTimeout = options.RequestTimeout,
-            EnvironmentVariables = options.EnvironmentVariables,
+            EnvironmentVariables = OpenCodeSkillPaths.Apply(options),
             ExtraArguments = options.ExtraArguments,
         };
     }
