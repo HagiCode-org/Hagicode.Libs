@@ -71,6 +71,11 @@ public sealed record PiOptions
     public IReadOnlyList<string> ExcludedTools { get; init; } = [];
 
     /// <summary>
+    /// Gets or sets skill files or directories Pi loads for this run, each sent as its own <c>--skill &lt;path&gt;</c>.
+    /// </summary>
+    public IReadOnlyList<string> SkillPaths { get; init; } = [];
+
+    /// <summary>
     /// Gets or sets the Pi thinking level.
     /// </summary>
     public string? Thinking { get; init; }

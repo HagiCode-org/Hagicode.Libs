@@ -300,6 +300,11 @@ public class PiProvider : ICliProvider<PiOptions>
             AddJoinedOption(arguments, "--exclude-tools", options.ExcludedTools);
         }
 
+        foreach (var skillPath in options.SkillPaths)
+        {
+            AddOption(arguments, "--skill", skillPath);
+        }
+
         if (questionExtensionPath is not null)
         {
             arguments.Add("-e");

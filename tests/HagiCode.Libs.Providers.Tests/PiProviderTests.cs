@@ -644,6 +644,23 @@ public sealed partial class PiProviderTests
         RealCliInvocationTestHarness.AssertActionableFailure("pi", failureMessage);
     }
 
+    [Test]
+    public void BuildCommandArguments_sends_one_skill_flag_per_skill_path_in_json_and_rpc_modes()
+    {
+        var provider = CreateProvider();
+        var options = new PiOptions { SkillPaths = ["/skills/a", " ", " /skills/b "] };
+
+        var jsonArguments = provider.BuildCommandArguments(options, "hello");
+        var rpcArguments = provider.BuildRpcCommandArguments(options, "/ext/ask.ts");
+
+        foreach (var arguments in new[] { jsonArguments, rpcArguments })
+        {
+            arguments.Where(static argument => argument == "--skill").Count().ShouldBe(2);
+            arguments.ShouldContain("/skills/a");
+            arguments.ShouldContain("/skills/b");
+        }
+    }
+
     private static PiProvider CreateProvider(
         CliExecutableResolver? executableResolver = null,
         CliProcessManager? processManager = null,
