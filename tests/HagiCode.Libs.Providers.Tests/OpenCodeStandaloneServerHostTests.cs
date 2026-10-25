@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using HagiCode.Libs.Core.Discovery;
+using HagiCode.Libs.Core.Environment;
 using HagiCode.Libs.Providers.OpenCode;
 using Shouldly;
 
@@ -75,6 +76,40 @@ public sealed class OpenCodeStandaloneServerHostTests
         finally
         {
             File.Delete(executablePath);
+        }
+    }
+
+    [Test]
+    public async Task WarmupAsync_passes_runtime_resolver_variables_to_the_owned_runtime_process()
+    {
+        await using var fixture = await OpenCodeFixtureServer.StartAsync(new OpenCodeFixtureServerOptions
+        {
+            RequireAuthentication = false,
+        });
+        var markerPath = Path.Combine(Path.GetTempPath(), $"opencode-host-marker-{Guid.NewGuid():N}.txt");
+        var executablePath = CreateMarkerServeShim(fixture.BaseUri, markerPath);
+        await using var host = new OpenCodeStandaloneServerHost(
+            new CliExecutableResolver(),
+            new FixedRuntimeEnvironmentResolver(new Dictionary<string, string?>
+            {
+                ["HAGI_TEST_CONTEXT_MARKER"] = "marker-opencode"
+            }));
+
+        try
+        {
+            var result = await host.WarmupAsync(new OpenCodeStandaloneServerOptions
+            {
+                ExecutablePath = executablePath,
+                WorkingDirectory = Path.GetDirectoryName(executablePath),
+            });
+
+            result.Status.ShouldBe(OpenCodeStandaloneServerStatus.Ready);
+            File.ReadAllText(markerPath).ShouldBe("marker-opencode");
+        }
+        finally
+        {
+            File.Delete(executablePath);
+            File.Delete(markerPath);
         }
     }
 
@@ -262,6 +297,32 @@ public sealed class OpenCodeStandaloneServerHostTests
         }
 
         return path;
+    }
+
+    /// <summary>
+    /// Writes a serve shim that first records the runtime-resolver marker variable to <paramref name="markerPath" />,
+    /// then prints the OpenCode 2.0 startup line and keeps running.
+    /// </summary>
+    private static string CreateMarkerServeShim(Uri baseUri, string markerPath)
+    {
+        var fileName = $"opencode-host-marker-shim-{Guid.NewGuid():N}.sh";
+        var path = Path.Combine(Path.GetTempPath(), fileName);
+        var content = $"#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s' \"$HAGI_TEST_CONTEXT_MARKER\" > '{markerPath}'\nprintf 'server listening on {baseUri.ToString().TrimEnd('/')}\\n'\nwhile true; do sleep 1; done\n";
+        File.WriteAllText(path, content, new UTF8Encoding(false));
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        return path;
+    }
+
+    private sealed class FixedRuntimeEnvironmentResolver(IReadOnlyDictionary<string, string?> environment) : IRuntimeEnvironmentResolver
+    {
+        public Task<IReadOnlyDictionary<string, string?>> ResolveAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(environment);
+        }
     }
 
     /// <summary>

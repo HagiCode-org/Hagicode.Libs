@@ -76,6 +76,65 @@ public sealed class OmpProviderTests
     }
 
     [Test]
+    public async Task ExecuteAsync_passes_runtime_resolver_variables_to_the_start_context()
+    {
+        var processManager = new StubCliProcessManager
+        {
+            ExecuteResult = CreateSuccessfulExecutionResult("ok")
+        };
+        var provider = CreateProvider(
+            processManager: processManager,
+            runtimeEnvironmentResolver: new StaticRuntimeEnvironmentResolver(new Dictionary<string, string?>
+            {
+                ["HAGI_TEST_CONTEXT_MARKER"] = "marker-omp"
+            }));
+
+        await CollectMessagesAsync(
+            provider,
+            new OmpOptions
+            {
+                Provider = "omniroute",
+                Model = "glm/glm-4.7"
+            },
+            "Plan a trip.");
+
+        processManager.LastContext.ShouldNotBeNull();
+        processManager.LastContext.EnvironmentVariables.ShouldNotBeNull();
+        processManager.LastContext.EnvironmentVariables["HAGI_TEST_CONTEXT_MARKER"].ShouldBe("marker-omp");
+    }
+
+    [Test]
+    public async Task ExecuteAsync_passes_runtime_resolver_variables_to_the_start_context_when_resuming()
+    {
+        var processManager = new StubCliProcessManager
+        {
+            ExecuteResult = CreateSuccessfulExecutionResult("Trip outline", "omp-session-1")
+        };
+        var provider = CreateProvider(
+            processManager: processManager,
+            runtimeEnvironmentResolver: new StaticRuntimeEnvironmentResolver(new Dictionary<string, string?>
+            {
+                ["HAGI_TEST_CONTEXT_MARKER"] = "marker-omp"
+            }));
+
+        var messages = await CollectMessagesAsync(
+            provider,
+            new OmpOptions
+            {
+                SessionId = "omp-session-1",
+                Model = "glm/glm-4.7"
+            },
+            "Plan a trip.");
+
+        messages[0].Type.ShouldBe("session.resumed");
+        processManager.LastContext.ShouldNotBeNull();
+        processManager.LastContext.Arguments.ShouldContain("--resume");
+        processManager.LastContext.Arguments.ShouldContain("omp-session-1");
+        processManager.LastContext.EnvironmentVariables.ShouldNotBeNull();
+        processManager.LastContext.EnvironmentVariables["HAGI_TEST_CONTEXT_MARKER"].ShouldBe("marker-omp");
+    }
+
+    [Test]
     public async Task ExecuteAsync_rejects_invalid_thinking_level_without_starting_a_process()
     {
         var processManager = new StubCliProcessManager
@@ -1430,6 +1489,14 @@ public sealed class OmpProviderTests
             {
                 ["PATH"] = "/tmp/bin"
             });
+        }
+    }
+
+    private sealed class StaticRuntimeEnvironmentResolver(IReadOnlyDictionary<string, string?> environment) : IRuntimeEnvironmentResolver
+    {
+        public Task<IReadOnlyDictionary<string, string?>> ResolveAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(environment);
         }
     }
 

@@ -773,6 +773,47 @@ public sealed class CopilotProviderTests
     }
 
     [Test]
+    public async Task ExecuteAsync_passes_runtime_resolver_variables_to_the_sdk_request()
+    {
+        var gateway = new StubCopilotSdkGateway(
+        [
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.TextDelta, Content: "pong"),
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.Completed)
+        ]);
+        var provider = CreateProviderWithRuntimeEnvironment(gateway, new Dictionary<string, string?>
+        {
+            ["HAGI_TEST_CONTEXT_MARKER"] = "marker-copilot"
+        });
+
+        await ReadExecutionMessagesAsync(provider, new CopilotOptions(), "hello");
+
+        gateway.CreateRequests.ShouldHaveSingleItem();
+        gateway.CreateRequests[0].EnvironmentVariables["HAGI_TEST_CONTEXT_MARKER"].ShouldBe("marker-copilot");
+    }
+
+    [Test]
+    public async Task ExecuteAsync_passes_runtime_resolver_variables_to_the_sdk_request_when_resuming()
+    {
+        var gateway = new StubCopilotSdkGateway(
+        [
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.TextDelta, Content: "remembered"),
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.Completed)
+        ],
+        lifecycleType: CopilotSdkStreamEventType.SessionResumed,
+        sessionId: "resume-session");
+        var provider = CreateProviderWithRuntimeEnvironment(gateway, new Dictionary<string, string?>
+        {
+            ["HAGI_TEST_CONTEXT_MARKER"] = "marker-copilot"
+        });
+
+        await ReadExecutionMessagesAsync(provider, new CopilotOptions { SessionId = "resume-session" }, "what did I ask earlier");
+
+        gateway.CreateRequests.ShouldHaveSingleItem();
+        gateway.CreateRequests[0].SessionId.ShouldBe("resume-session");
+        gateway.CreateRequests[0].EnvironmentVariables["HAGI_TEST_CONTEXT_MARKER"].ShouldBe("marker-copilot");
+    }
+
+    [Test]
     public async Task ExecuteAsync_creates_fresh_runtime_when_same_session_id_changes_permissions()
     {
         var gateway = new StubCopilotSdkGateway(
@@ -1249,6 +1290,17 @@ public sealed class CopilotProviderTests
             new StubRuntimeEnvironmentResolver());
     }
 
+    private static TestCopilotProvider CreateProviderWithRuntimeEnvironment(
+        ICopilotSdkGateway gateway,
+        IReadOnlyDictionary<string, string?> runtimeEnvironment)
+    {
+        return new TestCopilotProvider(
+            new StubExecutableResolver(),
+            new StubCliProcessManager(),
+            gateway,
+            new StaticRuntimeEnvironmentResolver(runtimeEnvironment));
+    }
+
     private static async Task<(string AssistantText, string? SessionId)> ReadExecutionResultAsync(
         ICliProvider<CopilotOptions> provider,
         CopilotOptions options,
@@ -1489,6 +1541,14 @@ public sealed class CopilotProviderTests
             {
                 ["PATH"] = "/tmp/bin"
             });
+        }
+    }
+
+    private sealed class StaticRuntimeEnvironmentResolver(IReadOnlyDictionary<string, string?> environment) : IRuntimeEnvironmentResolver
+    {
+        public Task<IReadOnlyDictionary<string, string?>> ResolveAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(environment);
         }
     }
 

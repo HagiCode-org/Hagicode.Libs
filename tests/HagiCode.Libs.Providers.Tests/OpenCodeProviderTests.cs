@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
 using HagiCode.Libs.Core.Discovery;
+using HagiCode.Libs.Core.Environment;
 using HagiCode.Libs.Core.Transport;
 using HagiCode.Libs.Providers.OpenCode;
 using Shouldly;
@@ -241,6 +242,49 @@ public sealed class OpenCodeProviderTests
     }
 
     [Test]
+    public async Task ExecuteAsync_resumed_session_on_owned_runtime_passes_runtime_resolver_variables_to_the_process()
+    {
+        await using var server = await OpenCodeTestServer.StartAsync(
+            static (_, sessionId, prompt) => OpenCodeTestServer.CreateTextEnvelope(sessionId, prompt));
+        await using var attachProvider = CreateProvider(new MissingExecutableResolver());
+        var initialMessages = await DrainMessagesAsync(attachProvider.ExecuteAsync(
+            new OpenCodeOptions { BaseUrl = server.BaseUri.ToString() },
+            "Remember this session."));
+        var sessionId = initialMessages[0].Content.GetProperty("session_id").GetString();
+        sessionId.ShouldNotBeNullOrWhiteSpace();
+
+        // A fresh provider has no pooled runtime, so resuming the session starts an owned runtime through the resolver.
+        var markerPath = Path.Combine(Path.GetTempPath(), $"opencode-provider-marker-{Guid.NewGuid():N}.txt");
+        var executablePath = CreateMarkerServeShim(server.BaseUri, markerPath);
+        await using var provider = CreateProvider(
+            runtimeEnvironmentResolver: new FixedRuntimeEnvironmentResolver(new Dictionary<string, string?>
+            {
+                ["HAGI_TEST_CONTEXT_MARKER"] = "marker-opencode"
+            }));
+
+        try
+        {
+            var messages = await DrainMessagesAsync(provider.ExecuteAsync(
+                new OpenCodeOptions
+                {
+                    ExecutablePath = executablePath,
+                    WorkingDirectory = Path.GetDirectoryName(executablePath),
+                    SessionId = sessionId,
+                },
+                "What did I ask earlier?"));
+
+            messages[0].Type.ShouldBe("session.resumed");
+            messages[0].Content.GetProperty("resumeMode").GetString().ShouldBe("resumed");
+            File.ReadAllText(markerPath).ShouldBe("marker-opencode");
+        }
+        finally
+        {
+            File.Delete(executablePath);
+            File.Delete(markerPath);
+        }
+    }
+
+    [Test]
     public async Task PingAsync_reports_success_and_version_when_runtime_is_healthy()
     {
         await using var server = await OpenCodeTestServer.StartAsync(
@@ -388,9 +432,11 @@ public sealed class OpenCodeProviderTests
         fixture.GetForms().Single().Message.ShouldBe(OpenCodeUserInput.NoHandlerMessage);
     }
 
-    private static TestOpenCodeProvider CreateProvider(CliExecutableResolver? executableResolver = null)
+    private static TestOpenCodeProvider CreateProvider(
+        CliExecutableResolver? executableResolver = null,
+        IRuntimeEnvironmentResolver? runtimeEnvironmentResolver = null)
     {
-        return new TestOpenCodeProvider(executableResolver ?? new CliExecutableResolver());
+        return new TestOpenCodeProvider(executableResolver ?? new CliExecutableResolver(), runtimeEnvironmentResolver);
     }
 
     private static async Task<List<CliMessage>> DrainMessagesAsync(IAsyncEnumerable<CliMessage> stream)
@@ -418,10 +464,36 @@ public sealed class OpenCodeProviderTests
         return path;
     }
 
+    /// <summary>
+    /// Writes a serve shim that first records the runtime-resolver marker variable to <paramref name="markerPath" />,
+    /// then prints the startup line and keeps running.
+    /// </summary>
+    private static string CreateMarkerServeShim(Uri baseUri, string markerPath)
+    {
+        var fileName = $"opencode-marker-shim-{Guid.NewGuid():N}.sh";
+        var path = Path.Combine(Path.GetTempPath(), fileName);
+        var content = $"#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s' \"$HAGI_TEST_CONTEXT_MARKER\" > '{markerPath}'\nprintf 'server listening on {baseUri.ToString().TrimEnd('/')}\\n'\nwhile true; do sleep 1; done\n";
+        File.WriteAllText(path, content, new UTF8Encoding(false));
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        return path;
+    }
+
+    private sealed class FixedRuntimeEnvironmentResolver(IReadOnlyDictionary<string, string?> environment) : IRuntimeEnvironmentResolver
+    {
+        public Task<IReadOnlyDictionary<string, string?>> ResolveAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(environment);
+        }
+    }
+
     private sealed class TestOpenCodeProvider : OpenCodeProvider
     {
-        public TestOpenCodeProvider(CliExecutableResolver executableResolver)
-            : base(executableResolver, runtimeEnvironmentResolver: null)
+        public TestOpenCodeProvider(CliExecutableResolver executableResolver, IRuntimeEnvironmentResolver? runtimeEnvironmentResolver = null)
+            : base(executableResolver, runtimeEnvironmentResolver)
         {
         }
 

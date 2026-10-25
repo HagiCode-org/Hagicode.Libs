@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Environment;
@@ -79,6 +80,102 @@ public sealed partial class PiProviderTests
         environmentVariables.ShouldNotBeNull();
         environmentVariables.ShouldContainKeyAndValue("PI_OFFLINE", "1");
         environmentVariables.ShouldContainKeyAndValue("PATH", "/tmp/bin");
+    }
+
+    [Test]
+    public async Task ExecuteAsync_passes_runtime_resolver_variables_to_the_start_context()
+    {
+        var processManager = new StubCliProcessManager
+        {
+            ExecuteResult = CreateSuccessfulExecutionResult("ok")
+        };
+        var provider = CreateProvider(
+            processManager: processManager,
+            runtimeEnvironmentResolver: new StaticRuntimeEnvironmentResolver(new Dictionary<string, string?>
+            {
+                ["HAGI_TEST_CONTEXT_MARKER"] = "marker-pi"
+            }));
+
+        await CollectMessagesAsync(
+            provider,
+            new PiOptions
+            {
+                Provider = "omniroute",
+                Model = "glm/glm-4.7",
+                NoSession = true
+            },
+            "Plan a trip.");
+
+        processManager.LastContext.ShouldNotBeNull();
+        processManager.LastContext.EnvironmentVariables.ShouldNotBeNull();
+        processManager.LastContext.EnvironmentVariables["HAGI_TEST_CONTEXT_MARKER"].ShouldBe("marker-pi");
+    }
+
+    [Test]
+    public async Task ExecuteAsync_passes_runtime_resolver_variables_to_the_start_context_when_resuming()
+    {
+        var processManager = new StubCliProcessManager
+        {
+            ExecuteResult = CreateSuccessfulExecutionResult("Trip outline", "pi-session-1")
+        };
+        var provider = CreateProvider(
+            processManager: processManager,
+            runtimeEnvironmentResolver: new StaticRuntimeEnvironmentResolver(new Dictionary<string, string?>
+            {
+                ["HAGI_TEST_CONTEXT_MARKER"] = "marker-pi"
+            }));
+
+        var messages = await CollectMessagesAsync(
+            provider,
+            new PiOptions
+            {
+                SessionId = "pi-session-1",
+                Model = "glm/glm-4.7"
+            },
+            "Plan a trip.");
+
+        messages[0].Type.ShouldBe("session.resumed");
+        processManager.LastContext.ShouldNotBeNull();
+        processManager.LastContext.Arguments.ShouldContain("--session-id");
+        processManager.LastContext.Arguments.ShouldContain("pi-session-1");
+        processManager.LastContext.EnvironmentVariables.ShouldNotBeNull();
+        processManager.LastContext.EnvironmentVariables["HAGI_TEST_CONTEXT_MARKER"].ShouldBe("marker-pi");
+    }
+
+    [Test]
+    public async Task ExecuteAsync_rpc_passes_runtime_resolver_variables_to_the_start_context()
+    {
+        var provider = CreateRpcCapturingProvider(
+            new StaticRuntimeEnvironmentResolver(new Dictionary<string, string?>
+            {
+                ["HAGI_TEST_CONTEXT_MARKER"] = "marker-pi-rpc"
+            }));
+
+        await CollectMessagesAsync(provider, CreateRpcOptions(sessionId: null), "Plan a trip.");
+
+        provider.LastRpcContext.ShouldNotBeNull();
+        provider.LastRpcContext!.Arguments.ShouldContain("rpc");
+        provider.LastRpcContext.EnvironmentVariables.ShouldNotBeNull();
+        provider.LastRpcContext.EnvironmentVariables["HAGI_TEST_CONTEXT_MARKER"].ShouldBe("marker-pi-rpc");
+    }
+
+    [Test]
+    public async Task ExecuteAsync_rpc_passes_runtime_resolver_variables_to_the_start_context_when_resuming()
+    {
+        var provider = CreateRpcCapturingProvider(
+            new StaticRuntimeEnvironmentResolver(new Dictionary<string, string?>
+            {
+                ["HAGI_TEST_CONTEXT_MARKER"] = "marker-pi-rpc"
+            }));
+
+        await CollectMessagesAsync(provider, CreateRpcOptions(sessionId: "pi-session-1"), "Plan a trip.");
+
+        provider.LastRpcContext.ShouldNotBeNull();
+        provider.LastRpcContext!.Arguments.ShouldContain("rpc");
+        provider.LastRpcContext.Arguments.ShouldContain("--session-id");
+        provider.LastRpcContext.Arguments.ShouldContain("pi-session-1");
+        provider.LastRpcContext.EnvironmentVariables.ShouldNotBeNull();
+        provider.LastRpcContext.EnvironmentVariables["HAGI_TEST_CONTEXT_MARKER"].ShouldBe("marker-pi-rpc");
     }
 
     [Test]
@@ -661,6 +758,25 @@ public sealed partial class PiProviderTests
         }
     }
 
+    private static RpcCapturingPiProvider CreateRpcCapturingProvider(IRuntimeEnvironmentResolver runtimeEnvironmentResolver)
+    {
+        return new RpcCapturingPiProvider(
+            new StubExecutableResolver(),
+            new StubCliProcessManager(),
+            runtimeEnvironmentResolver);
+    }
+
+    private static PiOptions CreateRpcOptions(string? sessionId)
+    {
+        // A handler switches the run to RPC mode; the stub never calls it, because the RPC process is not started.
+        return new PiOptions
+        {
+            Model = "glm/glm-4.7",
+            SessionId = sessionId,
+            UserInputHandler = (_, _) => Task.FromResult<PiUserInputResponse?>(null)
+        };
+    }
+
     private static PiProvider CreateProvider(
         CliExecutableResolver? executableResolver = null,
         CliProcessManager? processManager = null,
@@ -1199,6 +1315,30 @@ public sealed partial class PiProviderTests
             => null;
     }
 
+    /// <summary>
+    /// Records the start context of an RPC-mode run and returns no messages, so the RPC process is never started.
+    /// </summary>
+    private sealed class RpcCapturingPiProvider(
+        CliExecutableResolver executableResolver,
+        CliProcessManager processManager,
+        IRuntimeEnvironmentResolver runtimeEnvironmentResolver)
+        : PiProvider(executableResolver, processManager, runtimeEnvironmentResolver)
+    {
+        public ProcessStartContext? LastRpcContext { get; private set; }
+
+        internal override async IAsyncEnumerable<CliMessage> ExecuteRpcProcessAsync(
+            ProcessStartContext startContext,
+            PiOptions options,
+            string prompt,
+            PiRpcOutcome outcome,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            LastRpcContext = startContext;
+            await Task.Yield();
+            yield break;
+        }
+    }
+
     private sealed class StubRuntimeEnvironmentResolver : IRuntimeEnvironmentResolver
     {
         public Task<IReadOnlyDictionary<string, string?>> ResolveAsync(CancellationToken cancellationToken = default)
@@ -1207,6 +1347,14 @@ public sealed partial class PiProviderTests
             {
                 ["PATH"] = "/tmp/bin"
             });
+        }
+    }
+
+    private sealed class StaticRuntimeEnvironmentResolver(IReadOnlyDictionary<string, string?> environment) : IRuntimeEnvironmentResolver
+    {
+        public Task<IReadOnlyDictionary<string, string?>> ResolveAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(environment);
         }
     }
 

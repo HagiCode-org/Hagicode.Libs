@@ -783,6 +783,40 @@ public sealed partial class ClaudeCodeProviderTests
     }
 
     [Test]
+    public async Task ExecuteAsync_passes_runtime_resolver_variables_to_the_start_context()
+    {
+        var provider = CreateProviderWithRuntimeEnvironment(new Dictionary<string, string?>
+        {
+            ["HAGI_TEST_CONTEXT_MARKER"] = "marker-claude-code"
+        });
+
+        await foreach (var _ in provider.ExecuteAsync(new ClaudeCodeOptions(), "hello"))
+        {
+        }
+
+        provider.LastStartContext.ShouldNotBeNull();
+        provider.LastStartContext!.EnvironmentVariables["HAGI_TEST_CONTEXT_MARKER"].ShouldBe("marker-claude-code");
+    }
+
+    [Test]
+    public async Task ExecuteAsync_passes_runtime_resolver_variables_to_the_start_context_when_resuming()
+    {
+        var provider = CreateProviderWithRuntimeEnvironment(new Dictionary<string, string?>
+        {
+            ["HAGI_TEST_CONTEXT_MARKER"] = "marker-claude-code"
+        });
+
+        await foreach (var _ in provider.ExecuteAsync(new ClaudeCodeOptions { Resume = "resume-session-1" }, "hello"))
+        {
+        }
+
+        provider.LastStartContext.ShouldNotBeNull();
+        provider.LastStartContext.Arguments.ShouldContain("--resume");
+        provider.LastStartContext.Arguments.ShouldContain("resume-session-1");
+        provider.LastStartContext!.EnvironmentVariables["HAGI_TEST_CONTEXT_MARKER"].ShouldBe("marker-claude-code");
+    }
+
+    [Test]
     public async Task ExecuteAsync_starts_the_process_in_the_working_directory()
     {
         var provider = CreateProvider();
@@ -2475,6 +2509,16 @@ public sealed partial class ClaudeCodeProviderTests
         arguments.ShouldContain("/plugins/a");
         arguments.ShouldContain("/plugins/b");
         arguments.ShouldContain("/plugins/raw");
+    }
+
+    private static TestClaudeCodeProvider CreateProviderWithRuntimeEnvironment(IReadOnlyDictionary<string, string?> runtimeEnvironment)
+    {
+        return new TestClaudeCodeProvider(
+            new StubExecutableResolver(),
+            new StubCliProcessManager(),
+            new StaticRuntimeEnvironmentResolver(runtimeEnvironment),
+            messageBatches: null,
+            transportFailures: null);
     }
 
     private static TestClaudeCodeProvider CreateProvider(
