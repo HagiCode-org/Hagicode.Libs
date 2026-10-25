@@ -28,7 +28,7 @@ Tier markers, switch variables and filter expressions: `docs/testing-tiers.md`.
 
 - `src/HagiCode.Libs.Core/`: transport, process management, executable discovery (`Discovery/CliExecutableResolver.cs` shares validated, expiring resolutions through `CliResolutionCache`; not-found results are never cached; guide: `docs/agent-cli-discovery-guide.md`)
 - `src/HagiCode.Libs.Prompts/`: Handlebars prompt catalog
-- `src/HagiCode.Libs.Providers/`: provider abstractions (Claude, Copilot, Codex, Gemini, OpenCode, Pi, Omp, Reasonix, Dsh, etc.; one folder per provider)
+- `src/HagiCode.Libs.Providers/`: provider abstractions (Claude Code, Codebuddy, Codex, Copilot, DeepAgents, Dsh, Gemini, Hermes, Junie, Kimi, Kiro, OpenCode, Omp, Pi, QoderCli, Reasonix; one folder per provider, registered in `ProviderRegistry.cs`; each has a `src/HagiCode.Libs.<Provider>.Console` runner)
 - `src/HagiCode.Libs.Skills/`: skills infrastructure and online API client
 - `src/HagiCode.Libs.Git/`: provider-agnostic git wrapper over the `git` CLI (`IGitClient`, typed results and failure codes; `ProbeDirtyAsync` uses a single `git status` process; tests: `tests/HagiCode.Libs.Git.Tests/`, package guide: `src/HagiCode.Libs.Git/README.md`, backend guide: `docs/git-backend-integration-guide.md`)
 - `src/HagiCode.Libs.Imaging/`: in-process AVIF conversion with bundled libvips native libraries (tests: `tests/HagiCode.Libs.Imaging.Tests/`, backend guide: `docs/avif-backend-integration-guide.md`)
@@ -39,7 +39,7 @@ Tier markers, switch variables and filter expressions: `docs/testing-tiers.md`.
 - `tests/`: NUnit coverage for each project; shared test settings, packages and global usings are in `tests/Directory.Build.props`
 - `tests/HagiCode.Libs.Providers.Tests/Fixtures/`: recorded CLI/server fixtures (Pi, Omp, Reasonix, Codex app-server, OpenCode `v2.0.32`, Claude Code steering, tool calls); new fixture directories must be copied to the output in the `.csproj` (`CopyToOutputDirectory`)
 - `docs/`: guides beyond the backend integration ones above: `testing-tiers.md`, `agent-cli-discovery-guide.md`, `skills-online-api-reference.md`, `dsh-acp-capability-probe.md`
-- `.github/workflows/`: NuGet publish (`nuget-publish.yml`), release draft, and cross-platform/integration lanes for Git, AVIF imaging, CLI discovery and online API; `scripts/git/` (timing aggregation) and `scripts/imaging/` (native layout check) support the Git and Imaging lanes
+- `.github/workflows/`: NuGet publish (`nuget-publish.yml`; runs on pushes to `main` and `v*.*.*` tags), release draft, and cross-platform/integration lanes for Git, AVIF imaging, CLI discovery and online API; `scripts/git/` (timing aggregation) and `scripts/imaging/` (native layout check) support the Git and Imaging lanes
 
 ## Agent Guidelines
 
