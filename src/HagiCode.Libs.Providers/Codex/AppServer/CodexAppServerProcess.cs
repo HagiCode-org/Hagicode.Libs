@@ -38,37 +38,21 @@ internal sealed class CodexAppServerProcess : IAsyncDisposable
         string executablePath,
         IReadOnlyDictionary<string, string> environment,
         string? workingDirectory,
-        ILogger? logger = null)
+        ILogger? logger = null,
+        ICliResourceLimitProvider? resourceLimitProvider = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
         ArgumentNullException.ThrowIfNull(environment);
 
         var effectiveLogger = logger ?? NullLogger.Instance;
-        var startInfo = new ProcessStartInfo
-        {
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            StandardInputEncoding = Utf8NoBom,
-            StandardOutputEncoding = Utf8NoBom,
-            StandardErrorEncoding = Utf8NoBom,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-
-        // A command script given as the Codex path runs through the verified cmd.exe launch, never as FileName.
-        WindowsCommandScriptLaunch.ConfigureExecutable(startInfo, executablePath, [AppServerArgument], OperatingSystem.IsWindows());
-
-        if (!string.IsNullOrWhiteSpace(workingDirectory) && Directory.Exists(workingDirectory))
-        {
-            startInfo.WorkingDirectory = workingDirectory;
-        }
-
-        startInfo.Environment.Clear();
-        foreach (var (key, value) in environment)
-        {
-            startInfo.Environment[key] = value;
-        }
+        var startInfo = CreateStartInfo(
+            executablePath,
+            environment,
+            workingDirectory,
+            OperatingSystem.IsWindows(),
+            resourceLimitProvider?.GetCurrent(),
+            CgroupScopeCapabilityProbe.Default,
+            effectiveLogger);
 
         var process = new Process { StartInfo = startInfo };
         process.ErrorDataReceived += (_, args) =>
@@ -87,6 +71,48 @@ internal sealed class CodexAppServerProcess : IAsyncDisposable
 
         process.BeginErrorReadLine();
         return new CodexAppServerProcess(process, effectiveLogger);
+    }
+
+    /// <summary>
+    /// Builds the app-server start information, then applies the agent memory limit through the shared launcher.
+    /// </summary>
+    internal static ProcessStartInfo CreateStartInfo(
+        string executablePath,
+        IReadOnlyDictionary<string, string> environment,
+        string? workingDirectory,
+        bool isWindows,
+        CliResourceLimits? limits,
+        CgroupScopeCapabilityProbe cgroupScopeProbe,
+        ILogger? logger = null)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardInputEncoding = Utf8NoBom,
+            StandardOutputEncoding = Utf8NoBom,
+            StandardErrorEncoding = Utf8NoBom,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        // A command script given as the Codex path runs through the verified cmd.exe launch, never as FileName.
+        WindowsCommandScriptLaunch.ConfigureExecutable(startInfo, executablePath, [AppServerArgument], isWindows);
+
+        if (!string.IsNullOrWhiteSpace(workingDirectory) && Directory.Exists(workingDirectory))
+        {
+            startInfo.WorkingDirectory = workingDirectory;
+        }
+
+        startInfo.Environment.Clear();
+        foreach (var (key, value) in environment)
+        {
+            startInfo.Environment[key] = value;
+        }
+
+        CgroupScopeLauncher.Apply(startInfo, limits, cgroupScopeProbe, logger);
+        return startInfo;
     }
 
     /// <inheritdoc />

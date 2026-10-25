@@ -23,6 +23,8 @@ public class CliProcessManager
     private readonly CliProcessOwnershipOptions _ownershipOptions;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<CliProcessManager> _logger;
+    private readonly ICliResourceLimitProvider? _resourceLimitProvider;
+    private readonly CgroupScopeCapabilityProbe _cgroupScopeProbe;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="CliProcessManager" /> class.
@@ -39,19 +41,22 @@ public class CliProcessManager
 
     /// <summary>
     /// Initializes a new instance of the <see cref="CliProcessManager" /> class with dependency injection support.
+    /// A <paramref name="resourceLimitProvider" /> puts agent launches inside a memory-limited systemd user scope; without one, no limit applies.
     /// </summary>
     public CliProcessManager(
         CliExecutableResolver executableResolver,
         IOptions<CliProcessOwnershipOptions>? ownershipOptions = null,
         CliOwnedProcessRegistry? ownedProcessRegistry = null,
         TimeProvider? timeProvider = null,
-        ILogger<CliProcessManager>? logger = null)
+        ILogger<CliProcessManager>? logger = null,
+        ICliResourceLimitProvider? resourceLimitProvider = null)
         : this(
             executableResolver,
             ownedProcessRegistry ?? new CliOwnedProcessRegistry(),
             ownershipOptions?.Value ?? new CliProcessOwnershipOptions(),
             timeProvider ?? TimeProvider.System,
-            logger ?? NullLogger<CliProcessManager>.Instance)
+            logger ?? NullLogger<CliProcessManager>.Instance,
+            resourceLimitProvider)
     {
     }
 
@@ -70,13 +75,17 @@ public class CliProcessManager
         CliOwnedProcessRegistry ownedProcessRegistry,
         CliProcessOwnershipOptions ownershipOptions,
         TimeProvider timeProvider,
-        ILogger<CliProcessManager> logger)
+        ILogger<CliProcessManager> logger,
+        ICliResourceLimitProvider? resourceLimitProvider = null,
+        CgroupScopeCapabilityProbe? cgroupScopeProbe = null)
     {
         _executableResolver = executableResolver ?? throw new ArgumentNullException(nameof(executableResolver));
         _ownedProcessRegistry = ownedProcessRegistry ?? throw new ArgumentNullException(nameof(ownedProcessRegistry));
         _ownershipOptions = ownershipOptions ?? throw new ArgumentNullException(nameof(ownershipOptions));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _resourceLimitProvider = resourceLimitProvider;
+        _cgroupScopeProbe = cgroupScopeProbe ?? CgroupScopeCapabilityProbe.Default;
     }
 
     /// <summary>
@@ -343,6 +352,13 @@ public class CliProcessManager
 
         ConfigureExecutable(startInfo, context, resolvedExecutablePath);
         ApplyEnvironmentVariables(startInfo, context.EnvironmentVariables);
+
+        // The start info may now name systemd-run, but the plan keeps the CLI as the resolved path, like the cmd.exe launch.
+        if (context.ApplyResourceLimits && _resourceLimitProvider is not null)
+        {
+            CgroupScopeLauncher.Apply(startInfo, _resourceLimitProvider.GetCurrent(), _cgroupScopeProbe, _logger);
+        }
+
         return new CliProcessStartPlan(startInfo, resolvedExecutablePath);
     }
 

@@ -173,7 +173,8 @@ public class OmpProvider : ICliProvider<OmpOptions>
                     Arguments = ["--version"],
                     EnvironmentVariables = runtimeEnvironment,
                     Timeout = TimeSpan.FromSeconds(10),
-                    OutputEncoding = Utf8NoBom
+                    OutputEncoding = Utf8NoBom,
+                    ApplyResourceLimits = false
                 },
                 cancellationToken).ConfigureAwait(false);
 
@@ -476,7 +477,8 @@ public class OmpProvider : ICliProvider<OmpOptions>
                     WorkingDirectory = startContext.WorkingDirectory,
                     EnvironmentVariables = startContext.EnvironmentVariables,
                     Timeout = TimeSpan.FromSeconds(10),
-                    OutputEncoding = Utf8NoBom
+                    OutputEncoding = Utf8NoBom,
+                    ApplyResourceLimits = false
                 },
                 cancellationToken).ConfigureAwait(false);
             return result.ExitCode == 0 ? ArgumentValueNormalizer.NormalizeOptionalValue(result.StandardOutput) : null;

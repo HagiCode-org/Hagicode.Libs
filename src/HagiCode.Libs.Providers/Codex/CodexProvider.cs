@@ -22,18 +22,26 @@ public sealed class CodexProvider : ICodexProvider
     private readonly IRuntimeEnvironmentResolver? _runtimeEnvironmentResolver;
     private readonly ICliExecutionFacade? _executionFacade;
     private readonly ILogger<CodexProvider> _logger;
+    private readonly ICliResourceLimitProvider? _resourceLimitProvider;
 
     public CodexProvider(
         CliExecutableResolver executableResolver,
         IRuntimeEnvironmentResolver? runtimeEnvironmentResolver = null,
         ICliExecutionFacade? executionFacade = null,
-        ILogger<CodexProvider>? logger = null)
+        ILogger<CodexProvider>? logger = null,
+        ICliResourceLimitProvider? resourceLimitProvider = null)
     {
         _executableResolver = executableResolver ?? throw new ArgumentNullException(nameof(executableResolver));
         _runtimeEnvironmentResolver = runtimeEnvironmentResolver;
         _executionFacade = executionFacade;
         _logger = logger ?? NullLogger<CodexProvider>.Instance;
+        _resourceLimitProvider = resourceLimitProvider;
     }
+
+    /// <summary>
+    /// The memory-limit source for the exec and app-server processes; <see langword="null" /> runs them without a limit.
+    /// </summary>
+    internal ICliResourceLimitProvider? ResourceLimitProvider => _resourceLimitProvider;
 
     /// <inheritdoc />
     public string Name => "codex";
@@ -63,7 +71,8 @@ public sealed class CodexProvider : ICodexProvider
             BaseUrl = NormalizeOptional(options.BaseUrl),
             Config = options.Config,
             EnvironmentVariables = BuildEnvironmentVariables(runtimeEnvironment, options.EnvironmentVariables),
-            Logger = _logger
+            Logger = _logger,
+            ResourceLimitProvider = _resourceLimitProvider
         };
 
         var client = new CodexClient(new CodexClientOptions
@@ -158,7 +167,8 @@ public sealed class CodexProvider : ICodexProvider
                     userInputHandler,
                     options.QuestionTimeout,
                     _logger,
-                    cancellationToken)
+                    cancellationToken,
+                    _resourceLimitProvider)
                 .ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
@@ -219,7 +229,8 @@ public sealed class CodexProvider : ICodexProvider
                     ExecutablePath = executablePath,
                     Arguments = ["--version"],
                     EnvironmentVariables = runtimeEnvironment,
-                    Timeout = TimeSpan.FromSeconds(10)
+                    Timeout = TimeSpan.FromSeconds(10),
+                    ApplyResourceLimits = false
                 },
                 cancellationToken).ConfigureAwait(false);
 

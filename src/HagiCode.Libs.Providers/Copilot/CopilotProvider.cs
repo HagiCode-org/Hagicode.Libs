@@ -353,7 +353,8 @@ public class CopilotProvider : ICliProvider<CopilotOptions>, ICopilotModelCapabi
                     ExecutablePath = executablePath,
                     Arguments = arguments,
                     EnvironmentVariables = runtimeEnvironment,
-                    Timeout = TimeSpan.FromSeconds(15)
+                    Timeout = TimeSpan.FromSeconds(15),
+                    ApplyResourceLimits = false
                 },
                 cancellationToken);
 

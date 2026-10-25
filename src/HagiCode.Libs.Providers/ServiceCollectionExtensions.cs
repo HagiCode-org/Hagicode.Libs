@@ -21,6 +21,7 @@ using HagiCode.Libs.Providers.Pooling;
 using HagiCode.Libs.Providers.QoderCli;
 using HagiCode.Libs.Providers.Reasonix;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace HagiCode.Libs.Providers;
 
@@ -41,6 +42,9 @@ public static class ServiceCollectionExtensions
         services.AddOptions<CliProcessOwnershipOptions>();
         services.AddSingleton<CliExecutableResolver>();
         services.AddSingleton<CliOwnedProcessRegistry>();
+        // AGENT_MEM_MAX is the standalone default; a host registers its own limit provider with Replace.
+        services.TryAddSingleton<ICliResourceLimitProvider, EnvironmentCliResourceLimitProvider>();
+        services.TryAddSingleton(static _ => CgroupScopeCapabilityProbe.Default);
         services.AddSingleton<CliProcessManager>();
         services.AddSingleton<CliDiscoveryService>();
         services.AddSingleton<IShellCommandRunner, ProcessShellCommandRunner>();

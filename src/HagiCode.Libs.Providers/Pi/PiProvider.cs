@@ -173,7 +173,8 @@ public class PiProvider : ICliProvider<PiOptions>
                     Arguments = ["--version"],
                     EnvironmentVariables = runtimeEnvironment,
                     Timeout = TimeSpan.FromSeconds(10),
-                    OutputEncoding = Utf8NoBom
+                    OutputEncoding = Utf8NoBom,
+                    ApplyResourceLimits = false
                 },
                 cancellationToken).ConfigureAwait(false);
 

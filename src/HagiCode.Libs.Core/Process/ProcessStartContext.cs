@@ -56,4 +56,10 @@ public sealed record ProcessStartContext
     /// Gets or sets provider ownership metadata for managed subprocess persistence.
     /// </summary>
     public CliProcessOwnershipRegistration? Ownership { get; init; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the active agent memory limit applies to this launch.
+    /// Defaults to <see langword="true" />; version probes, discovery and other non-agent launches set it to <see langword="false" />.
+    /// </summary>
+    public bool ApplyResourceLimits { get; init; } = true;
 }

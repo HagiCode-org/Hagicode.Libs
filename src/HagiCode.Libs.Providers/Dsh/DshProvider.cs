@@ -392,7 +392,8 @@ public class DshProvider : ICliProvider<DshOptions>
                 ExecutablePath = executablePath,
                 Arguments = [argument],
                 EnvironmentVariables = runtimeEnvironment,
-                Timeout = ProbeTimeout
+                Timeout = ProbeTimeout,
+                ApplyResourceLimits = false
             },
             cancellationToken);
     }

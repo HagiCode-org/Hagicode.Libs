@@ -47,6 +47,11 @@ public sealed record CliExecutionContext
     public TimeSpan? Timeout { get; init; }
 
     /// <summary>
+    /// Gets a value indicating whether the active agent memory limit applies.
+    /// </summary>
+    public bool ApplyResourceLimits { get; init; } = true;
+
+    /// <summary>
     /// Gets the requested execution mode.
     /// </summary>
     public required CliExecutionMode Mode { get; init; }
@@ -95,6 +100,7 @@ public sealed record CliExecutionContext
             InputEncoding = request.InputEncoding,
             OutputEncoding = request.OutputEncoding,
             Timeout = request.Timeout,
+            ApplyResourceLimits = request.ApplyResourceLimits,
             Mode = request.Options.Mode,
             CommandPreview = string.IsNullOrWhiteSpace(request.Options.CommandPreview)
                 ? CommandPreviewFormatter.Format(request.ExecutablePath, arguments)
@@ -115,7 +121,8 @@ public sealed record CliExecutionContext
             EnvironmentVariables = EnvironmentVariables,
             InputEncoding = InputEncoding,
             OutputEncoding = OutputEncoding,
-            Timeout = Timeout
+            Timeout = Timeout,
+            ApplyResourceLimits = ApplyResourceLimits
         };
     }
 }

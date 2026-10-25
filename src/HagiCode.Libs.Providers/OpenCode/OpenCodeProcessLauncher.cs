@@ -24,17 +24,27 @@ public sealed class OpenCodeProcessLauncher
 
     private readonly CliExecutableResolver _executableResolver;
     private readonly Func<bool> _isWindows;
+    private readonly ICliResourceLimitProvider? _resourceLimitProvider;
+    private readonly CgroupScopeCapabilityProbe _cgroupScopeProbe;
 
-    public OpenCodeProcessLauncher(CliExecutableResolver executableResolver)
-        : this(executableResolver, static () => OperatingSystem.IsWindows())
+    public OpenCodeProcessLauncher(CliExecutableResolver executableResolver, ICliResourceLimitProvider? resourceLimitProvider = null)
+        : this(executableResolver, static () => OperatingSystem.IsWindows(), resourceLimitProvider)
     {
     }
 
-    internal OpenCodeProcessLauncher(CliExecutableResolver executableResolver, Func<bool> isWindows)
+    internal OpenCodeProcessLauncher(
+        CliExecutableResolver executableResolver,
+        Func<bool> isWindows,
+        ICliResourceLimitProvider? resourceLimitProvider = null,
+        CgroupScopeCapabilityProbe? cgroupScopeProbe = null)
     {
         _executableResolver = executableResolver ?? throw new ArgumentNullException(nameof(executableResolver));
         _isWindows = isWindows ?? throw new ArgumentNullException(nameof(isWindows));
+        _resourceLimitProvider = resourceLimitProvider;
+        _cgroupScopeProbe = cgroupScopeProbe ?? CgroupScopeCapabilityProbe.Default;
     }
+
+    internal ICliResourceLimitProvider? ResourceLimitProvider => _resourceLimitProvider;
 
     public async Task<OpenCodeProcessHandle> StartAsync(
         OpenCodeStandaloneServerOptions options,
@@ -126,7 +136,8 @@ public sealed class OpenCodeProcessLauncher
 
     /// <summary>
     /// Builds the start information for an OpenCode server. A Windows command script runs through the verified <c>cmd.exe</c> launch,
-    /// and every other executable keeps <c>FileName</c> and <c>ArgumentList</c>.
+    /// and every other executable keeps <c>FileName</c> and <c>ArgumentList</c>. An active agent memory limit wraps the result
+    /// through <see cref="CgroupScopeLauncher" />.
     /// </summary>
     internal ProcessStartInfo CreateStartInfo(
         string executablePath,
@@ -185,6 +196,11 @@ public sealed class OpenCodeProcessLauncher
             }
 
             startInfo.Environment[key] = value;
+        }
+
+        if (_resourceLimitProvider is not null)
+        {
+            CgroupScopeLauncher.Apply(startInfo, _resourceLimitProvider.GetCurrent(), _cgroupScopeProbe);
         }
 
         return startInfo;

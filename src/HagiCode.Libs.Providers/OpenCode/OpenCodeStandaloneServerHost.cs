@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Environment;
+using HagiCode.Libs.Core.Process;
 
 namespace HagiCode.Libs.Providers.OpenCode;
 
@@ -20,8 +21,9 @@ public sealed class OpenCodeStandaloneServerHost : IOpenCodeStandaloneServerClie
 
     public OpenCodeStandaloneServerHost(
         CliExecutableResolver executableResolver,
-        IRuntimeEnvironmentResolver? runtimeEnvironmentResolver = null)
-        : this(executableResolver, runtimeEnvironmentResolver, null)
+        IRuntimeEnvironmentResolver? runtimeEnvironmentResolver = null,
+        ICliResourceLimitProvider? resourceLimitProvider = null)
+        : this(executableResolver, runtimeEnvironmentResolver, new OpenCodeProcessLauncher(executableResolver, resourceLimitProvider))
     {
     }
 
@@ -34,6 +36,8 @@ public sealed class OpenCodeStandaloneServerHost : IOpenCodeStandaloneServerClie
         _runtimeEnvironmentResolver = runtimeEnvironmentResolver;
         _processLauncher = processLauncher ?? new OpenCodeProcessLauncher(_executableResolver);
     }
+
+    internal OpenCodeProcessLauncher ProcessLauncher => _processLauncher;
 
     public async Task<OpenCodeStandaloneServerConnection> AcquireAsync(
         OpenCodeStandaloneServerOptions options,

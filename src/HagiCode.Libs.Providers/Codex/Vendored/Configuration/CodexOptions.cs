@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using HagiCode.Libs.Core.Process;
 using Microsoft.Extensions.Logging;
 
 namespace ManagedCode.CodexSharpSDK.Configuration;
@@ -16,4 +17,7 @@ public sealed record CodexOptions
     public IReadOnlyDictionary<string, string>? EnvironmentVariables { get; init; }
 
     public ILogger? Logger { get; init; }
+
+    // HagiCode: the agent memory limit for the exec process; null runs it without a limit.
+    internal ICliResourceLimitProvider? ResourceLimitProvider { get; init; }
 }

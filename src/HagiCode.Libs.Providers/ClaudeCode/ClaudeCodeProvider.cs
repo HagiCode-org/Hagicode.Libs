@@ -195,7 +195,8 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
                     ExecutablePath = executablePath,
                     Arguments = ["--version"],
                     EnvironmentVariables = runtimeEnvironment,
-                    Timeout = TimeSpan.FromSeconds(10)
+                    Timeout = TimeSpan.FromSeconds(10),
+                    ApplyResourceLimits = false
                 },
                 cancellationToken);
 

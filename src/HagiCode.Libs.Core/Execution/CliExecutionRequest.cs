@@ -43,6 +43,11 @@ public sealed record CliExecutionRequest
     public TimeSpan? Timeout { get; init; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether the active agent memory limit applies. Version probes set it to <see langword="false" />.
+    /// </summary>
+    public bool ApplyResourceLimits { get; init; } = true;
+
+    /// <summary>
     /// Gets or sets additive execution options.
     /// </summary>
     public CliExecutionOptions Options { get; init; } = new();

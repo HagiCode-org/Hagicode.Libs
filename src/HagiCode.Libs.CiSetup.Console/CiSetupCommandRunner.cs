@@ -18,7 +18,8 @@ public sealed class ProcessCiSetupCommandRunner(CliProcessManager processManager
             {
                 ExecutablePath = command.FileName,
                 Arguments = command.Arguments,
-                EnvironmentVariables = command.EnvironmentVariables
+                EnvironmentVariables = command.EnvironmentVariables,
+                ApplyResourceLimits = false
             },
             cancellationToken).ConfigureAwait(false);
         return new CiSetupCommandResult(result.ExitCode, result.StandardOutput, result.StandardError);

@@ -188,7 +188,8 @@ public sealed partial class CliVersionProbe
                     Arguments = arguments,
                     EnvironmentVariables = BuildProbeEnvironment(environmentVariables),
                     Timeout = _timeout,
-                    MaxCapturedOutputCharacters = MaxOutputCharacters
+                    MaxCapturedOutputCharacters = MaxOutputCharacters,
+                    ApplyResourceLimits = false
                 },
                 cancellationToken).ConfigureAwait(false);
         }

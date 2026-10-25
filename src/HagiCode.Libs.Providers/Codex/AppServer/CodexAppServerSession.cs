@@ -8,6 +8,8 @@ using ManagedCode.CodexSharpSDK.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
+using HagiCode.Libs.Core.Process;
+
 namespace HagiCode.Libs.Providers.Codex.AppServer;
 
 /// <summary>
@@ -69,11 +71,12 @@ internal sealed class CodexAppServerSession : IAsyncDisposable
         CodexUserInputHandler? userInputHandler,
         TimeSpan questionTimeout,
         ILogger? logger,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ICliResourceLimitProvider? resourceLimitProvider = null)
     {
         var effectiveLogger = logger ?? NullLogger.Instance;
 
-        var process = CodexAppServerProcess.Start(executablePath, environment, workingDirectory, effectiveLogger);
+        var process = CodexAppServerProcess.Start(executablePath, environment, workingDirectory, effectiveLogger, resourceLimitProvider);
         var client = new CodexAppServerClient(process.Output, process.Input, userInputHandler, questionTimeout, effectiveLogger);
         try
         {

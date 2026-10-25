@@ -427,7 +427,21 @@ internal sealed class DefaultCodexProcessRunner : ICodexProcessRunner
 {
     private static readonly UTF8Encoding Utf8NoBom = new(false);
 
-    internal static ProcessStartInfo CreateStartInfo(CodexProcessInvocation invocation, bool? isWindows = null)
+    private readonly ICliResourceLimitProvider? _resourceLimitProvider;
+
+    public DefaultCodexProcessRunner(ICliResourceLimitProvider? resourceLimitProvider = null)
+    {
+        _resourceLimitProvider = resourceLimitProvider;
+    }
+
+    internal ICliResourceLimitProvider? ResourceLimitProvider => _resourceLimitProvider;
+
+    internal static ProcessStartInfo CreateStartInfo(
+        CodexProcessInvocation invocation,
+        bool? isWindows = null,
+        ICliResourceLimitProvider? resourceLimitProvider = null,
+        CgroupScopeCapabilityProbe? cgroupScopeProbe = null,
+        ILogger? logger = null)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -450,6 +464,16 @@ internal sealed class DefaultCodexProcessRunner : ICodexProcessRunner
             startInfo.Environment[key] = value;
         }
 
+        // HagiCode: the same memory-limit wrapping as CliProcessManager, applied to the finished start info.
+        if (resourceLimitProvider is not null)
+        {
+            CgroupScopeLauncher.Apply(
+                startInfo,
+                resourceLimitProvider.GetCurrent(),
+                cgroupScopeProbe ?? CgroupScopeCapabilityProbe.Default,
+                logger);
+        }
+
         return startInfo;
     }
 
@@ -458,7 +482,7 @@ internal sealed class DefaultCodexProcessRunner : ICodexProcessRunner
         ILogger logger,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var startInfo = CreateStartInfo(invocation);
+        var startInfo = CreateStartInfo(invocation, resourceLimitProvider: _resourceLimitProvider, logger: logger);
 
         using var process = new Process { StartInfo = startInfo };
         Task<string>? standardErrorTask = null;

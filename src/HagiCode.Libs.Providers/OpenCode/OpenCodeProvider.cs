@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Environment;
+using HagiCode.Libs.Core.Process;
 using HagiCode.Libs.Core.Transport;
 
 namespace HagiCode.Libs.Providers.OpenCode;
@@ -22,11 +23,13 @@ public class OpenCodeProvider : ICliProvider<OpenCodeOptions>
     public OpenCodeProvider(
         CliExecutableResolver executableResolver,
         IRuntimeEnvironmentResolver? runtimeEnvironmentResolver = null,
-        IOpenCodeStandaloneServerClient? standaloneServerClient = null)
+        IOpenCodeStandaloneServerClient? standaloneServerClient = null,
+        ICliResourceLimitProvider? resourceLimitProvider = null)
     {
         _executableResolver = executableResolver ?? throw new ArgumentNullException(nameof(executableResolver));
         _runtimeEnvironmentResolver = runtimeEnvironmentResolver;
-        _standaloneServerClient = standaloneServerClient ?? new OpenCodeStandaloneServerHost(_executableResolver, _runtimeEnvironmentResolver);
+        _standaloneServerClient = standaloneServerClient
+            ?? new OpenCodeStandaloneServerHost(_executableResolver, _runtimeEnvironmentResolver, resourceLimitProvider);
     }
 
     /// <inheritdoc />
