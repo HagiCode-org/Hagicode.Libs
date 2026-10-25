@@ -166,5 +166,30 @@
         "turn"
       ]
     }
+  },
+  "turn/steer": {
+    "params": {
+      "required": [
+        "expectedTurnId",
+        "input",
+        "threadId"
+      ],
+      "properties": [
+        "additionalContext",
+        "clientUserMessageId",
+        "expectedTurnId",
+        "input",
+        "responsesapiClientMetadata",
+        "threadId"
+      ]
+    },
+    "response": {
+      "required": [
+        "turnId"
+      ],
+      "properties": [
+        "turnId"
+      ]
+    }
   }
 }

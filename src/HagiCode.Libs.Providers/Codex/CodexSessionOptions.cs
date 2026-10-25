@@ -57,11 +57,19 @@ public sealed record CodexSessionOptions
     public CodexUserInputHandler? UserInputHandler { get; init; }
 
     /// <summary>
-    /// Gets or sets whether the run uses the interactive transport (<c>codex app-server</c>), which can carry questions. The
-    /// exec transport is used when this is <see langword="false"/>, or when the interactive transport cannot start (the CLI is
-    /// below the minimum version, or the handshake fails).
+    /// Gets or sets whether agent questions are enabled on the interactive transport (<c>codex app-server</c>). A configured
+    /// <see cref="UserInputHandler"/> uses that transport when this is <see langword="true"/>. A configured
+    /// <see cref="Steering"/> selects the interactive transport independently. The exec transport is used when neither
+    /// interactive feature is requested, or when the CLI version or handshake prevents the interactive path.
     /// </summary>
     public bool InteractiveUserInput { get; init; }
+
+    /// <summary>
+    /// Gets the optional steering channel for this execution. Supplying it selects the interactive transport when supported,
+    /// independently of whether agent questions are enabled. The app-server must meet the minimum CLI version and complete its
+    /// handshake; otherwise the provider uses exec and this channel returns <see cref="CodexSteerResult.NotSteerable"/>.
+    /// </summary>
+    public CodexRunSteering? Steering { get; init; }
 
     /// <summary>
     /// Gets or sets how long an interactive question may stay unanswered. When it passes, the question is declined and the run
@@ -70,7 +78,16 @@ public sealed record CodexSessionOptions
     public TimeSpan QuestionTimeout { get; init; } = DefaultQuestionTimeout;
 
     /// <summary>
+    /// Gets the finite maximum time to wait for the app-server's correlated acknowledgement of an accepted steer. The default
+    /// is 30 seconds. If confirmation does not arrive by this deadline, the steer outcome is reported as not consumed.
+    /// </summary>
+    public TimeSpan SteerDeliveryTimeout { get; init; } = DefaultSteerDeliveryTimeout;
+
+    /// <summary>
     /// The default value of <see cref="QuestionTimeout"/>.
     /// </summary>
     public static readonly TimeSpan DefaultQuestionTimeout = TimeSpan.FromMinutes(30);
+
+    /// <summary>The default value of <see cref="SteerDeliveryTimeout"/>.</summary>
+    public static readonly TimeSpan DefaultSteerDeliveryTimeout = TimeSpan.FromSeconds(30);
 }

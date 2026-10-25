@@ -310,7 +310,10 @@ public sealed class CodexThread
                     "Local image inputs are not supported on the interactive Codex transport; pass CodexImageAttachment values instead.");
             }
 
-            var threadParameters = CodexAppServerSession.BuildThreadParameters(_threadOptions, _options.Config);
+            var threadParameters = CodexAppServerSession.BuildThreadParameters(
+                _threadOptions,
+                _options.Config,
+                _appServer.SupportsUserQuestions);
             var turnParameters = CodexAppServerSession.BuildTurnParameters(_threadOptions);
             await foreach (var appServerEvent in _appServer
                                .RunTurnAsync(

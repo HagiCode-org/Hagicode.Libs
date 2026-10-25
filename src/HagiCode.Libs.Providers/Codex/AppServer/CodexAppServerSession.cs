@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json.Nodes;
+using HagiCode.Libs.Providers.Codex;
 using ManagedCode.CodexSharpSDK.Client;
 using ManagedCode.CodexSharpSDK.Configuration;
 using ManagedCode.CodexSharpSDK.Execution;
@@ -14,9 +15,9 @@ namespace HagiCode.Libs.Providers.Codex.AppServer;
 /// that the run uses.
 /// </summary>
 /// <remarks>
-/// A session is opened only when the interactive path is allowed: the CLI meets the version floor, the handshake succeeds, and
-/// the server lists the user-input feature. Otherwise <see cref="OpenAsync"/> throws, and the provider runs the exec path with
-/// questions disabled for that run (design D7).
+/// A session is opened when the CLI meets the version floor and the handshake succeeds. The user-input feature is required only
+/// when an agent question handler is enabled. Native active-turn steering does not enable or require that feature; if the
+/// provider cannot open this transport, it falls back to exec and steering is unavailable for that run.
 /// </remarks>
 internal sealed class CodexAppServerSession : IAsyncDisposable
 {
@@ -37,29 +38,39 @@ internal sealed class CodexAppServerSession : IAsyncDisposable
     private readonly CodexAppServerProcess _process;
     private readonly CodexAppServerClient _client;
     private readonly ILogger _logger;
+    private readonly bool _supportsUserQuestions;
+    private CodexRunSteering? _steering;
+    private TimeSpan _steerDeliveryTimeout = CodexSessionOptions.DefaultSteerDeliveryTimeout;
     private string? _loadedThreadId;
 
-    private CodexAppServerSession(CodexAppServerProcess process, CodexAppServerClient client, ILogger logger)
+    private CodexAppServerSession(
+        CodexAppServerProcess process,
+        CodexAppServerClient client,
+        ILogger logger,
+        bool supportsUserQuestions)
     {
         _process = process;
         _client = client;
         _logger = logger;
+        _supportsUserQuestions = supportsUserQuestions;
     }
 
+    /// <summary>Whether this session has an agent-question handler enabled.</summary>
+    public bool SupportsUserQuestions => _supportsUserQuestions;
+
     /// <summary>
-    /// Starts the app-server, runs the handshake, and confirms the user-input feature. Throws when any step fails, and releases
-    /// the process in that case.
+    /// Starts the app-server and runs the handshake. When a user-input handler is present, it also confirms the user-input
+    /// feature. Throws when any required step fails, and releases the process in that case.
     /// </summary>
     public static async Task<CodexAppServerSession> OpenAsync(
         string executablePath,
         IReadOnlyDictionary<string, string> environment,
         string? workingDirectory,
-        CodexUserInputHandler userInputHandler,
+        CodexUserInputHandler? userInputHandler,
         TimeSpan questionTimeout,
         ILogger? logger,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(userInputHandler);
         var effectiveLogger = logger ?? NullLogger.Instance;
 
         var process = CodexAppServerProcess.Start(executablePath, environment, workingDirectory, effectiveLogger);
@@ -72,16 +83,19 @@ internal sealed class CodexAppServerSession : IAsyncDisposable
             handshakeCts.CancelAfter(HandshakeTimeout);
 
             await client.InitializeAsync(handshakeCts.Token).ConfigureAwait(false);
-            var hasFeature = await client.HasExperimentalFeatureAsync(
-                CodexAppServerClient.UserInputFeatureName,
-                handshakeCts.Token).ConfigureAwait(false);
-            if (!hasFeature)
+            if (userInputHandler is not null)
             {
-                throw new NotSupportedException(
-                    $"codex app-server does not list the '{CodexAppServerClient.UserInputFeatureName}' feature, so user-input requests are unavailable.");
+                var hasFeature = await client.HasExperimentalFeatureAsync(
+                    CodexAppServerClient.UserInputFeatureName,
+                    handshakeCts.Token).ConfigureAwait(false);
+                if (!hasFeature)
+                {
+                    throw new NotSupportedException(
+                        $"codex app-server does not list the '{CodexAppServerClient.UserInputFeatureName}' feature, so user-input requests are unavailable.");
+                }
             }
 
-            return new CodexAppServerSession(process, client, effectiveLogger);
+            return new CodexAppServerSession(process, client, effectiveLogger, userInputHandler is not null);
         }
         catch
         {
@@ -151,7 +165,7 @@ internal sealed class CodexAppServerSession : IAsyncDisposable
 
         var input = BuildTurnInput(prompt, imageAttachments);
 
-        await foreach (var threadEvent in _client.RunTurnAsync(activeThreadId, input, turnParameters, cancellationToken)
+            await foreach (var threadEvent in _client.RunTurnAsync(activeThreadId, input, turnParameters, cancellationToken)
                            .ConfigureAwait(false))
         {
             yield return threadEvent;
@@ -208,9 +222,34 @@ internal sealed class CodexAppServerSession : IAsyncDisposable
         return _client.RespondToUserQuestionAsync(requestId, response, cancellationToken);
     }
 
+    /// <summary>Attaches a per-execution channel to this session's native active-turn steering operation.</summary>
+    public void AttachSteering(CodexRunSteering steering, TimeSpan deliveryTimeout)
+    {
+        ArgumentNullException.ThrowIfNull(steering);
+        if (deliveryTimeout == Timeout.InfiniteTimeSpan || deliveryTimeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(deliveryTimeout),
+                deliveryTimeout,
+                "The steering delivery timeout must be positive and finite.");
+        }
+
+        _steerDeliveryTimeout = deliveryTimeout;
+        _steering = steering;
+        steering.Attach((steerId, text, cancellationToken) =>
+        {
+            var threadId = Volatile.Read(ref _loadedThreadId);
+            return threadId is null
+                ? Task.FromResult(CodexSteerResult.NotSteerable)
+                : _client.TrySteerAsync(steerId, threadId, text, _steerDeliveryTimeout, steering, cancellationToken);
+        });
+    }
+
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
+        _steering?.Detach();
+        _steering = null;
         await _client.DisposeAsync().ConfigureAwait(false);
         await _process.DisposeAsync().ConfigureAwait(false);
     }
@@ -280,10 +319,10 @@ internal sealed class CodexAppServerSession : IAsyncDisposable
     }
 
     /// <summary>
-    /// Builds the <c>thread/start</c> and <c>thread/resume</c> parameters. The raw config override is merged with the user-input
-    /// feature flag, which is set for interactive runs only.
+    /// Builds the <c>thread/start</c> and <c>thread/resume</c> parameters. The user-input feature is enabled only when the run
+    /// has an agent question handler.
     /// </summary>
-    public static JsonObject BuildThreadParameters(ThreadOptions threadOptions, JsonObject? config)
+    public static JsonObject BuildThreadParameters(ThreadOptions threadOptions, JsonObject? config, bool enableUserInput = true)
     {
         ArgumentNullException.ThrowIfNull(threadOptions);
 
@@ -291,7 +330,10 @@ internal sealed class CodexAppServerSession : IAsyncDisposable
             ? new JsonObject()
             : (JsonObject)config.DeepClone();
         var features = configObject[ConfigFeaturesKey] as JsonObject ?? new JsonObject();
-        features[CodexAppServerClient.UserInputFeatureName] = true;
+        if (enableUserInput)
+        {
+            features[CodexAppServerClient.UserInputFeatureName] = true;
+        }
         foreach (var enabled in threadOptions.EnabledFeatures ?? [])
         {
             if (!string.IsNullOrWhiteSpace(enabled))

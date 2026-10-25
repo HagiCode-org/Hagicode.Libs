@@ -72,9 +72,19 @@ public sealed class CodexProvider : ICodexProvider
             CodexOptions = sdkOptions
         });
 
-        if (options.InteractiveUserInput && options.UserInputHandler is { } userInputHandler)
+        var userInputHandler = options.InteractiveUserInput ? options.UserInputHandler : null;
+        if (userInputHandler is not null || options.Steering is not null)
         {
-            ValidateQuestionTimeout(options.QuestionTimeout);
+            if (userInputHandler is not null)
+            {
+                ValidateQuestionTimeout(options.QuestionTimeout);
+            }
+
+            if (options.Steering is not null)
+            {
+                ValidateSteerDeliveryTimeout(options.SteerDeliveryTimeout);
+            }
+
             var appServer = await TryOpenAppServerSessionAsync(
                     executablePath,
                     sdkOptions,
@@ -84,6 +94,11 @@ public sealed class CodexProvider : ICodexProvider
                 .ConfigureAwait(false);
             if (appServer is not null)
             {
+                if (options.Steering is { } steering)
+                {
+                    appServer.AttachSteering(steering, options.SteerDeliveryTimeout);
+                }
+
                 var appServerThreadId = string.IsNullOrWhiteSpace(options.ThreadId) ? null : options.ThreadId.Trim();
                 var appServerThread = client.CreateAppServerThread(appServer, appServerThreadId, options.ThreadOptions);
                 return new CodexSessionHandle(client, appServerThread, appServer);
@@ -98,15 +113,16 @@ public sealed class CodexProvider : ICodexProvider
     }
 
     /// <summary>
-    /// Opens the interactive transport, or returns <see langword="null"/> so the run uses the exec transport with questions
-    /// disabled (design D7). The transport is refused below <see cref="CodexAppServerSession.MinimumCliVersion"/>, when the
-    /// version cannot be read, and when the app-server handshake or the user-input feature check fails.
+    /// Opens the interactive transport for requested questions or steering, or returns <see langword="null"/> so the run uses
+    /// the exec transport without those interactive features. The transport is refused below
+    /// <see cref="CodexAppServerSession.MinimumCliVersion"/>, when the version cannot be read, or when the handshake fails. The
+    /// user-input feature is checked only when an agent question handler is enabled; native steering does not require that feature.
     /// </summary>
     private async Task<CodexAppServerSession?> TryOpenAppServerSessionAsync(
         string executablePath,
         CodexOptions sdkOptions,
         CodexSessionOptions options,
-        CodexUserInputHandler userInputHandler,
+        CodexUserInputHandler? userInputHandler,
         CancellationToken cancellationToken)
     {
         string? installedVersion;
@@ -116,14 +132,14 @@ public sealed class CodexProvider : ICodexProvider
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            _logger.LogWarning(exception, "Could not read the Codex CLI version; user questions are disabled for this run.");
+            _logger.LogWarning(exception, "Could not read the Codex CLI version; interactive Codex features are unavailable for this run.");
             return null;
         }
 
         if (!CodexAppServerSession.MeetsMinimumCliVersion(installedVersion))
         {
             _logger.LogWarning(
-                "Codex CLI {InstalledVersion} is below the interactive minimum {MinimumVersion}; user questions are disabled for this run.",
+                "Codex CLI {InstalledVersion} is below the interactive minimum {MinimumVersion}; interactive Codex features are unavailable for this run.",
                 installedVersion ?? "(unknown)",
                 CodexAppServerSession.MinimumCliVersion);
             return null;
@@ -149,7 +165,7 @@ public sealed class CodexProvider : ICodexProvider
         {
             _logger.LogWarning(
                 exception,
-                "The Codex app-server did not start for an interactive run; user questions are disabled for this run.");
+                "The Codex app-server did not start for an interactive run; interactive Codex features are unavailable for this run.");
             return null;
         }
     }
@@ -162,6 +178,17 @@ public sealed class CodexProvider : ICodexProvider
                 nameof(questionTimeout),
                 questionTimeout,
                 "The question timeout must be positive, or Timeout.InfiniteTimeSpan.");
+        }
+    }
+
+    private static void ValidateSteerDeliveryTimeout(TimeSpan deliveryTimeout)
+    {
+        if (deliveryTimeout == Timeout.InfiniteTimeSpan || deliveryTimeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(deliveryTimeout),
+                deliveryTimeout,
+                "The steering delivery timeout must be positive and finite.");
         }
     }
 

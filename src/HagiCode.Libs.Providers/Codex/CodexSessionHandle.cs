@@ -29,7 +29,14 @@ public sealed class CodexSessionHandle : IAsyncDisposable
     /// Gets whether this session runs on the interactive transport, so it can deliver user answers. It is <see langword="false"/>
     /// for the exec transport, where no question can be asked.
     /// </summary>
-    public bool SupportsUserQuestions => _appServer is not null;
+    public bool SupportsUserQuestions => _appServer?.SupportsUserQuestions == true;
+
+    /// <summary>
+    /// Gets whether this session is using the interactive transport that supports native active-turn steering. This describes
+    /// transport capability; a <see cref="CodexRunSteering"/> channel must also be supplied to <see cref="CodexSessionOptions"/>
+    /// for an execution to receive steering requests.
+    /// </summary>
+    public bool SupportsSteering => _appServer is not null;
 
     /// <summary>
     /// Answers an open question of the active turn by its request id. Passing <see langword="null"/> declines it. Only the

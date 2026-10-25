@@ -1,0 +1,61 @@
+{
+  "codexCliVersion": "0.163.0",
+  "source": "The turn/steer request and response fields are pinned from the Codex CLI 0.163.0 app-server v2 protocol. The response id is the JSON-RPC correlation id; a successful result names the bound active turn. The stale-turn error shape follows the app-server's invalid-request contract. These are scripted protocol frames; no turn/start frame is included.",
+  "activeTurn": {
+    "threadId": "00000000-0000-4000-8000-000000000001",
+    "turnId": "00000000-0000-4000-8000-000000000002"
+  },
+  "transactions": [
+    {
+      "name": "accepted",
+      "request": {
+        "id": 41,
+        "method": "turn/steer",
+        "params": {
+          "threadId": "00000000-0000-4000-8000-000000000001",
+          "expectedTurnId": "00000000-0000-4000-8000-000000000002",
+          "clientUserMessageId": "steer-accepted",
+          "input": [
+            {
+              "type": "text",
+              "text": "Focus on the failing tests first.",
+              "text_elements": []
+            }
+          ]
+        }
+      },
+      "response": {
+        "id": 41,
+        "result": {
+          "turnId": "00000000-0000-4000-8000-000000000002"
+        }
+      }
+    },
+    {
+      "name": "stale-turn-refused",
+      "request": {
+        "id": 42,
+        "method": "turn/steer",
+        "params": {
+          "threadId": "00000000-0000-4000-8000-000000000001",
+          "expectedTurnId": "00000000-0000-4000-8000-000000000003",
+          "clientUserMessageId": "steer-stale",
+          "input": [
+            {
+              "type": "text",
+              "text": "Do not retarget this stale request.",
+              "text_elements": []
+            }
+          ]
+        }
+      },
+      "response": {
+        "id": 42,
+        "error": {
+          "code": -32600,
+          "message": "expected active turn id `00000000-0000-4000-8000-000000000003` but found `00000000-0000-4000-8000-000000000002`"
+        }
+      }
+    }
+  ]
+}

@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading.Channels;
+using HagiCode.Libs.Providers.Codex;
 using ManagedCode.CodexSharpSDK.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -32,6 +33,7 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
     private const string ThreadStartMethod = "thread/start";
     private const string ThreadResumeMethod = "thread/resume";
     private const string TurnStartMethod = "turn/start";
+    private const string TurnSteerMethod = "turn/steer";
     private const string TurnInterruptMethod = "turn/interrupt";
     private const string FeatureListMethod = "experimentalFeature/list";
     private const string UserInputRequestMethod = "item/tool/requestUserInput";
@@ -55,6 +57,7 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
     private readonly CancellationTokenSource _shutdown = new();
     private readonly SemaphoreSlim _writeGate = new(1, 1);
     private readonly ConcurrentDictionary<long, TaskCompletionSource<JsonElement>> _pendingRequests = new();
+    private readonly ConcurrentDictionary<long, PendingSteer> _pendingSteers = new();
     private readonly CodexAppServerRequestMap _serverRequests = new();
     private readonly ConcurrentDictionary<Task, byte> _questionTasks = new();
     private readonly CodexAgentWorkTracker _agentWork = new();
@@ -62,6 +65,7 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
     private long _nextRequestId;
     private Task? _readLoop;
     private ActiveTurn? _activeTurn;
+    private int _connectionClosed;
     private int _disposed;
 
     /// <summary>
@@ -203,7 +207,7 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(turnParameters);
 
-        var turn = BeginTurn(cancellationToken);
+        var turn = BeginTurn(threadId, cancellationToken);
         try
         {
             // A subagent change observed between turns is delivered first, before this turn's events.
@@ -221,7 +225,10 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
                 throw new InvalidOperationException("codex app-server did not return a turn id for turn/start.");
             }
 
-            turn.TurnId = turnId;
+            lock (turn.LifecycleGate)
+            {
+                turn.TurnId = turnId;
+            }
 
             while (true)
             {
@@ -232,6 +239,7 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
+                    ResolvePendingSteers(turn);
                     await StopTurnAsync(threadId, turn).ConfigureAwait(false);
                     throw;
                 }
@@ -255,6 +263,100 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
         {
             EndTurn(turn);
         }
+    }
+
+    /// <summary>
+    /// Sends a native steer request to the currently active turn on this connection. The request is never translated into a
+    /// turn/start call. Its acknowledgement is correlated to the original steer identity and expected turn, with unresolved
+    /// delivery bounded by <paramref name="deliveryTimeout"/>.
+    /// </summary>
+    /// <param name="steerId">The caller-provided identity for this steer.</param>
+    /// <param name="threadId">The thread whose active turn should receive the steer.</param>
+    /// <param name="text">The follow-up message to deliver.</param>
+    /// <param name="deliveryTimeout">A positive finite deadline for the acknowledgement.</param>
+    /// <param name="steering">The execution channel that receives the correlated outcome.</param>
+    /// <param name="cancellationToken">Cancels the request write if delivery has not completed.</param>
+    /// <returns><see cref="CodexSteerResult.Sent"/> when the request was written; confirmation is reported later as an outcome.</returns>
+    public async Task<CodexSteerResult> TrySteerAsync(
+        string steerId,
+        string threadId,
+        string text,
+        TimeSpan deliveryTimeout,
+        CodexRunSteering steering,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(steerId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(threadId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(text);
+        ArgumentNullException.ThrowIfNull(steering);
+        if (deliveryTimeout == Timeout.InfiniteTimeSpan || deliveryTimeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(deliveryTimeout), "The steering delivery timeout must be positive and finite.");
+        }
+
+        if (_disposed == 1 || _connectionClosed == 1)
+        {
+            return CodexSteerResult.NotSteerable;
+        }
+
+        var turn = Volatile.Read(ref _activeTurn);
+        if (turn is null)
+        {
+            return CodexSteerResult.NotSteerable;
+        }
+
+        string expectedTurnId;
+        var requestId = Interlocked.Increment(ref _nextRequestId);
+        PendingSteer pending;
+        lock (turn.LifecycleGate)
+        {
+            if (turn.IsClosing || !string.Equals(turn.ThreadId, threadId, StringComparison.Ordinal)
+                || string.IsNullOrWhiteSpace(turn.TurnId)
+                || !turn.SeenSteerIds.Add(steerId))
+            {
+                return CodexSteerResult.NotSteerable;
+            }
+
+            expectedTurnId = turn.TurnId;
+            pending = new PendingSteer(requestId, steerId, threadId, expectedTurnId, turn, steering);
+            if (!_pendingSteers.TryAdd(requestId, pending))
+            {
+                turn.SeenSteerIds.Remove(steerId);
+                return CodexSteerResult.NotSteerable;
+            }
+        }
+
+        var input = new JsonArray
+        {
+            new JsonObject
+            {
+                ["type"] = "text",
+                ["text"] = text,
+                ["text_elements"] = new JsonArray()
+            }
+        };
+        var parameters = new JsonObject
+        {
+            ["threadId"] = threadId,
+            ["expectedTurnId"] = expectedTurnId,
+            ["clientUserMessageId"] = steerId,
+            ["input"] = input
+        };
+
+        Task<JsonElement> responseTask;
+        try
+        {
+            responseTask = await SendRequestFrameAsync(requestId, TurnSteerMethod, parameters, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is OperationCanceledException or IOException or InvalidOperationException)
+        {
+            RemoveUnsentSteer(pending);
+            return CodexSteerResult.NotSteerable;
+        }
+
+        _ = ObserveSteerOutcomeAsync(pending, responseTask, deliveryTimeout);
+        return CodexSteerResult.Sent;
     }
 
     /// <summary>
@@ -291,6 +393,7 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
 
         await _shutdown.CancelAsync().ConfigureAwait(false);
         FailPendingRequests(new OperationCanceledException("The codex app-server connection was closed."));
+        ResolvePendingSteers();
         _activeTurn?.Events.Writer.TryComplete(new IOException("The codex app-server connection was closed."));
 
         if (_readLoop is not null)
@@ -309,9 +412,9 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
         _writeGate.Dispose();
     }
 
-    private ActiveTurn BeginTurn(CancellationToken cancellationToken)
+    private ActiveTurn BeginTurn(string threadId, CancellationToken cancellationToken)
     {
-        var turn = new ActiveTurn(cancellationToken);
+        var turn = new ActiveTurn(threadId, cancellationToken);
         if (Interlocked.CompareExchange(ref _activeTurn, turn, null) is not null)
         {
             turn.Dispose();
@@ -400,6 +503,117 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
         return await completion.Task.ConfigureAwait(false);
     }
 
+    private async Task<Task<JsonElement>> SendRequestFrameAsync(
+        long id,
+        string method,
+        JsonObject parameters,
+        CancellationToken cancellationToken)
+    {
+        ThrowIfDisposed();
+        var completion = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (!_pendingRequests.TryAdd(id, completion))
+        {
+            throw new InvalidOperationException($"A codex app-server request with id {id} is already pending.");
+        }
+
+        var message = new JsonObject
+        {
+            ["id"] = id,
+            ["method"] = method,
+            ["params"] = parameters
+        };
+
+        try
+        {
+            await WriteAsync(message, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            if (_pendingRequests.TryRemove(id, out var pending))
+            {
+                pending.TrySetCanceled(cancellationToken);
+            }
+
+            throw;
+        }
+
+        return completion.Task;
+    }
+
+    private async Task ObserveSteerOutcomeAsync(
+        PendingSteer pending,
+        Task<JsonElement> responseTask,
+        TimeSpan deliveryTimeout)
+    {
+        try
+        {
+            var response = await responseTask.WaitAsync(deliveryTimeout).ConfigureAwait(false);
+            var acknowledgedTurnId = ReadString(response, "turnId");
+            ResolveSteer(
+                pending,
+                string.Equals(acknowledgedTurnId, pending.ExpectedTurnId, StringComparison.Ordinal)
+                    ? CodexSteerOutcome.Consumed
+                    : CodexSteerOutcome.NotConsumed);
+        }
+        catch (TimeoutException)
+        {
+            ResolveSteer(pending, CodexSteerOutcome.NotConsumed);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogDebug(exception, "Codex steer {SteerId} was not confirmed by the active turn.", pending.SteerId);
+            ResolveSteer(pending, CodexSteerOutcome.NotConsumed);
+        }
+    }
+
+    private void ResolvePendingSteers(ActiveTurn? turn = null)
+    {
+        foreach (var pending in _pendingSteers.Values)
+        {
+            if (turn is null || ReferenceEquals(pending.Turn, turn))
+            {
+                ResolveSteer(pending, CodexSteerOutcome.NotConsumed);
+            }
+        }
+    }
+
+    private void ResolveSteer(PendingSteer pending, CodexSteerOutcome outcome)
+    {
+        if (!pending.TryResolve())
+        {
+            return;
+        }
+
+        _pendingSteers.TryRemove(pending.RequestId, out _);
+        CancelPendingRequest(pending.RequestId);
+        try
+        {
+            pending.Steering.Report(pending.SteerId, outcome);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "A Codex steering outcome observer failed for steer {SteerId}.", pending.SteerId);
+        }
+    }
+
+    private void RemoveUnsentSteer(PendingSteer pending)
+    {
+        _pendingSteers.TryRemove(pending.RequestId, out _);
+        CancelPendingRequest(pending.RequestId);
+        lock (pending.Turn.LifecycleGate)
+        {
+            pending.Turn.SeenSteerIds.Remove(pending.SteerId);
+        }
+    }
+
+    private void CancelPendingRequest(long requestId)
+    {
+        if (_pendingRequests.TryRemove(requestId, out var completion))
+        {
+            completion.TrySetCanceled();
+        }
+    }
+
     private async Task NotifyAsync(string method, JsonObject? parameters, CancellationToken cancellationToken)
     {
         var message = new JsonObject { ["method"] = method };
@@ -456,7 +670,9 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
         }
         finally
         {
+            Volatile.Write(ref _connectionClosed, 1);
             FailPendingRequests(new IOException("The codex app-server process exited before it answered."));
+            ResolvePendingSteers();
             _activeTurn?.Events.Writer.TryComplete(new IOException("The codex app-server process exited during a turn."));
         }
     }
@@ -500,14 +716,31 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
             return;
         }
 
+        _pendingSteers.TryGetValue(id, out var pendingSteer);
+
         if (root.TryGetProperty("error", out var error))
         {
             completion.TrySetException(new InvalidOperationException(
                 ReadString(error, "message") ?? "codex app-server returned an error."));
+            if (pendingSteer is not null)
+            {
+                ResolveSteer(pendingSteer, CodexSteerOutcome.NotConsumed);
+            }
+
             return;
         }
 
-        completion.TrySetResult(root.TryGetProperty("result", out var result) ? result : default);
+        var result = root.TryGetProperty("result", out var resultElement) ? resultElement : default;
+        completion.TrySetResult(result);
+        if (pendingSteer is not null)
+        {
+            var acknowledgedTurnId = ReadString(result, "turnId");
+            ResolveSteer(
+                pendingSteer,
+                string.Equals(acknowledgedTurnId, pendingSteer.ExpectedTurnId, StringComparison.Ordinal)
+                    ? CodexSteerOutcome.Consumed
+                    : CodexSteerOutcome.NotConsumed);
+        }
     }
 
     private void HandleNotification(string method, JsonElement parameters)
@@ -529,6 +762,18 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
 
         FlushAgentWork(turn);
 
+        if (method == "turn/started")
+        {
+            var startedTurnId = ReadTurnId(parameters);
+            if (!string.IsNullOrWhiteSpace(startedTurnId))
+            {
+                lock (turn.LifecycleGate)
+                {
+                    turn.TurnId ??= startedTurnId;
+                }
+            }
+        }
+
         ThreadEvent? threadEvent;
         try
         {
@@ -542,6 +787,20 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
 
         if (threadEvent is not null)
         {
+            var failedTurn = threadEvent is TurnFailedEvent;
+            if (threadEvent is TurnCompletedEvent or TurnFailedEvent)
+            {
+                lock (turn.LifecycleGate)
+                {
+                    turn.IsClosing = true;
+                }
+            }
+
+            if (failedTurn)
+            {
+                ResolvePendingSteers(turn);
+            }
+
             turn.Events.Writer.TryWrite(threadEvent);
         }
     }
@@ -831,15 +1090,41 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
         throw new InvalidOperationException("codex app-server did not return a thread id.");
     }
 
+    private sealed class PendingSteer(
+        long requestId,
+        string steerId,
+        string threadId,
+        string expectedTurnId,
+        ActiveTurn turn,
+        CodexRunSteering steering)
+    {
+        private int _resolved;
+
+        public long RequestId { get; } = requestId;
+
+        public string SteerId { get; } = steerId;
+
+        public string ThreadId { get; } = threadId;
+
+        public string ExpectedTurnId { get; } = expectedTurnId;
+
+        public ActiveTurn Turn { get; } = turn;
+
+        public CodexRunSteering Steering { get; } = steering;
+
+        public bool TryResolve() => Interlocked.Exchange(ref _resolved, 1) == 0;
+    }
+
     /// <summary>
-    /// The state of the one turn a client runs: its id, its event channel, and the cancellation of its questions.
+    /// The state of the one turn a client runs: its identity, event channel, and cancellation of its questions.
     /// </summary>
     private sealed class ActiveTurn : IDisposable
     {
         private readonly CancellationTokenSource _questionScope;
 
-        public ActiveTurn(CancellationToken cancellationToken)
+        public ActiveTurn(string threadId, CancellationToken cancellationToken)
         {
+            ThreadId = threadId;
             _questionScope = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             Events = Channel.CreateUnbounded<ThreadEvent>(new UnboundedChannelOptions
             {
@@ -850,9 +1135,17 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
 
         public CodexAppServerEventMapper Mapper { get; } = new();
 
+        public object LifecycleGate { get; } = new();
+
+        public string ThreadId { get; }
+
         public Channel<ThreadEvent> Events { get; }
 
         public string? TurnId { get; set; }
+
+        public bool IsClosing { get; set; }
+
+        public HashSet<string> SeenSteerIds { get; } = new(StringComparer.Ordinal);
 
         public CancellationToken CancellationToken => _questionScope.Token;
 
