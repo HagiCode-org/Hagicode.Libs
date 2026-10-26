@@ -73,3 +73,21 @@ internal static class OmpRpcCapture
         return File.ReadAllLines(path).Where(static line => line.Length > 0).ToArray();
     }
 }
+
+// END-TO-END CHECK (openspec omp-steer-support, task 7.1; 2026-10-26). Real omp 18.10.4 through OmpProvider and the default
+// CliProcessManager with EnvironmentCliResourceLimitProvider (AGENT_MEM_MAX=4G). Command: omp --mode rpc-ui --model
+// omniroute/claude/claude-haiku-5-5 --no-session, in a scratch directory outside the home directory. Environment: HOME, PATH,
+// AGENT_MEM_MAX, XDG_RUNTIME_DIR and DBUS_SESSION_BUS_ADDRESS. The last two are needed by the systemd user manager: without them
+// the trial scope fails and no limit is applied. The harness was a throwaway program outside the repositories. Results, one run
+// per scenario, observed through OmpProvider's CliMessage stream and OmpRunSteering.OutcomeObserved:
+//  streaming: the steer was issued at the first assistant message. steerResult Sent, outcomes [steer-1=Consumed] (one). The
+//    final text ends with PINEAPPLE, so the steered instruction took effect after the turn that was running.
+//  tool call: the steer was issued at tool.call, while `sleep 6 && echo TOOLDONE` ran. steerResult Sent, outcomes [steer-1=Consumed]
+//    (one). tool.completed came about 6 s after the call and the reply contains TOOLDONE, so the tool was not backgrounded. The final
+//    text is "TOOLDONE | PINEAPPLE".
+//  memory cap: the omp process ran in its own transient scope run-p<pid>.scope with memory.max 4294967296 (4 GiB), read from
+//    /proc/<pid>/cgroup during the run.
+// Captured CliMessage sequences (the raw frames were not kept by the harness):
+//   streaming: session.started, assistant (steer issued here), 30+ assistant, terminal.completed
+//   tool call: session.started, tool.call, [steer issued], tool.completed, assistant x3, terminal.completed
+// Gate unchanged: the wire facts above are the ones recorded in this file's findings and in Fixtures/Omp.
