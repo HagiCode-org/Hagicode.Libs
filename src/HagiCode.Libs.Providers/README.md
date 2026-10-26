@@ -313,6 +313,41 @@ var result = await steering.SteerAsync("steer-1", "also update the tests"); // S
 - `SteerDeliveryTimeout` bounds only the wait for Pi's reply to a steer; Pi answered in 3 to 30 ms when recorded. A reply that does not arrive in time makes the steer `NotSteerable`. Consumption is never timed, so a long tool call does not produce `NotConsumed`. The value must be positive for every RPC run; zero or negative is rejected before any process starts.
 - `NotSteerable` (nothing was written) covers: no attached run (before the prompt started, after the run ended, or after the enumeration was abandoned), a prompt that Pi handled or rejected, an empty or whitespace message (Pi would run it as an empty turn), a steer after Pi reported `agent_end`, an id that an earlier steer of the same run already used, and a steer Pi refused (for example a missing message). The caller then sends the message as an ordinary follow-up.
 
+## OMP run steering
+
+`OmpOptions.Steering` (default `null`, nothing changes) lets the host send follow-up messages to an OMP run that is already executing, through the same `rpc-ui` process. Create one `OmpRunSteering` per run and pass it in the options. `SteerAsync` is meaningful only while `ExecuteAsync` is being iterated, so drive the stream on its own task:
+
+```csharp
+var steering = new OmpRunSteering();
+steering.OutcomeObserved += (_, args) => RecordOutcome(args.SteerId, args.Outcome);
+
+var options = new OmpOptions
+{
+    UserInputHandler = (request, cancellationToken) => Task.FromResult<OmpUserInputResponse?>(null), // selects RPC mode
+    Steering = steering,
+    SteerDeliveryTimeout = TimeSpan.FromSeconds(30) // default; must be positive
+};
+
+var run = Task.Run(async () =>
+{
+    await foreach (var message in provider.ExecuteAsync(options, "Refactor the parser", cancellationToken))
+    {
+        Handle(message);
+    }
+});
+
+var result = await steering.SteerAsync("steer-1", "also update the tests"); // Sent or NotSteerable
+```
+
+- Steering needs RPC mode, which a `UserInputHandler` selects. A JSON print run never attaches the channel, and the OMP command line is the same with or without it.
+- When a channel is attached, the provider sets OMP's interrupt mode to `wait` before the prompt. The default `immediate` mode backgrounds a running tool call when a steer arrives and replaces its result; `wait` keeps the real result, and the steer is taken into the run after the tool call finishes.
+- `Sent` means OMP answered the steer command with success. OMP takes queued steers into the run one per turn, in order. Each accepted steer gets exactly one outcome through `OutcomeObserved`: `Consumed` when OMP's output shows the message entering the run, `NotConsumed` when the run ends first, by cancellation, when OMP exits, or when OMP settles with the steer still pending.
+- The accepting window closes at the first `agent_end` of the run. A steer after it is `NotSteerable` and is never written, even while background work could wake the agent again; send it as an ordinary follow-up.
+- `NotSteerable` (nothing written) covers: no attached run (before the agent started, after the run ended, or after the enumeration was abandoned), an empty or whitespace message (OMP would accept and drop it), an id that an earlier steer of the same run already used, a steer OMP refused (for example a missing message), a steer whose reply did not arrive within `SteerDeliveryTimeout`, and a build that refused the interrupt mode (the channel is then never attached).
+- `SteerDeliveryTimeout` bounds only the wait for OMP's reply. Recorded replies came back in about 1 ms during a run and 11 to 18 ms right after a settle. Consumption is never timed, so a long tool call does not produce `NotConsumed`. The value must be positive for every RPC run that has a channel; zero or negative is rejected before any process starts.
+- A steer sent while an `ask` question is open does not answer or cancel it; the steer is taken into the run after the answer's tool result.
+- The wire facts come from `omp` 18.10.4 captures in `Fixtures/Omp/steer-*.jsonl`, with the findings in `tests/HagiCode.Libs.Providers.Tests/OmpRpcCapture.cs`. Replay tests over those captures are in `OmpSteeringTests` and `OmpProviderSteeringTests`.
+
 ## Pi interactive questions
 
 Set `PiOptions.UserInputHandler` and the Pi agent can ask the user multiple-choice questions with the bundled `ask_user_question` tool (the input schema of Claude's `AskUserQuestion`). Without a handler Pi runs as before in `--mode json --print`; with one the provider runs `pi --mode rpc` and loads the extension from an embedded resource, so there is nothing to install.
