@@ -348,6 +348,40 @@ var result = await steering.SteerAsync("steer-1", "also update the tests"); // S
 - A steer sent while an `ask` question is open does not answer or cancel it; the steer is taken into the run after the answer's tool result.
 - The wire facts come from `omp` 18.10.4 captures in `Fixtures/Omp/steer-*.jsonl`, with the findings in `tests/HagiCode.Libs.Providers.Tests/OmpRpcCapture.cs`. Replay tests over those captures are in `OmpSteeringTests` and `OmpProviderSteeringTests`.
 
+## CodeBuddy run steering
+
+`CodebuddyOptions.Steering` (default `null`, nothing changes) lets the host send a follow-up message to a CodeBuddy run that is already executing, through the same ACP process. Create one `CodebuddyRunSteering` per run and pass it in the options. `SteerAsync` is meaningful only while `ExecuteAsync` is being iterated, so drive the stream on its own task:
+
+```csharp
+var steering = new CodebuddyRunSteering();
+steering.OutcomeObserved += (_, args) => RecordOutcome(args.SteerId, args.Outcome);
+
+var options = new CodebuddyOptions
+{
+    Steering = steering,
+    SteerDeliveryTimeout = TimeSpan.FromSeconds(30) // default; must be positive when Steering is set
+};
+
+var run = Task.Run(async () =>
+{
+    await foreach (var message in provider.ExecuteAsync(options, "Refactor the parser", cancellationToken))
+    {
+        Handle(message);
+    }
+});
+
+var result = await steering.SteerAsync("steer-1", "also update the tests"); // Sent or NotSteerable
+```
+
+- The steer is sent as `session/steer` over the existing ACP connection while `session/prompt` is pending, with `clientUserMessageId` set to the steer id. Requests are serialized, so the steer never interleaves with another write.
+- `Sent` means CodeBuddy answered `{ steered: true }`. Each accepted steer gets exactly one outcome through `OutcomeObserved`. `Consumed` is reported when CodeBuddy emits a `user_message_chunk` whose `codebuddy.ai/messageId` equals the steer id. Without that frame the outcome is `NotConsumed`. The echo arrives at the injection point: after a tool call completes, or at the next model request during plain text generation.
+- The accepting window closes at the run's terminal message. Outcomes are reported after the CLI process is disposed, so a held steer is never run again after the caller has been told `NotConsumed`.
+- `NotSteerable` (nothing written) covers: no attached run (before the run started, after it ended, or after the enumeration was abandoned), an empty or whitespace message, an id this run already used, a steer CodeBuddy refused (an idle session answers `{ steered: false, reason: "idle" }`), a steer whose acknowledgement did not arrive within `SteerDeliveryTimeout`, and a CodeBuddy CLI older than the minimum below, where the channel is never attached.
+- The minimum verified CLI version is `2.146.0` (the internal constant `CodebuddyProvider.MinimumSteerCliVersion`). Versions 2.140.0 to 2.145.0 acknowledge the steer, and some echo its text, but none echo the steer id, so the channel stays detached on them. The version is read with `codebuddy --version`, once per provider and executable path, because the ACP `initialize` result does not carry it. A version that cannot be read leaves the channel detached.
+- Consumption is never timed. `SteerDeliveryTimeout` bounds only the wait for the acknowledgement.
+- Known gap: a steer that CodeBuddy holds across a process teardown followed by a session resume has not been verified. Within one process, a steer accepted during a tool call and then cancelled was not run afterwards. The recorded captures use `--no-session-persistence`, so there was no session to resume.
+- The wire facts come from CodeBuddy 2.169.0 captures in `Fixtures/Codebuddy/steer-*.jsonl`, with the findings and the gate in `tests/HagiCode.Libs.Providers.Tests/CodebuddySteerCapture.cs`. Replay tests over those captures are in `CodebuddyProviderSteeringTests`, and the rules are covered by `CodebuddySteerTrackerTests` and `CodebuddySteeringTests`.
+
 ## Pi interactive questions
 
 Set `PiOptions.UserInputHandler` and the Pi agent can ask the user multiple-choice questions with the bundled `ask_user_question` tool (the input schema of Claude's `AskUserQuestion`). Without a handler Pi runs as before in `--mode json --print`; with one the provider runs `pi --mode rpc` and loads the extension from an embedded resource, so there is nothing to install.
