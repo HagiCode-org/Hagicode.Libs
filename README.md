@@ -415,34 +415,45 @@ If you omit `Model`, the provider forwards no model override so qodercli can use
 
 ## Agent memory limits (Linux)
 
-An agent CLI and the commands it starts can be capped at a memory limit. When a limit is active, `CliProcessManager` and the launchers that build their own start information (Codex exec, the Codex app-server and OpenCode, through `CgroupScopeLauncher`) start the CLI inside a systemd user scope. The scope charges the agent and every process it starts. `systemd-run --scope` replaces itself with the CLI, so the tracked process id, the standard streams and the exit code are the CLI's, and `ProcessResult.ResolvedExecutablePath` and `CommandPreview` still name the CLI.
+An agent CLI and the commands it starts can be capped at a memory limit, a CPU limit, or both. When a limit is active, `CliProcessManager` and the launchers that build their own start information (Codex exec, the Codex app-server and OpenCode, through `CgroupScopeLauncher`) start the CLI inside a systemd user scope. The scope charges the agent and every process it starts. `systemd-run --scope` replaces itself with the CLI, so the tracked process id, the standard streams and the exit code are the CLI's, and `ProcessResult.ResolvedExecutablePath` and `CommandPreview` still name the CLI.
 
-The limit comes from `ICliResourceLimitProvider`. `AddHagiCodeLibs()` registers `EnvironmentCliResourceLimitProvider` with `TryAddSingleton`; it reads `AGENT_MEM_MAX`, a positive whole number with an optional `M`, `MB`, `G` or `GB` suffix (case-insensitive, megabytes by default). An empty, zero or negative value means no limit; a malformed value also means no limit and logs one warning. A host that keeps its own setting registers its provider with `Replace`, and then `AGENT_MEM_MAX` is not read. `new CliProcessManager()` has no provider and never applies a limit. The limit is read for each launch, so a change applies to agents started afterwards.
+The limits come from `ICliResourceLimitProvider`. `AddHagiCodeLibs()` registers `EnvironmentCliResourceLimitProvider` with `TryAddSingleton`. It reads two independent variables on every launch:
 
-Every value is derived from the limit in whole megabytes, rounded down:
+- `AGENT_MEM_MAX`: a positive whole number with an optional `M`, `MB`, `G` or `GB` suffix (case-insensitive, megabytes by default).
+- `AGENT_CPU_MAX`: a positive whole number of percent of one core, with an optional `%` suffix. `200%` and `200` both mean two cores. A value above `10000` is clamped to `10000`.
+
+An empty, zero or negative value means no limit for that resource. A malformed value also means no limit for it and logs one warning for that variable. A host that keeps its own setting registers its provider with `Replace`, and then neither variable is read. `new CliProcessManager()` has no provider and never applies a limit. Limits are read for each launch, so a change applies to agents started afterwards.
+
+Every memory value is derived from the memory limit in whole megabytes, rounded down:
 
 | Property | Value |
 | --- | --- |
-| `MemoryMax` | the limit |
-| `MemoryHigh` | 85% of the limit |
+| `MemoryMax` | the memory limit |
+| `MemoryHigh` | 85% of the memory limit |
 | `MemorySwapMax` | `0` |
 | `TasksMax` | `2000` |
-| `NODE_OPTIONS` | adds `--max-old-space-size=` 75% of the limit; other content is kept, and a caller's own `--max-old-space-size` wins |
+| `NODE_OPTIONS` | adds `--max-old-space-size=` 75% of the memory limit; other content is kept, and a caller's own `--max-old-space-size` wins |
+| `CPUQuota` | the CPU limit as a percentage of one core (`CPUQuota=200%` is two cores); `CPUWeight` is not used |
 
-For example, this setting:
+For example, these settings:
 
 ```bash
 AGENT_MEM_MAX=4G
+AGENT_CPU_MAX=200%
 ```
 
-starts each agent CLI as:
+start each agent CLI as:
 
 ```text
-systemd-run --user --scope --quiet -p MemoryMax=4096M -p MemoryHigh=3481M -p MemorySwapMax=0 -p TasksMax=2000 -- <cli> <args>
+systemd-run --user --scope --quiet -p MemoryMax=4096M -p MemoryHigh=3481M -p MemorySwapMax=0 -p TasksMax=2000 -p CPUQuota=200% -- <cli> <args>
 NODE_OPTIONS=--max-old-space-size=3072
 ```
 
-Requirements: Linux with cgroup v2, `systemd-run` on `PATH`, and a running systemd user manager that the process can reach (`XDG_RUNTIME_DIR` or `DBUS_SESSION_BUS_ADDRESS` must be set). `CgroupScopeCapabilityProbe` checks this once per process with a trial `systemd-run --user --scope --quiet -p MemoryMax=64M -- true` (5 s timeout) and reports `ok`, `not-linux`, `systemd-run-missing` or `user-scope-unavailable`. It never spawns anything on Windows or macOS. When the host cannot enforce the limit, agents start without it and one warning is logged per reason.
+With `AGENT_CPU_MAX` alone, the scope carries only `-p CPUQuota=200%`, and `NODE_OPTIONS` is not set. With `AGENT_MEM_MAX` alone, the scope carries only the memory properties.
+
+Requirements: Linux with cgroup v2, `systemd-run` on `PATH`, and a running systemd user manager that the process can reach (`XDG_RUNTIME_DIR` or `DBUS_SESSION_BUS_ADDRESS` must be set). `CgroupScopeCapabilityProbe` checks memory once per process with a trial `systemd-run --user --scope --quiet -p MemoryMax=64M -- true` (5 s timeout) and reports `ok`, `not-linux`, `systemd-run-missing` or `user-scope-unavailable`. It checks CPU with a trial `-p CPUQuota=50%` scope and reads that scope's own `cpu.max`. CPU is reported `ok` only when the quota reads back as limited. A scope whose `cpu.max` reads `max` or cannot be read reports `cpu-controller-unavailable`, which means the `cpu` controller is not delegated to the user manager. The probe never spawns anything on Windows or macOS.
+
+Memory and CPU are decided separately. A limit the host can enforce still applies when the other cannot be enforced, and the agent starts without the unenforceable part. One warning is logged per resource and reason.
 
 Version probes, discovery and CI setup set `ProcessStartContext.ApplyResourceLimits = false` (or `CliExecutionRequest.ApplyResourceLimits = false`) and are never limited.
 

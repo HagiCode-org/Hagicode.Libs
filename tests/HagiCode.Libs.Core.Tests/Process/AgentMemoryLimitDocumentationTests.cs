@@ -10,16 +10,30 @@ public sealed class AgentMemoryLimitDocumentationTests
     public void The_README_example_produces_the_documented_systemd_run_arguments_and_node_options()
     {
         var section = ReadSection();
-        var settingLine = section.Single(static line => line.StartsWith(CliResourceLimits.EnvironmentVariableName + "=", StringComparison.Ordinal));
+        var memorySettingLine = section.Single(static line => line.StartsWith(CliResourceLimits.EnvironmentVariableName + "=", StringComparison.Ordinal));
+        var cpuSettingLine = section.Single(static line => line.StartsWith(CliResourceLimits.CpuEnvironmentVariableName + "=", StringComparison.Ordinal));
         var commandLine = section.Single(static line => line.StartsWith("systemd-run ", StringComparison.Ordinal));
         var nodeOptionsLine = section.Single(static line => line.StartsWith("NODE_OPTIONS=", StringComparison.Ordinal));
 
-        CliResourceLimits.TryParseSize(settingLine[(CliResourceLimits.EnvironmentVariableName.Length + 1)..], out var limits).ShouldBeTrue();
-        limits.ShouldNotBeNull();
+        CliResourceLimits.TryParseSize(memorySettingLine[(CliResourceLimits.EnvironmentVariableName.Length + 1)..], out var memory).ShouldBeTrue();
+        CliResourceLimits.TryParseCpuPercent(cpuSettingLine[(CliResourceLimits.CpuEnvironmentVariableName.Length + 1)..], out var cpuPercent).ShouldBeTrue();
+        memory.ShouldNotBeNull();
+        var limits = new CliResourceLimits(memory.MemoryMaxMegabytes, cpuPercent);
 
         var documentedArguments = commandLine.Split(' ', StringSplitOptions.RemoveEmptyEntries).Skip(1).ToList();
         documentedArguments.Take(documentedArguments.IndexOf("--") + 1).ShouldBe(limits.SystemdRunArguments);
         nodeOptionsLine["NODE_OPTIONS=".Length..].ShouldBe(CgroupScopeLauncher.MergeNodeOptions(null, limits.NodeHeapOption!));
+    }
+
+    [Test]
+    public void The_README_names_every_capability_reason_the_probe_can_report()
+    {
+        var section = string.Join('\n', ReadSection());
+
+        foreach (var reason in Enum.GetValues<CgroupScopeCapabilityReason>().Select(CgroupScopeCapability.ToReasonCode))
+        {
+            section.ShouldContain($"`{reason}`");
+        }
     }
 
     private static IReadOnlyList<string> ReadSection()
