@@ -10,6 +10,8 @@ using HagiCode.Libs.Core.Process;
 using HagiCode.Libs.Core.Transport;
 using HagiCode.Libs.Core.Acp;
 using HagiCode.Libs.Core.AgentWork;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace HagiCode.Libs.Providers.ClaudeCode;
 
@@ -49,6 +51,7 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
     private readonly CliExecutableResolver _executableResolver;
     private readonly CliProcessManager _processManager;
     private readonly IRuntimeEnvironmentResolver? _runtimeEnvironmentResolver;
+    private readonly ILogger<ClaudeCodeProvider> _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ClaudeCodeProvider" /> class.
@@ -56,14 +59,17 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
     /// <param name="executableResolver">The executable resolver.</param>
     /// <param name="processManager">The process manager.</param>
     /// <param name="runtimeEnvironmentResolver">The optional runtime environment resolver.</param>
+    /// <param name="logger">The optional logger for launch and init diagnostics. Defaults to a logger that discards entries.</param>
     public ClaudeCodeProvider(
         CliExecutableResolver executableResolver,
         CliProcessManager processManager,
-        IRuntimeEnvironmentResolver? runtimeEnvironmentResolver = null)
+        IRuntimeEnvironmentResolver? runtimeEnvironmentResolver = null,
+        ILogger<ClaudeCodeProvider>? logger = null)
     {
         _executableResolver = executableResolver ?? throw new ArgumentNullException(nameof(executableResolver));
         _processManager = processManager ?? throw new ArgumentNullException(nameof(processManager));
         _runtimeEnvironmentResolver = runtimeEnvironmentResolver;
+        _logger = logger ?? NullLogger<ClaudeCodeProvider>.Instance;
     }
 
     /// <inheritdoc />
@@ -346,6 +352,12 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
             }
         }
 
+        var debugFile = ArgumentValueNormalizer.NormalizeOptionalValue(options.DebugFile);
+        if (debugFile is not null)
+        {
+            arguments.AddRange(["--debug-file", debugFile]);
+        }
+
         foreach (var extraArgument in options.ExtraArgs)
         {
             if (string.Equals(extraArgument.Key, "continue", StringComparison.OrdinalIgnoreCase))
@@ -391,6 +403,104 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
         }
 
         return environment;
+    }
+
+    /// <summary>
+    /// Logs the argument shape and the environment names of one launch. Diagnostics only read the launch, and a failure
+    /// is logged at Debug without affecting the run.
+    /// </summary>
+    private void LogLaunch(ProcessStartContext startContext)
+    {
+        try
+        {
+            _logger.LogInformation(
+                "Claude Code launch arguments: {Arguments}",
+                ClaudeLaunchDiagnostics.DescribeArguments(startContext.Arguments));
+            _logger.LogInformation(
+                "Claude Code launch environment: {Environment}",
+                ClaudeLaunchDiagnostics.DescribeEnvironment(startContext.EnvironmentVariables ?? new Dictionary<string, string?>()));
+        }
+        catch (Exception exception)
+        {
+            _logger.LogDebug(exception, "Could not describe the Claude Code launch.");
+        }
+    }
+
+    /// <summary>
+    /// Logs a content-free summary of one message written to the CLI's stdin.
+    /// </summary>
+    private void LogStdinWrite(int sequence, CliMessage message)
+    {
+        try
+        {
+            _logger.LogDebug(
+                "Claude Code stdin write {Sequence}: {Summary}",
+                sequence,
+                ClaudeLaunchDiagnostics.DescribeStdinMessage(message));
+        }
+        catch (Exception exception)
+        {
+            _logger.LogDebug(exception, "Could not describe a Claude Code stdin write.");
+        }
+    }
+
+    /// <summary>
+    /// Summarizes the <c>system</c> <c>init</c> message and warns about plugin directories the CLI did not expose. The message
+    /// is only read; the caller yields it unchanged, and a failure is logged at Debug.
+    /// </summary>
+    private void ObserveInitMessage(CliMessage message, ClaudeCodeOptions options)
+    {
+        try
+        {
+            if (!string.Equals(message.Type, "system", StringComparison.Ordinal)
+                || !IsInitMessage(message.Content)
+                || !ClaudeInitSummary.TryParse(message.Content, out var summary))
+            {
+                return;
+            }
+
+            _logger.LogInformation("Claude Code init summary: {Summary}", summary.Describe());
+
+            var pluginDirectories = options.PluginDirectories
+                .Select(ArgumentValueNormalizer.NormalizeOptionalValue)
+                .OfType<string>()
+                .ToArray();
+            var findings = ClaudeInitSummary.FindUnexposedPlugins(summary, pluginDirectories);
+            foreach (var plugin in findings.RegisteredWithoutSkills)
+            {
+                _logger.LogWarning(
+                    "Claude Code plugin registered but skills not exposed: plugin {PluginName} at {PluginPath} has no skill named {PluginName}:...",
+                    plugin.Name,
+                    plugin.Path,
+                    plugin.Name);
+            }
+
+            if (findings.PassedWithoutRegistration.Count > 0)
+            {
+                var listedPaths = summary.Plugins.Count == 0
+                    ? "(none)"
+                    : string.Join(", ", summary.Plugins.Select(static plugin => plugin.Path ?? "(no path)"));
+                foreach (var directory in findings.PassedWithoutRegistration)
+                {
+                    _logger.LogWarning(
+                        "Claude Code plugin directory passed but no plugin registered: {PluginDirectory}; init listed {ListedPluginPaths}",
+                        directory,
+                        listedPaths);
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            _logger.LogDebug(exception, "Could not summarize the Claude Code init message.");
+        }
+    }
+
+    private static bool IsInitMessage(JsonElement content)
+    {
+        return content.ValueKind == JsonValueKind.Object
+            && content.TryGetProperty("subtype", out var subtype)
+            && subtype.ValueKind == JsonValueKind.String
+            && string.Equals(subtype.GetString(), "init", StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -506,6 +616,7 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
         ClaudeCodeDebugContext debugContext,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
+        LogLaunch(startContext);
         await using var transport = CreateTransport(startContext);
         await transport.ConnectAsync(cancellationToken).ConfigureAwait(false);
 
@@ -520,7 +631,8 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
 
         // Every write after connect goes through one gate: the receive loop and the background task of each pending
         // question write concurrently.
-        var writer = new ClaudeStdinWriter(transport);
+        var stdinSequence = 0;
+        var writer = new ClaudeStdinWriter(transport, message => LogStdinWrite(++stdinSequence, message));
         using var pendingQuestions = options.UserInputHandler is { } userInputHandler
             ? new ClaudePendingQuestions(userInputHandler, options.QuestionTimeout, writer, completionTracker, cancellationToken)
             : null;
@@ -602,6 +714,7 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
                 }
 
                 var message = receiver.Current;
+                ObserveInitMessage(message, options);
 
                 // Control-protocol traffic is handled before the tracker and the turn delivery see the message: the echo of
                 // a response the host wrote looks like run activity to them, and a request that is answered here is not

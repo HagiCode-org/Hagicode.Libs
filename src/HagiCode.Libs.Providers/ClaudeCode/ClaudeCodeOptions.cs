@@ -109,6 +109,12 @@ public sealed record ClaudeCodeOptions
     public IReadOnlyList<string> PluginDirectories { get; init; } = [];
 
     /// <summary>
+    /// Gets or sets the file Claude writes its debug log to, sent as <c>--debug-file &lt;path&gt;</c> when set.
+    /// The debug log can contain prompts and tool output, so callers must choose a private location.
+    /// </summary>
+    public string? DebugFile { get; init; }
+
+    /// <summary>
     /// Gets or sets extra CLI arguments expressed as flag/value pairs.
     /// A <see langword="null" /> value adds a switch without a value, while non-null values are boundary-trimmed and ignored when empty after trimming.
     /// </summary>

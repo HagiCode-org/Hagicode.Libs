@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Collections.ObjectModel;
+using Microsoft.Extensions.Logging;
 using Shouldly;
 using HagiCode.Libs.Core.Acp;
 using HagiCode.Libs.Core.Discovery;
@@ -132,6 +133,26 @@ public sealed partial class ClaudeCodeProviderTests
 
         arguments.ShouldContain("--resume", "resume-id");
         arguments.ShouldNotContain("--session-id");
+    }
+
+    [Test]
+    public void BuildCommandArguments_adds_debug_file_only_when_set()
+    {
+        var provider = CreateProvider();
+        var withoutDebugFile = provider.BuildCommandArguments(new ClaudeCodeOptions { SessionId = "session-id" });
+
+        withoutDebugFile.ShouldNotContain("--debug-file");
+
+        var withDebugFile = provider.BuildCommandArguments(new ClaudeCodeOptions
+        {
+            SessionId = "session-id",
+            DebugFile = "/private/claude-debug/claude-debug.log"
+        });
+
+        var index = withDebugFile.ToList().IndexOf("--debug-file");
+        index.ShouldBeGreaterThan(0);
+        withDebugFile[index + 1].ShouldBe("/private/claude-debug/claude-debug.log");
+        withDebugFile.Count.ShouldBe(withoutDebugFile.Count + 2);
     }
 
     [Test]
@@ -2357,6 +2378,180 @@ public sealed partial class ClaudeCodeProviderTests
         StreamMessage("result", new { is_error = false })
     ];
 
+    [Test]
+    public async Task ExecuteAsync_logs_launch_shape_and_environment_names_without_secrets()
+    {
+        var logger = new CapturingClaudeLogger();
+        var provider = CreateProvider(logger: logger);
+
+        await CollectAsync(provider, new ClaudeCodeOptions
+        {
+            ApiKey = "sk-secret-api-key",
+            SystemPrompt = "SECRET-SYSTEM-PROMPT",
+            PluginDirectories = ["/plugins/hagi"],
+            SessionId = "session-1",
+            WorkingDirectory = "/tmp/project"
+        });
+
+        var arguments = logger.Entries.Single(static entry => entry.Message.StartsWith("Claude Code launch arguments:", StringComparison.Ordinal)).Message;
+        arguments.ShouldContain("--plugin-dir /plugins/hagi");
+        arguments.ShouldContain("--system-prompt");
+        arguments.ShouldNotContain("SECRET-SYSTEM-PROMPT");
+
+        var environment = logger.Entries.Single(static entry => entry.Message.StartsWith("Claude Code launch environment:", StringComparison.Ordinal)).Message;
+        environment.ShouldContain("CLAUDE_CODE_ENTRYPOINT");
+        environment.ShouldContain("ANTHROPIC_AUTH_TOKEN=present");
+        AllLogText(logger).ShouldNotContain("sk-secret-api-key");
+    }
+
+    [Test]
+    public async Task ExecuteAsync_launches_and_delivers_the_same_bytes_with_and_without_a_logger()
+    {
+        var options = new ClaudeCodeOptions
+        {
+            ApiKey = "sk-key",
+            SystemPrompt = "system",
+            PluginDirectories = ["/plugins/hagi"],
+            SessionId = "session-1",
+            WorkingDirectory = "/tmp/project"
+        };
+        var plain = CreateProvider();
+        var logged = CreateProvider(logger: new CapturingClaudeLogger());
+
+        var plainMessages = await CollectAsync(plain, options);
+        var loggedMessages = await CollectAsync(logged, options);
+
+        logged.LastStartContext!.Arguments.ShouldBe(plain.LastStartContext!.Arguments);
+        EnvironmentPairs(logged.LastStartContext).ShouldBe(EnvironmentPairs(plain.LastStartContext));
+        loggedMessages.Select(RawText).ShouldBe(plainMessages.Select(RawText));
+        logged.SentMessages.Select(RawText).ShouldBe(plain.SentMessages.Select(RawText));
+    }
+
+    [Test]
+    public async Task ExecuteAsync_logs_each_stdin_write_at_debug_without_its_content_and_sends_the_same_bytes()
+    {
+        var logger = new CapturingClaudeLogger();
+        var logged = CreateProvider(logger: logger);
+        var plain = CreateProvider();
+
+        await CollectAsync(logged);
+        await CollectAsync(plain);
+
+        var promptEntry = logger.Entries.Single(static entry =>
+            entry.Level == LogLevel.Debug && entry.Message.StartsWith("Claude Code stdin write 1:", StringComparison.Ordinal)).Message;
+        promptEntry.ShouldContain("type=user");
+        promptEntry.ShouldContain(" bytes=");
+        promptEntry.ShouldNotContain("hello");
+        logged.SentMessages.Select(RawText).ShouldBe(plain.SentMessages.Select(RawText));
+    }
+
+    [Test]
+    public async Task ExecuteAsync_warns_when_a_registered_plugin_exposes_no_skills_and_still_yields_init()
+    {
+        var logger = new CapturingClaudeLogger();
+        var init = InitBatch(
+            [new { name = "hagi", source = "hagi@inline", path = "/plugins/hagi" }],
+            ["debug"],
+            ["Bash", "Artifact"]);
+        var provider = CreateProvider(messageBatches: [init], logger: logger);
+
+        var messages = await CollectAsync(provider, new ClaudeCodeOptions
+        {
+            PluginDirectories = ["/plugins/hagi"],
+            SessionId = "session-1",
+            WorkingDirectory = "/tmp/project"
+        });
+
+        var warning = logger.Entries.Single(static entry => entry.Level == LogLevel.Warning).Message;
+        warning.ShouldContain("plugin registered but skills not exposed");
+        warning.ShouldContain("hagi");
+        warning.ShouldContain("/plugins/hagi");
+        logger.Entries.Single(static entry => entry.Message.StartsWith("Claude Code init summary:", StringComparison.Ordinal))
+            .Message.ShouldContain("hagi (hagi@inline)");
+        ShouldKeepPayloadOf(messages.Single(static message => message.Type == "system"), init[0]);
+    }
+
+    [Test]
+    public async Task ExecuteAsync_does_not_warn_when_the_registered_plugin_exposes_skills()
+    {
+        var logger = new CapturingClaudeLogger();
+        var provider = CreateProvider(
+            messageBatches: [InitBatch([new { name = "hagi", source = "hagi@inline", path = "/plugins/hagi" }], ["hagi:review"], ["Bash"])],
+            logger: logger);
+
+        await CollectAsync(provider, new ClaudeCodeOptions
+        {
+            PluginDirectories = ["/plugins/hagi"],
+            SessionId = "session-1",
+            WorkingDirectory = "/tmp/project"
+        });
+
+        logger.Entries.Where(static entry => entry.Level == LogLevel.Warning).ShouldBeEmpty();
+    }
+
+    [Test]
+    public async Task ExecuteAsync_warns_when_a_passed_plugin_directory_was_not_registered()
+    {
+        var logger = new CapturingClaudeLogger();
+        var provider = CreateProvider(messageBatches: [InitBatch([], ["debug"], ["Bash"])], logger: logger);
+
+        await CollectAsync(provider, new ClaudeCodeOptions
+        {
+            PluginDirectories = ["/plugins/hagi"],
+            SessionId = "session-1",
+            WorkingDirectory = "/tmp/project"
+        });
+
+        var warning = logger.Entries.Single(static entry => entry.Level == LogLevel.Warning).Message;
+        warning.ShouldContain("plugin directory passed but no plugin registered");
+        warning.ShouldContain("/plugins/hagi");
+    }
+
+    [Test]
+    public async Task ExecuteAsync_does_not_warn_about_plugins_when_no_plugin_directory_was_passed()
+    {
+        var logger = new CapturingClaudeLogger();
+        var provider = CreateProvider(messageBatches: [InitBatch([], [], ["Bash"])], logger: logger);
+
+        await CollectAsync(provider, new ClaudeCodeOptions { SessionId = "session-1", WorkingDirectory = "/tmp/project" });
+
+        logger.Entries.Where(static entry => entry.Level == LogLevel.Warning).ShouldBeEmpty();
+    }
+
+    [Test]
+    public async Task ExecuteAsync_delivers_a_malformed_init_unchanged_and_does_not_throw()
+    {
+        var logger = new CapturingClaudeLogger();
+        var malformedInit = StreamMessage("system", new { subtype = "init", plugins = "not-an-array", skills = 5, tools = new { } });
+        var provider = CreateProvider(messageBatches: [[malformedInit]], logger: logger);
+
+        var messages = await CollectAsync(provider, new ClaudeCodeOptions
+        {
+            PluginDirectories = ["/plugins/hagi"],
+            SessionId = "session-1",
+            WorkingDirectory = "/tmp/project"
+        });
+
+        ShouldKeepPayloadOf(messages.Single(static message => message.Type == "system"), malformedInit);
+    }
+
+    private static IReadOnlyList<string> EnvironmentPairs(ProcessStartContext? startContext) =>
+        (startContext!.EnvironmentVariables ?? new Dictionary<string, string?>())
+        .OrderBy(static pair => pair.Key, StringComparer.Ordinal)
+        .Select(static pair => $"{pair.Key}={pair.Value}")
+        .ToArray();
+
+    private static string RawText(CliMessage message) => message.Content.GetRawText();
+
+    // The delivered copy may carry debug metadata added by the provider, so each original field is compared, not the whole text.
+    private static void ShouldKeepPayloadOf(CliMessage delivered, CliMessage original)
+    {
+        foreach (var property in original.Content.EnumerateObject())
+        {
+            delivered.Content.GetProperty(property.Name).GetRawText().ShouldBe(property.Value.GetRawText());
+        }
+    }
+
     private static CliMessage StreamMessage(string type, object payload)
     {
         var content = JsonSerializer.SerializeToElement(payload);
@@ -2525,15 +2720,29 @@ public sealed partial class ClaudeCodeProviderTests
         CliExecutableResolver? executableResolver = null,
         CliProcessManager? processManager = null,
         IReadOnlyList<IReadOnlyList<CliMessage>>? messageBatches = null,
-        IReadOnlyList<TransportFailure?>? transportFailures = null)
+        IReadOnlyList<TransportFailure?>? transportFailures = null,
+        ILogger<ClaudeCodeProvider>? logger = null)
     {
         return new TestClaudeCodeProvider(
             executableResolver ?? new StubExecutableResolver(),
             processManager ?? new StubCliProcessManager(),
             new StubRuntimeEnvironmentResolver(),
             messageBatches,
-            transportFailures);
+            transportFailures,
+            logger);
     }
+
+    private static IReadOnlyList<CliMessage> InitBatch(
+        object[] plugins,
+        string[] skills,
+        string[] tools) =>
+    [
+        StreamMessage("system", new { subtype = "init", claude_code_version = "2.1.310", plugins, skills, tools }),
+        StreamMessage("result", new { is_error = false })
+    ];
+
+    private static string AllLogText(CapturingClaudeLogger logger) =>
+        string.Join('\n', logger.Entries.Select(static entry => entry.Message));
 
     /// <summary>
     /// Scripts how one transport attempt behaves. <see cref="OnSend" /> throws from SendAsync before the prompt is recorded;
@@ -2554,8 +2763,9 @@ public sealed partial class ClaudeCodeProviderTests
         CliProcessManager processManager,
         IRuntimeEnvironmentResolver runtimeEnvironmentResolver,
         IReadOnlyList<IReadOnlyList<CliMessage>>? messageBatches,
-        IReadOnlyList<TransportFailure?>? transportFailures)
-        : ClaudeCodeProvider(executableResolver, processManager, runtimeEnvironmentResolver)
+        IReadOnlyList<TransportFailure?>? transportFailures,
+        ILogger<ClaudeCodeProvider>? logger = null)
+        : ClaudeCodeProvider(executableResolver, processManager, runtimeEnvironmentResolver, logger)
     {
         private readonly Queue<IReadOnlyList<CliMessage>> _messageBatches = new(messageBatches ?? []);
         private readonly Queue<TransportFailure?> _transportFailures = new(transportFailures ?? []);
@@ -2685,6 +2895,43 @@ public sealed partial class ClaudeCodeProviderTests
                 initIndex + 1,
                 StreamMessage("user", new { isReplay = true, message = new { role = "user", content = "hello" } }));
             return withEcho;
+        }
+    }
+
+    private sealed record CapturedLogEntry(LogLevel Level, string Message);
+
+    private sealed class CapturingClaudeLogger : ILogger<ClaudeCodeProvider>
+    {
+        private readonly object _sync = new();
+        private readonly List<CapturedLogEntry> _entries = [];
+
+        public IReadOnlyList<CapturedLogEntry> Entries
+        {
+            get
+            {
+                lock (_sync)
+                {
+                    return _entries.ToArray();
+                }
+            }
+        }
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            lock (_sync)
+            {
+                _entries.Add(new CapturedLogEntry(logLevel, formatter(state, exception)));
+            }
         }
     }
 
