@@ -18,6 +18,8 @@ The host then injects `IGitClient`. The client is a singleton, and each call sta
 - Map failure codes at the adapter, not in the wrapper. The backend adapter owns its own response codes.
 - Build commit messages (co-author trailers, `[skip ci]`) before calling `CommitAsync`. The wrapper records the message exactly as given.
 - Pass cancellation tokens. A cancelled call throws `OperationCanceledException` after the process tree is terminated.
+- Clone with `GitCloneOptions { AllowedProtocols = [...] }` when the remote comes from configuration. A protocol outside the list fails with `UnsupportedProtocol` and no process starts. Without the options, clone behaves as before.
+- `RemoveRepositoryAsync` deletes a standalone checkout only. It refuses dirty trees and unpushed commits unless `GitRemoveOptions.Force` is set, and it refuses worktrees, submodules and links even with force. Map `WorkingTreeDirty` and `UnpushedCommits` to a conflict in the adapter, and `RemoveFailed` to a server error.
 
 ## Timing suite
 
