@@ -19,7 +19,7 @@ public sealed class AgentMemoryLimitDocumentationTests
 
         var documentedArguments = commandLine.Split(' ', StringSplitOptions.RemoveEmptyEntries).Skip(1).ToList();
         documentedArguments.Take(documentedArguments.IndexOf("--") + 1).ShouldBe(limits.SystemdRunArguments);
-        nodeOptionsLine["NODE_OPTIONS=".Length..].ShouldBe(CgroupScopeLauncher.MergeNodeOptions(null, limits));
+        nodeOptionsLine["NODE_OPTIONS=".Length..].ShouldBe(CgroupScopeLauncher.MergeNodeOptions(null, limits.NodeHeapOption!));
     }
 
     private static IReadOnlyList<string> ReadSection()

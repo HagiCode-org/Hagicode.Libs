@@ -40,7 +40,11 @@ public sealed class CliProcessManagerResourceLimitTests
     public void A_manager_without_a_provider_never_probes_the_host()
     {
         var trials = 0;
-        var probe = new CgroupScopeCapabilityProbe(static () => true, static () => "/usr/bin/systemd-run", (_, _, _) => ++trials > 0);
+        var probe = ResourceLimitTestSupport.Scripted(arguments =>
+        {
+            trials++;
+            return ResourceLimitTestSupport.TrialSucceeds(arguments);
+        });
         var manager = ResourceLimitTestSupport.CreateManager(limitProvider: null, probe);
 
         var plan = manager.CreateStartPlan(new ProcessStartContext { ExecutablePath = "/bin/sh", Arguments = ["-c", "true"] });
@@ -148,6 +152,64 @@ public sealed class CliProcessManagerResourceLimitTests
         var version = await probe.TryGetVersionAsync(cli, [["--version"]]);
 
         version.ShouldBe("1.2.3");
+    }
+
+    [Test]
+    public void A_cpu_only_plan_names_systemd_run_with_cpuquota_alone_and_no_heap_flag()
+    {
+        var manager = ResourceLimitTestSupport.CreateManager(new DelegateLimitProvider(() => new CliResourceLimits(null, 200)), ResourceLimitTestSupport.SupportedProbe());
+
+        var plan = manager.CreateStartPlan(new ProcessStartContext
+        {
+            ExecutablePath = "/bin/sh",
+            Arguments = ["-c", "printf '%s' \"$1\"", "sh", "two words"]
+        });
+
+        plan.ResolvedExecutablePath.ShouldBe("/bin/sh");
+        plan.StartInfo.FileName.ShouldBe("/usr/bin/systemd-run");
+        plan.StartInfo.ArgumentList.ShouldBe(["--user", "--scope", "--quiet", "-p", "CPUQuota=200%", "--", "/bin/sh", "-c", "printf '%s' \"$1\"", "sh", "two words"]);
+        plan.StartInfo.Environment.ContainsKey("NODE_OPTIONS").ShouldBeFalse();
+    }
+
+    [Test]
+    [Category("Integration")]
+    public async Task A_cpu_only_wrapped_one_shot_passes_output_and_exit_code_through_and_names_the_cli()
+    {
+        RequireUnix();
+        var systemdRun = ResourceLimitTestSupport.WriteFakeSystemdRun(_root);
+        var manager = ResourceLimitTestSupport.CreateManager(new DelegateLimitProvider(() => new CliResourceLimits(null, 100)), ResourceLimitTestSupport.SupportedProbe(systemdRun));
+        var context = new ProcessStartContext
+        {
+            ExecutablePath = "/bin/sh",
+            Arguments = ["-c", "printf '%s|%s' \"$1\" \"${NODE_OPTIONS-unset}\"; exit 4", "sh", "two words"]
+        };
+
+        var result = await manager.ExecuteAsync(context);
+
+        result.ExitCode.ShouldBe(4);
+        result.StandardOutput.ShouldBe("two words|unset");
+        result.ResolvedExecutablePath.ShouldBe("/bin/sh");
+        result.CommandPreview.ShouldBe(CommandPreviewFormatter.Format(context.ExecutablePath, context.Arguments));
+        result.CommandPreview.ShouldNotContain("systemd-run");
+    }
+
+    [Test]
+    [Category("Integration")]
+    public async Task The_version_probe_stays_unwrapped_under_a_cpu_only_limit()
+    {
+        RequireUnix();
+        Directory.CreateDirectory(_root);
+        var failingSystemdRun = Path.Combine(_root, "systemd-run");
+        File.WriteAllText(failingSystemdRun, "#!/bin/sh\nexit 97\n");
+        File.SetUnixFileMode(failingSystemdRun, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        var cli = Path.Combine(_root, "fake-cli");
+        File.WriteAllText(cli, "#!/bin/sh\necho 'fake-cli 2.0.0'\n");
+        File.SetUnixFileMode(cli, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+
+        var manager = ResourceLimitTestSupport.CreateManager(new DelegateLimitProvider(() => new CliResourceLimits(null, 200)), ResourceLimitTestSupport.SupportedProbe(failingSystemdRun));
+        var version = await new CliVersionProbe(manager).TryGetVersionAsync(cli, [["--version"]]);
+
+        version.ShouldBe("2.0.0");
     }
 
     private static void RequireUnix()

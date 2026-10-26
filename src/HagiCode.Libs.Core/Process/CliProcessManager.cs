@@ -41,7 +41,7 @@ public class CliProcessManager
 
     /// <summary>
     /// Initializes a new instance of the <see cref="CliProcessManager" /> class with dependency injection support.
-    /// A <paramref name="resourceLimitProvider" /> puts agent launches inside a memory-limited systemd user scope; without one, no limit applies.
+    /// A <paramref name="resourceLimitProvider" /> puts agent launches inside a systemd user scope carrying the memory and/or CPU limit it reports; without one, no limit applies.
     /// </summary>
     public CliProcessManager(
         CliExecutableResolver executableResolver,

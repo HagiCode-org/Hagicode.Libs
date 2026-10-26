@@ -56,6 +56,42 @@ public sealed class CgroupScopeRealScopeTests
     }
 
     [Test]
+    public async Task A_scope_started_with_a_cpu_quota_reads_a_limited_cpu_max()
+    {
+        RealScope.RequireUserScope();
+        RealScope.RequireCpuController();
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = RealScope.Probe.GetCpuCapability().SystemdRunPath!,
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        foreach (var argument in new[] { "--user", "--scope", "--quiet", "-p", "CPUQuota=100%", "--", "sleep", "30" })
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        using var process = System.Diagnostics.Process.Start(startInfo)!;
+        string cgroupPath;
+        try
+        {
+            (await RealScope.WaitForCommAsync(process.Id, "sleep")).ShouldBe("sleep");
+            cgroupPath = RealScope.ReadCgroupPath(process.Id);
+            cgroupPath.ShouldEndWith(".scope");
+            RealScope.ReadCpuMax(cgroupPath).ShouldBe("100000 100000");
+        }
+        finally
+        {
+            process.Kill(entireProcessTree: true);
+            await process.WaitForExitAsync();
+        }
+
+        (await RealScope.WaitForCgroupGoneAsync(cgroupPath)).ShouldBeTrue($"scope {cgroupPath} still exists after the process was killed");
+    }
+
+    [Test]
     public async Task A_wrapped_agent_passes_stdin_stdout_and_exit_code_through_inside_a_limited_scope()
     {
         RealScope.RequireUserScope();

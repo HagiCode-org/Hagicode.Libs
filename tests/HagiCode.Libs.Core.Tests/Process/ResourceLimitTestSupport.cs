@@ -11,15 +11,43 @@ internal static class ResourceLimitTestSupport
 {
     public const string FakeSystemdRunPath = "/usr/bin/systemd-run";
 
+    /// <summary>The CPU quota the trial scope reads back when the controller is delegated.</summary>
+    public const string LimitedCpuMaxOutput = "50000 100000\n";
+
+    /// <summary>The <c>cpu.max</c> text of a trial scope whose controller is not delegated.</summary>
+    public const string UnlimitedCpuMaxOutput = "max 100000\n";
+
+    /// <summary>Reports whether a trial call is the memory trial (<c>MemoryMax=64M</c>) rather than the CPU trial.</summary>
+    public static bool IsMemoryTrial(IReadOnlyList<string> arguments) => arguments.Contains("MemoryMax=64M");
+
+    /// <summary>A trial that succeeds: the memory trial exits 0, the CPU trial reads a limited <c>cpu.max</c>.</summary>
+    public static CgroupScopeTrialResult? TrialSucceeds(IReadOnlyList<string> arguments) =>
+        new(0, IsMemoryTrial(arguments) ? string.Empty : LimitedCpuMaxOutput);
+
+    /// <summary>A probe whose memory and CPU trials both succeed.</summary>
     public static CgroupScopeCapabilityProbe SupportedProbe(string systemdRunPath = FakeSystemdRunPath) =>
-        new(static () => true, () => systemdRunPath, static (_, _, _) => true);
+        Scripted(TrialSucceeds, systemdRunPath);
+
+    /// <summary>A probe whose trials are answered by <paramref name="trial" />, for both resources.</summary>
+    public static CgroupScopeCapabilityProbe Scripted(
+        Func<IReadOnlyList<string>, CgroupScopeTrialResult?> trial,
+        string? systemdRunPath = FakeSystemdRunPath) =>
+        new(static () => true, () => systemdRunPath, (_, arguments, _) => trial(arguments));
 
     public static CgroupScopeCapabilityProbe UnsupportedProbe(CgroupScopeCapabilityReason reason) => reason switch
     {
-        CgroupScopeCapabilityReason.NotLinux => new(static () => false, static () => FakeSystemdRunPath, static (_, _, _) => true),
-        CgroupScopeCapabilityReason.SystemdRunMissing => new(static () => true, static () => null, static (_, _, _) => true),
-        _ => new(static () => true, static () => FakeSystemdRunPath, static (_, _, _) => false)
+        CgroupScopeCapabilityReason.NotLinux => new(static () => false, static () => FakeSystemdRunPath, static (_, _, _) => new CgroupScopeTrialResult(0, string.Empty)),
+        CgroupScopeCapabilityReason.SystemdRunMissing => new(static () => true, static () => null, static (_, _, _) => new CgroupScopeTrialResult(0, string.Empty)),
+        _ => Scripted(_ => null)
     };
+
+    /// <summary>A probe where memory is enforced but the trial scope's CPU quota is not limited.</summary>
+    public static CgroupScopeCapabilityProbe CpuControllerUnavailableProbe() =>
+        Scripted(arguments => IsMemoryTrial(arguments) ? new CgroupScopeTrialResult(0, string.Empty) : new CgroupScopeTrialResult(0, UnlimitedCpuMaxOutput));
+
+    /// <summary>A probe where the memory trial fails and the CPU trial succeeds.</summary>
+    public static CgroupScopeCapabilityProbe MemoryUnavailableProbe() =>
+        Scripted(arguments => IsMemoryTrial(arguments) ? null : new CgroupScopeTrialResult(0, LimitedCpuMaxOutput));
 
     public static CliProcessManager CreateManager(ICliResourceLimitProvider? limitProvider, CgroupScopeCapabilityProbe probe, ILogger<CliProcessManager>? logger = null) =>
         new(
@@ -107,6 +135,16 @@ internal static class RealScope
         return capability;
     }
 
+    /// <summary>Reports the test as Skipped unless the <c>cpu</c> controller is delegated to the user manager.</summary>
+    public static void RequireCpuController()
+    {
+        var capability = HostProbe.GetCpuCapability();
+        if (!capability.Supported)
+        {
+            Assert.Ignore($"The cpu controller is not delegated to the systemd user manager ({capability.ReasonCode}).");
+        }
+    }
+
     public static string ReadCgroupPath(int processId)
     {
         var line = File.ReadAllLines($"/proc/{processId}/cgroup").First(static entry => entry.StartsWith("0::", StringComparison.Ordinal));
@@ -115,16 +153,22 @@ internal static class RealScope
 
     public static string ReadMemoryMax(string cgroupPath) => File.ReadAllText($"/sys/fs/cgroup{cgroupPath}/memory.max").Trim();
 
+    public static string ReadCpuMax(string cgroupPath) => File.ReadAllText($"/sys/fs/cgroup{cgroupPath}/cpu.max").Trim();
+
     public static bool CgroupExists(string cgroupPath) => Directory.Exists($"/sys/fs/cgroup{cgroupPath}");
 
-    /// <summary>Waits until the process sits in a <c>.scope</c> cgroup, which systemd-run sets up before it runs the command.</summary>
+    /// <summary>
+    /// Waits until the process has exec'd the command (its name is no longer <c>systemd-run</c>) and sits in a <c>.scope</c> cgroup.
+    /// Before the exec the process still belongs to the caller's cgroup, which may itself be a <c>.scope</c>.
+    /// </summary>
     public static async Task<string> WaitForScopeAsync(int processId)
     {
         var deadline = Stopwatch.StartNew();
         while (true)
         {
+            var comm = File.ReadAllText($"/proc/{processId}/comm").Trim();
             var cgroupPath = ReadCgroupPath(processId);
-            if (cgroupPath.EndsWith(".scope", StringComparison.Ordinal) || deadline.Elapsed > TimeSpan.FromSeconds(10))
+            if ((comm != "systemd-run" && cgroupPath.EndsWith(".scope", StringComparison.Ordinal)) || deadline.Elapsed > TimeSpan.FromSeconds(10))
             {
                 return cgroupPath;
             }

@@ -134,6 +134,67 @@ public sealed class AgentMemoryLimitLauncherTests
     }
 
     [Test]
+    public void Codex_exec_start_info_with_a_cpu_only_limit_wraps_with_cpuquota_alone()
+    {
+        var invocation = new CodexProcessInvocation("/opt/agents/codex", ["exec", "--json"], new Dictionary<string, string> { ["NODE_OPTIONS"] = "--enable-source-maps" }, "prompt");
+
+        var startInfo = DefaultCodexProcessRunner.CreateStartInfo(invocation, isWindows: false, new FixedLimitProvider(null, 200), SupportedProbe());
+
+        startInfo.FileName.ShouldBe(SystemdRunPath);
+        startInfo.ArgumentList.ShouldBe(["--user", "--scope", "--quiet", "-p", "CPUQuota=200%", "--", "/opt/agents/codex", "exec", "--json"]);
+        startInfo.Environment["NODE_OPTIONS"].ShouldBe("--enable-source-maps");
+    }
+
+    [Test]
+    public void Codex_app_server_start_info_with_a_cpu_only_limit_wraps_with_cpuquota_alone()
+    {
+        var startInfo = CodexAppServerProcess.CreateStartInfo(
+            "/opt/agents/codex",
+            new Dictionary<string, string>(),
+            workingDirectory: null,
+            isWindows: false,
+            new CliResourceLimits(null, 200),
+            SupportedProbe());
+
+        startInfo.FileName.ShouldBe(SystemdRunPath);
+        startInfo.ArgumentList.ShouldBe(["--user", "--scope", "--quiet", "-p", "CPUQuota=200%", "--", "/opt/agents/codex", "app-server"]);
+        startInfo.Environment.ContainsKey("NODE_OPTIONS").ShouldBeFalse();
+    }
+
+    [Test]
+    public void OpenCode_start_info_with_a_cpu_only_limit_wraps_with_cpuquota_alone()
+    {
+        var launcher = new OpenCodeProcessLauncher(new CliExecutableResolver(), static () => false, new FixedLimitProvider(null, 200), SupportedProbe());
+
+        var startInfo = launcher.CreateStartInfo("/opt/agents/opencode", new OpenCodeStandaloneServerOptions(), new Dictionary<string, string?>(), port: 4096);
+
+        startInfo.FileName.ShouldBe(SystemdRunPath);
+        startInfo.ArgumentList.ShouldBe(["--user", "--scope", "--quiet", "-p", "CPUQuota=200%", "--", "/opt/agents/opencode", "serve", "--hostname=127.0.0.1", "--port=4096"]);
+        startInfo.Environment.ContainsKey("NODE_OPTIONS").ShouldBeFalse();
+    }
+
+    [Test]
+    public void A_cpu_only_limit_the_host_cannot_enforce_leaves_every_path_unwrapped()
+    {
+        var unsupportedCpu = new CgroupScopeCapabilityProbe(
+            static () => true,
+            static () => SystemdRunPath,
+            static (_, arguments, _) => new CgroupScopeTrialResult(0, arguments.Contains("CPUQuota=50%") ? "max 100000" : string.Empty));
+        var codex = DefaultCodexProcessRunner.CreateStartInfo(
+            new CodexProcessInvocation("/opt/agents/codex", ["exec"], new Dictionary<string, string>(), "prompt"),
+            isWindows: false,
+            new FixedLimitProvider(null, 200),
+            unsupportedCpu);
+        var launcher = new OpenCodeProcessLauncher(new CliExecutableResolver(), static () => false, new FixedLimitProvider(null, 200), unsupportedCpu);
+        var openCode = launcher.CreateStartInfo("/opt/agents/opencode", new OpenCodeStandaloneServerOptions(), new Dictionary<string, string?>(), port: 4096);
+
+        codex.FileName.ShouldBe("/opt/agents/codex");
+        codex.ArgumentList.ShouldBe(["exec"]);
+        openCode.FileName.ShouldBe("/opt/agents/opencode");
+        openCode.ArgumentList.ShouldBe(["serve", "--hostname=127.0.0.1", "--port=4096"]);
+    }
+
+    [Test]
     public async Task AddHagiCodeLibs_registers_the_AGENT_MEM_MAX_provider_by_default()
     {
         var services = new ServiceCollection();
@@ -172,7 +233,10 @@ public sealed class AgentMemoryLimitLauncherTests
         hostProvider.Calls.ShouldBe(1);
     }
 
-    private static CgroupScopeCapabilityProbe SupportedProbe() => new(static () => true, static () => SystemdRunPath, static (_, _, _) => true);
+    private static CgroupScopeCapabilityProbe SupportedProbe() => new(
+        static () => true,
+        static () => SystemdRunPath,
+        static (_, arguments, _) => new CgroupScopeTrialResult(0, arguments.Contains("CPUQuota=50%") ? "50000 100000\n" : string.Empty));
 
     private static CliProcessManager CreateManager(ICliResourceLimitProvider provider, CgroupScopeCapabilityProbe probe) =>
         new(
@@ -184,14 +248,14 @@ public sealed class AgentMemoryLimitLauncherTests
             provider,
             probe);
 
-    private sealed class FixedLimitProvider(int? megabytes) : ICliResourceLimitProvider
+    private sealed class FixedLimitProvider(int? megabytes, int? cpuPercent = null) : ICliResourceLimitProvider
     {
         public int Calls { get; private set; }
 
         public CliResourceLimits? GetCurrent()
         {
             Calls++;
-            return megabytes is { } value ? new CliResourceLimits(value) : null;
+            return megabytes is null && cpuPercent is null ? null : new CliResourceLimits(megabytes, cpuPercent);
         }
     }
 }
