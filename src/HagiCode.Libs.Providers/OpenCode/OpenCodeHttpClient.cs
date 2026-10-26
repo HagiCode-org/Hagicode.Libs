@@ -192,11 +192,62 @@ public sealed class OpenCodeHttpClient : IDisposable
     /// session spawns are tracked (see <see cref="OpenCodeAgentWorkTracker"/>), and the turn is held open after the prompted session
     /// reports success while a tracked child is still active.
     /// </summary>
+    public Task<OpenCodeMessageEnvelope> PromptAsync(
+        string sessionId,
+        OpenCodeSessionPromptRequest request,
+        OpenCodeTurnInteraction? interaction,
+        OpenCodeAgentWorkTurn? agentWork,
+        CancellationToken cancellationToken = default)
+    {
+        return PromptAsync(sessionId, request, interaction, agentWork, steering: null, cancellationToken);
+    }
+
+    /// <summary>
+    /// Runs one prompt that can be steered through <paramref name="runSteering"/>. The steering channel is attached once the prompt is
+    /// acknowledged and detached when the prompt ends. Its steers are reported through <see cref="OpenCodeRunSteering.OutcomeObserved"/>
+    /// and wait at most <paramref name="steerDeliveryTimeout"/> for OpenCode to deliver them. Callers that drive the client directly,
+    /// instead of through <see cref="OpenCodeProvider"/>, use this overload; a null channel behaves as the overload without one.
+    /// </summary>
+    /// <param name="sessionId">The session to prompt.</param>
+    /// <param name="request">The prompt.</param>
+    /// <param name="interaction">The question handler and its timeout, or <see langword="null"/> to decline every question.</param>
+    /// <param name="agentWork">Receives the agent work of the run, or <see langword="null"/> to track none.</param>
+    /// <param name="runSteering">The steering channel of the run, or <see langword="null"/> for a run that is not steerable.</param>
+    /// <param name="steerDeliveryTimeout">How long an accepted steer may wait for delivery. It must be positive and finite.</param>
+    /// <param name="cancellationToken">Cancels the turn.</param>
     public async Task<OpenCodeMessageEnvelope> PromptAsync(
         string sessionId,
         OpenCodeSessionPromptRequest request,
         OpenCodeTurnInteraction? interaction,
         OpenCodeAgentWorkTurn? agentWork,
+        OpenCodeRunSteering? runSteering,
+        TimeSpan steerDeliveryTimeout,
+        CancellationToken cancellationToken = default)
+    {
+        if (runSteering is null)
+        {
+            return await PromptAsync(sessionId, request, interaction, agentWork, steering: null, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (steerDeliveryTimeout <= TimeSpan.Zero || steerDeliveryTimeout == Timeout.InfiniteTimeSpan)
+        {
+            throw new ArgumentOutOfRangeException(nameof(steerDeliveryTimeout), steerDeliveryTimeout, "SteerDeliveryTimeout must be positive and finite.");
+        }
+
+        using var steering = new OpenCodeSteerTurn(this, sessionId, runSteering, steerDeliveryTimeout);
+        return await PromptAsync(sessionId, request, interaction, agentWork, steering, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Runs one prompt with an optional steering turn. The turn is started once the prompt is acknowledged, so steers are accepted
+    /// only while the turn runs, and it is ended when the turn ends, which resolves any steer still pending as not consumed.
+    /// </summary>
+    internal async Task<OpenCodeMessageEnvelope> PromptAsync(
+        string sessionId,
+        OpenCodeSessionPromptRequest request,
+        OpenCodeTurnInteraction? interaction,
+        OpenCodeAgentWorkTurn? agentWork,
+        OpenCodeSteerTurn? steering,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
@@ -231,8 +282,9 @@ public sealed class OpenCodeHttpClient : IDisposable
                 request,
                 turnToken).ConfigureAwait(false);
             promptPosted = true;
+            steering?.Start(() => questions.HasPending);
 
-            return await AwaitTurnAsync(events, sessionId, ack.Data?.Id, questions, agentWork, deadline, readSource, turnToken).ConfigureAwait(false);
+            return await AwaitTurnAsync(events, sessionId, ack.Data?.Id, questions, agentWork, steering, deadline, readSource, turnToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -240,10 +292,39 @@ public sealed class OpenCodeHttpClient : IDisposable
         }
         finally
         {
-            // Runs on every exit: the pending forms are closed, and an interactive turn the caller cancelled interrupts its session.
+            // Runs on every exit: steers still pending are resolved, the pending forms are closed, and an interactive turn the caller
+            // cancelled interrupts its session.
+            if (steering is not null)
+            {
+                await steering.EndAsync().ConfigureAwait(false);
+            }
+
             await questions.CloseAsync(interruptSession: promptPosted && cancellationToken.IsCancellationRequested).ConfigureAwait(false);
             questions.Dispose();
         }
+    }
+
+    /// <summary>
+    /// Posts a steer to a running turn (<c>POST /api/session/{id}/prompt</c> with <c>delivery: "steer"</c> and the steer's own id).
+    /// The request succeeding only means OpenCode accepted the message. Delivery into the turn is reported by
+    /// <c>session.inbox.delivered</c>.
+    /// </summary>
+    internal Task SendSteerAsync(string sessionId, string steerId, string text, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(steerId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(text);
+
+        return SendForBodyAsync(
+            HttpMethod.Post,
+            BuildUri($"/api/session/{Uri.EscapeDataString(sessionId)}/prompt"),
+            new OpenCodeSessionPromptRequest
+            {
+                Text = text,
+                MessageId = steerId,
+                Delivery = OpenCodeInboxDelivery.Steer,
+            },
+            cancellationToken);
     }
 
     /// <summary>
@@ -479,6 +560,7 @@ public sealed class OpenCodeHttpClient : IDisposable
         string? promptMessageId,
         OpenCodeQuestionScope questions,
         OpenCodeAgentWorkTurn? agentWork,
+        OpenCodeSteerTurn? steering,
         TurnDeadline deadline,
         CancellationTokenSource readSource,
         CancellationToken cancellationToken)
@@ -594,8 +676,18 @@ public sealed class OpenCodeHttpClient : IDisposable
                     continue;
                 }
 
+                if (steering is not null && envelope.EventType is "session.execution.succeeded" or "session.execution.failed" or "session.execution.interrupted")
+                {
+                    // OpenCode starts a new execution for a steer sent after its turn ended, so no steer is sent once the turn has ended.
+                    await steering.EndAsync().ConfigureAwait(false);
+                }
+
                 switch (envelope.EventType)
                 {
+                    case "session.inbox.delivered":
+                        steering?.Delivered(TryGetString(envelope.Payload, "inboxID"));
+                        break;
+
                     case "form.created":
                         if (envelope.Form is { } form)
                         {

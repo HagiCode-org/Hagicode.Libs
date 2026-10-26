@@ -97,6 +97,9 @@ internal sealed class OpenCodeQuestionScope : IDisposable
     private readonly CancellationTokenSource _turnEnded;
     private readonly ConcurrentDictionary<string, byte> _pending = new(StringComparer.Ordinal);
 
+    /// <summary>Whether a question is waiting for its answer. OpenCode holds a steer sent meanwhile until the question is settled.</summary>
+    public bool HasPending => !_pending.IsEmpty;
+
     public OpenCodeQuestionScope(
         OpenCodeHttpClient client,
         string sessionId,

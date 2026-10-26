@@ -1,0 +1,210 @@
+{
+  "_header": {
+    "opencodeVersion": "2.0.32",
+    "model": "opencode/big-pickle",
+    "recordedWith": "isolated scratch HOME, ephemeral port",
+    "scenario": "prompt to an idle session with delivery omitted (ack says steer)"
+  },
+  "request": {
+    "text": "Reply with exactly: pong",
+    "id": "msg_probe_idle_default"
+  },
+  "status": 200,
+  "response": {
+    "data": {
+      "id": "msg_probe_idle_default",
+      "sessionID": "ses_e892799f6ffemEoKntQrPkoN3M",
+      "time": {
+        "created": 1792995255830
+      },
+      "type": "user",
+      "payload": {
+        "text": "Reply with exactly: pong"
+      },
+      "delivery": "steer"
+    }
+  },
+  "events": [
+    {
+      "event": null,
+      "data": {
+        "id": "evt_176d86616001W2bPnfBC5hvIFW",
+        "created": 1792995255830,
+        "type": "session.inbox.enqueued",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "inboxID": "msg_probe_idle_default",
+          "sessionID": "ses_e892799f6ffemEoKntQrPkoN3M",
+          "item": {
+            "type": "user",
+            "payload": {
+              "text": "Reply with exactly: pong"
+            },
+            "delivery": "steer"
+          }
+        },
+        "durable": {
+          "aggregateID": "ses_e892799f6ffemEoKntQrPkoN3M",
+          "seq": 2,
+          "version": 1
+        }
+      }
+    },
+    {
+      "event": null,
+      "data": {
+        "id": "evt_176d866180010D3a9xo8kf2DUR",
+        "created": 1792995255832,
+        "type": "session.execution.started",
+        "data": {
+          "sessionID": "ses_e892799f6ffemEoKntQrPkoN3M"
+        },
+        "durable": {
+          "aggregateID": "ses_e892799f6ffemEoKntQrPkoN3M",
+          "seq": 3,
+          "version": 1
+        }
+      }
+    },
+    {
+      "event": null,
+      "data": {
+        "id": "evt_176d86624001Yzt8t4OiHFIgDY",
+        "created": 1792995255844,
+        "type": "session.inbox.delivered",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e892799f6ffemEoKntQrPkoN3M",
+          "inboxID": "msg_probe_idle_default"
+        },
+        "durable": {
+          "aggregateID": "ses_e892799f6ffemEoKntQrPkoN3M",
+          "seq": 5,
+          "version": 1
+        }
+      }
+    },
+    {
+      "event": null,
+      "data": {
+        "id": "evt_176d86e01001UAh7IFBK0rhkJf",
+        "created": 1792995257857,
+        "type": "session.step.started",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e892799f6ffemEoKntQrPkoN3M",
+          "agent": "build",
+          "model": {
+            "id": "big-pickle",
+            "providerID": "opencode",
+            "variant": "default"
+          },
+          "assistantMessageID": "msg_176d8662a001qK3eWR3xlxWtyC",
+          "started": 1792995255858
+        },
+        "durable": {
+          "aggregateID": "ses_e892799f6ffemEoKntQrPkoN3M",
+          "seq": 6,
+          "version": 1
+        }
+      }
+    },
+    {
+      "event": null,
+      "data": {
+        "id": "evt_176d86e03001abFYBEqW0zpkoq",
+        "created": 1792995257859,
+        "type": "session.text.started",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e892799f6ffemEoKntQrPkoN3M",
+          "assistantMessageID": "msg_176d8662a001qK3eWR3xlxWtyC",
+          "ordinal": 0
+        },
+        "durable": {
+          "aggregateID": "ses_e892799f6ffemEoKntQrPkoN3M",
+          "seq": 7,
+          "version": 1
+        }
+      }
+    },
+    {
+      "event": null,
+      "data": {
+        "id": "evt_176d86e06002pMEHcifobyPu2B",
+        "created": 1792995257862,
+        "type": "session.text.ended",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e892799f6ffemEoKntQrPkoN3M",
+          "assistantMessageID": "msg_176d8662a001qK3eWR3xlxWtyC",
+          "ordinal": 0,
+          "text": "pong"
+        },
+        "durable": {
+          "aggregateID": "ses_e892799f6ffemEoKntQrPkoN3M",
+          "seq": 8,
+          "version": 1
+        }
+      }
+    },
+    {
+      "event": null,
+      "data": {
+        "id": "evt_176d86e09001bPFiZecVbucj5M",
+        "created": 1792995257865,
+        "type": "session.step.ended",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e892799f6ffemEoKntQrPkoN3M",
+          "assistantMessageID": "msg_176d8662a001qK3eWR3xlxWtyC",
+          "finish": "stop",
+          "rawFinish": "stop",
+          "cost": 0,
+          "tokens": {
+            "input": 3791,
+            "output": 3,
+            "reasoning": 0,
+            "cache": {
+              "read": 1536,
+              "write": 0
+            }
+          }
+        },
+        "durable": {
+          "aggregateID": "ses_e892799f6ffemEoKntQrPkoN3M",
+          "seq": 10,
+          "version": 1
+        }
+      }
+    },
+    {
+      "event": null,
+      "data": {
+        "id": "evt_176d86e0b001LOm3eVYWrhRUEO",
+        "created": 1792995257867,
+        "type": "session.execution.succeeded",
+        "data": {
+          "sessionID": "ses_e892799f6ffemEoKntQrPkoN3M"
+        },
+        "durable": {
+          "aggregateID": "ses_e892799f6ffemEoKntQrPkoN3M",
+          "seq": 11,
+          "version": 1
+        }
+      }
+    }
+  ]
+}

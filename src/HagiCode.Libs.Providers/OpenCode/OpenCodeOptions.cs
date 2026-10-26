@@ -103,6 +103,25 @@ public sealed record OpenCodeOptions
     public static readonly TimeSpan DefaultQuestionTimeout = TimeSpan.FromMinutes(30);
 
     /// <summary>
+    /// Gets or sets the handle that accepts follow-up text into this run's active turn. It is <see langword="null"/> by default, and
+    /// the run then behaves as before. Create a new handle for each run.
+    /// </summary>
+    public OpenCodeRunSteering? Steering { get; init; }
+
+    /// <summary>
+    /// Gets or sets how long an accepted steer may wait for OpenCode to report it delivered before it is reported as not consumed.
+    /// The default is 5 minutes, which covers a running shell tool call, because OpenCode delivers a steer at the step boundary after
+    /// the tool finishes. A value that is not positive and finite is rejected with an <see cref="ArgumentOutOfRangeException"/> before
+    /// any request is sent, when <see cref="Steering"/> is set.
+    /// </summary>
+    public TimeSpan SteerDeliveryTimeout { get; init; } = DefaultSteerDeliveryTimeout;
+
+    /// <summary>
+    /// The default value of <see cref="SteerDeliveryTimeout"/>.
+    /// </summary>
+    public static readonly TimeSpan DefaultSteerDeliveryTimeout = TimeSpan.FromMinutes(5);
+
+    /// <summary>
     /// Gets or sets whether the provider reports the agent work of the run (child sessions the agent spawned) as
     /// <c>agent_work_snapshot</c> messages. The default is <see langword="true"/>. When <see langword="false"/>, child sessions are
     /// not tracked, no snapshot is produced, and a turn ends as soon as the prompted session reports its result.

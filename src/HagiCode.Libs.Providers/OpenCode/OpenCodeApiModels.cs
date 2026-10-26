@@ -332,6 +332,59 @@ public sealed class OpenCodeInboxUser
     public string? Delivery { get; init; }
 }
 
+/// <summary>
+/// The <c>delivery</c> values OpenCode 2.0.32 accepts on <c>POST /api/session/{id}/prompt</c>. An omitted value is <c>steer</c>.
+/// </summary>
+public static class OpenCodeInboxDelivery
+{
+    /// <summary>Injects the message into the running turn at the next step boundary.</summary>
+    public const string Steer = "steer";
+
+    /// <summary>Holds the message until the running turn ends.</summary>
+    public const string Queue = "queue";
+}
+
+/// <summary>
+/// Data of <c>session.inbox.enqueued</c>: an inbox item was accepted for a session. For a steer, <see cref="InboxId"/> is the
+/// caller's message id.
+/// </summary>
+public sealed class OpenCodeInboxEnqueuedEvent
+{
+    [JsonPropertyName("inboxID")]
+    public string? InboxId { get; init; }
+
+    [JsonPropertyName("sessionID")]
+    public string? SessionId { get; init; }
+
+    [JsonPropertyName("item")]
+    public OpenCodeInboxItem? Item { get; init; }
+}
+
+/// <summary>
+/// The item carried by <c>session.inbox.enqueued</c>. A user item has <c>type: "user"</c>, a completion notice of a child agent has
+/// <c>type: "synthetic"</c>.
+/// </summary>
+public sealed class OpenCodeInboxItem
+{
+    [JsonPropertyName("type")]
+    public string? Type { get; init; }
+
+    [JsonPropertyName("delivery")]
+    public string? Delivery { get; init; }
+}
+
+/// <summary>
+/// Data of <c>session.inbox.delivered</c>: the inbox item entered the running turn. This is the consumed signal for a steer.
+/// </summary>
+public sealed class OpenCodeInboxDeliveredEvent
+{
+    [JsonPropertyName("inboxID")]
+    public string? InboxId { get; init; }
+
+    [JsonPropertyName("sessionID")]
+    public string? SessionId { get; init; }
+}
+
 public sealed class OpenCodeMessageEnvelope
 {
     [JsonPropertyName("info")]

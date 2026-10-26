@@ -1,0 +1,543 @@
+{
+  "_header": {
+    "opencodeVersion": "2.0.32",
+    "model": "opencode/big-pickle",
+    "recordedWith": "isolated scratch HOME, ephemeral port",
+    "scenario": "queue prompt sent while a shell tool call runs: delivered later than steer, at a later step boundary"
+  },
+  "queue": {
+    "request": {
+      "text": "Also end your reply with the word QUEUED.",
+      "id": "msg_ii_queue",
+      "delivery": "queue"
+    },
+    "status": 200,
+    "response": {
+      "data": {
+        "id": "msg_ii_queue",
+        "sessionID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+        "time": {
+          "created": 1792995429087
+        },
+        "type": "user",
+        "payload": {
+          "text": "Also end your reply with the word QUEUED."
+        },
+        "delivery": "queue"
+      }
+    }
+  },
+  "events": [
+    {
+      "dt_ms": 19,
+      "type": "session.inbox.enqueued",
+      "data": {
+        "id": "evt_176daf7520011HxqCm1RCn3YHe",
+        "created": 1792995424082,
+        "type": "session.inbox.enqueued",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "inboxID": "msg_ii_main",
+          "sessionID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "item": {
+            "type": "user",
+            "payload": {
+              "text": "Run the shell command `sleep 8` with the shell tool, wait for it, then reply with exactly: done"
+            },
+            "delivery": "steer"
+          }
+        },
+        "durable": {
+          "aggregateID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "seq": 2,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 19,
+      "type": "session.execution.started",
+      "data": {
+        "id": "evt_176daf7530011o4O0HJvnAZ9nr",
+        "created": 1792995424083,
+        "type": "session.execution.started",
+        "data": {
+          "sessionID": "ses_e892508b5ffeQsTtwFlsHeH0fH"
+        },
+        "durable": {
+          "aggregateID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "seq": 3,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 19,
+      "type": "session.inbox.delivered",
+      "data": {
+        "id": "evt_176daf758001kgsjUDqD7msYRD",
+        "created": 1792995424088,
+        "type": "session.inbox.delivered",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "inboxID": "msg_ii_main"
+        },
+        "durable": {
+          "aggregateID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "seq": 5,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 2853,
+      "type": "session.step.started",
+      "data": {
+        "id": "evt_176db0271001qx59rZg7pMDjdL",
+        "created": 1792995426929,
+        "type": "session.step.started",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "agent": "build",
+          "model": {
+            "id": "big-pickle",
+            "providerID": "opencode",
+            "variant": "default"
+          },
+          "assistantMessageID": "msg_176daf75b001Oz4sSi5ETfzS1M",
+          "started": 1792995424098
+        },
+        "durable": {
+          "aggregateID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "seq": 6,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 2853,
+      "type": "session.tool.input.started",
+      "data": {
+        "id": "evt_176db0273001TfOFuSIeWBpF1I",
+        "created": 1792995426931,
+        "type": "session.tool.input.started",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "assistantMessageID": "msg_176daf75b001Oz4sSi5ETfzS1M",
+          "id": "call_00_l13tupij7ysc1wbzjbmsf39x",
+          "name": "shell"
+        },
+        "durable": {
+          "aggregateID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "seq": 7,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 2862,
+      "type": "session.tool.input.ended",
+      "data": {
+        "id": "evt_176db0279001F8LfM21t9LbTj6",
+        "created": 1792995426937,
+        "type": "session.tool.input.ended",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "assistantMessageID": "msg_176daf75b001Oz4sSi5ETfzS1M",
+          "id": "call_00_l13tupij7ysc1wbzjbmsf39x",
+          "text": "{\"command\": \"sleep 8\"}"
+        },
+        "durable": {
+          "aggregateID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "seq": 8,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 2862,
+      "type": "session.tool.called",
+      "data": {
+        "id": "evt_176db027a001uSUBSNMZtmD6Uz",
+        "created": 1792995426938,
+        "type": "session.tool.called",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "assistantMessageID": "msg_176daf75b001Oz4sSi5ETfzS1M",
+          "id": "call_00_l13tupij7ysc1wbzjbmsf39x",
+          "input": {
+            "command": "sleep 8"
+          },
+          "executed": false
+        },
+        "durable": {
+          "aggregateID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "seq": 9,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 5008,
+      "type": "session.inbox.enqueued",
+      "data": {
+        "id": "evt_176db0adf001h0aB0SCcxh057X",
+        "created": 1792995429087,
+        "type": "session.inbox.enqueued",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "inboxID": "msg_ii_queue",
+          "sessionID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "item": {
+            "type": "user",
+            "payload": {
+              "text": "Also end your reply with the word QUEUED."
+            },
+            "delivery": "queue"
+          }
+        },
+        "durable": {
+          "aggregateID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "seq": 11,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 10886,
+      "type": "session.tool.success",
+      "data": {
+        "id": "evt_176db21c3001zNRTBlQHZZaVfY",
+        "created": 1792995434947,
+        "type": "session.tool.success",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "assistantMessageID": "msg_176daf75b001Oz4sSi5ETfzS1M",
+          "id": "call_00_l13tupij7ysc1wbzjbmsf39x",
+          "content": [
+            {
+              "type": "text",
+              "text": "(no output)"
+            }
+          ],
+          "metadata": {
+            "status": "completed",
+            "truncated": false,
+            "exit": 0
+          },
+          "executed": false
+        },
+        "durable": {
+          "aggregateID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "seq": 12,
+          "version": 2
+        }
+      }
+    },
+    {
+      "dt_ms": 10886,
+      "type": "session.step.ended",
+      "data": {
+        "id": "evt_176db21c5001ZHfmEyI9OMgQHV",
+        "created": 1792995434949,
+        "type": "session.step.ended",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "assistantMessageID": "msg_176daf75b001Oz4sSi5ETfzS1M",
+          "finish": "tool-calls",
+          "rawFinish": "tool_calls",
+          "cost": 0,
+          "tokens": {
+            "input": 97,
+            "output": 39,
+            "reasoning": 0,
+            "cache": {
+              "read": 5248,
+              "write": 0
+            }
+          }
+        },
+        "durable": {
+          "aggregateID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "seq": 13,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 30232,
+      "type": "session.step.started",
+      "data": {
+        "id": "evt_176db6d49001gir5VS7ebQFTCY",
+        "created": 1792995454282,
+        "type": "session.step.started",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "agent": "build",
+          "model": {
+            "id": "big-pickle",
+            "providerID": "opencode",
+            "variant": "default"
+          },
+          "assistantMessageID": "msg_176db21cf0010ujm3nYI4L9tfK",
+          "started": 1792995434965
+        },
+        "durable": {
+          "aggregateID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "seq": 14,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 30232,
+      "type": "session.text.started",
+      "data": {
+        "id": "evt_176db6d4c0017U1s91i3FDFXxE",
+        "created": 1792995454284,
+        "type": "session.text.started",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "assistantMessageID": "msg_176db21cf0010ujm3nYI4L9tfK",
+          "ordinal": 0
+        },
+        "durable": {
+          "aggregateID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "seq": 15,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 30232,
+      "type": "session.text.ended",
+      "data": {
+        "id": "evt_176db6d4e0022pgh8qKpJXeUV6",
+        "created": 1792995454286,
+        "type": "session.text.ended",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "assistantMessageID": "msg_176db21cf0010ujm3nYI4L9tfK",
+          "ordinal": 0,
+          "text": "done"
+        },
+        "durable": {
+          "aggregateID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "seq": 16,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 30232,
+      "type": "session.step.ended",
+      "data": {
+        "id": "evt_176db6d50001c3O21eo5UJD3d1",
+        "created": 1792995454288,
+        "type": "session.step.ended",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "assistantMessageID": "msg_176db21cf0010ujm3nYI4L9tfK",
+          "finish": "stop",
+          "rawFinish": "stop",
+          "cost": 0,
+          "tokens": {
+            "input": 151,
+            "output": 2,
+            "reasoning": 0,
+            "cache": {
+              "read": 5248,
+              "write": 0
+            }
+          }
+        },
+        "durable": {
+          "aggregateID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "seq": 18,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 30232,
+      "type": "session.inbox.delivered",
+      "data": {
+        "id": "evt_176db6d5b0016LBuX6F91VDVqC",
+        "created": 1792995454299,
+        "type": "session.inbox.delivered",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "inboxID": "msg_ii_queue"
+        },
+        "durable": {
+          "aggregateID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "seq": 19,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 31948,
+      "type": "session.step.started",
+      "data": {
+        "id": "evt_176db741a001bFbfRB52fYHKR0",
+        "created": 1792995456026,
+        "type": "session.step.started",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "agent": "build",
+          "model": {
+            "id": "big-pickle",
+            "providerID": "opencode",
+            "variant": "default"
+          },
+          "assistantMessageID": "msg_176db6d5f001WpVk5Ih3TUygrU",
+          "started": 1792995454310
+        },
+        "durable": {
+          "aggregateID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "seq": 20,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 33451,
+      "type": "session.text.started",
+      "data": {
+        "id": "evt_176db79f3002rjs87LrURvJ1bf",
+        "created": 1792995457523,
+        "type": "session.text.started",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "assistantMessageID": "msg_176db6d5f001WpVk5Ih3TUygrU",
+          "ordinal": 0
+        },
+        "durable": {
+          "aggregateID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "seq": 22,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 33451,
+      "type": "session.text.ended",
+      "data": {
+        "id": "evt_176db79f60028VDtruAm62FAaG",
+        "created": 1792995457526,
+        "type": "session.text.ended",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "assistantMessageID": "msg_176db6d5f001WpVk5Ih3TUygrU",
+          "ordinal": 0,
+          "text": "done\n\nQUEUED"
+        },
+        "durable": {
+          "aggregateID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "seq": 24,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 33451,
+      "type": "session.step.ended",
+      "data": {
+        "id": "evt_176db79f8001M2RwzkP1wilLdB",
+        "created": 1792995457528,
+        "type": "session.step.ended",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "assistantMessageID": "msg_176db6d5f001WpVk5Ih3TUygrU",
+          "finish": "stop",
+          "rawFinish": "stop",
+          "cost": 0,
+          "tokens": {
+            "input": 41,
+            "output": 6,
+            "reasoning": 113,
+            "cache": {
+              "read": 5376,
+              "write": 0
+            }
+          }
+        },
+        "durable": {
+          "aggregateID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "seq": 26,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 33451,
+      "type": "session.execution.succeeded",
+      "data": {
+        "id": "evt_176db79fa00135Lg7ZV3XA1JuS",
+        "created": 1792995457530,
+        "type": "session.execution.succeeded",
+        "data": {
+          "sessionID": "ses_e892508b5ffeQsTtwFlsHeH0fH"
+        },
+        "durable": {
+          "aggregateID": "ses_e892508b5ffeQsTtwFlsHeH0fH",
+          "seq": 27,
+          "version": 1
+        }
+      }
+    }
+  ]
+}

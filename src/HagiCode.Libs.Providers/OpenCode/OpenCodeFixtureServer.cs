@@ -57,6 +57,12 @@ public sealed class OpenCodeFixtureServerOptions
     /// <summary>The child-session turn the models in <see cref="ChildSessionModelIds"/> run.</summary>
     public OpenCodeFixtureChildSessionScript ChildSessionScript { get; init; } = new();
 
+    /// <summary>Models whose prompt runs the <see cref="SteerScript"/> turn: a steer sent during it is delivered at the next step boundary.</summary>
+    public IReadOnlyCollection<string> SteerModelIds { get; init; } = Array.Empty<string>();
+
+    /// <summary>The steerable turn the models in <see cref="SteerModelIds"/> run.</summary>
+    public OpenCodeFixtureSteerScript SteerScript { get; init; } = new();
+
     /// <summary>The models <c>GET /api/model</c> lists, with their input capabilities.</summary>
     public IReadOnlyCollection<OpenCodeFixtureModel> Models { get; init; } = Array.Empty<OpenCodeFixtureModel>();
 
@@ -101,6 +107,33 @@ public sealed class OpenCodeFixtureQuestionScript
 
     /// <summary>When true, the turn publishes nothing after the forms settle (an agent that stalls after the answer).</summary>
     public bool StallAfterSettlement { get; init; }
+}
+
+/// <summary>
+/// A scripted steerable turn, as OpenCode 2.0.32 reports it in the probe: a step runs for <see cref="StepDelay"/>, the steers that
+/// arrived during it enter the turn at its end (<c>session.inbox.delivered</c> with the steer's id), and the turn then succeeds.
+/// A steer that arrives after that point is not delivered and the turn ends without it.
+/// </summary>
+public sealed class OpenCodeFixtureSteerScript
+{
+    /// <summary>How long the first step runs before its boundary, which is when pending steers are delivered.</summary>
+    public TimeSpan StepDelay { get; init; } = TimeSpan.FromMilliseconds(300);
+
+    /// <summary>When <c>false</c>, the step boundary delivers nothing, so every steer ends the turn not consumed.</summary>
+    public bool DeliverSteers { get; init; } = true;
+
+    /// <summary>When <c>true</c>, a steer sent to the running turn is refused with an <c>InvalidRequestError</c> and never enqueued.</summary>
+    public bool RefuseSteers { get; init; }
+
+    /// <summary>When <c>true</c>, the turn ends with <c>session.execution.failed</c> after its first step instead of succeeding.</summary>
+    public bool FailTurn { get; init; }
+
+    /// <summary>
+    /// When <c>true</c>, a steer is delivered at once: <c>session.inbox.delivered</c> is published before the steer's response is written.
+    /// The probe recorded the same ordering for an idle-session prompt, so this checks that a delivery event which arrives before the
+    /// response still resolves the steer.
+    /// </summary>
+    public bool DeliverSteersImmediately { get; init; }
 }
 
 /// <summary>
@@ -210,7 +243,8 @@ public static class OpenCodeFixtureServer
                 .ToArray(),
             () => Interlocked.Read(ref state.InterruptRequestCount),
             () => state.LastPromptBody,
-            () => Interlocked.Read(ref state.ModelListingRequestCount)));
+            () => Interlocked.Read(ref state.ModelListingRequestCount),
+            () => state.SteerRequestIds.ToArray()));
     }
 
     private static async Task AcceptLoopAsync(HttpListener listener, FixtureState state, CancellationToken cancellationToken)
@@ -761,8 +795,21 @@ public static class OpenCodeFixtureServer
         }
 
         var sessionId = session.Id;
-        var inboxId = $"msg_{Guid.NewGuid():N}";
+        // OpenCode 2.0.32 uses the caller's message id as the inbox id, and echoes the requested delivery (steer when omitted).
+        var inboxId = requestedId ?? $"msg_{Guid.NewGuid():N}";
+        var delivery = TryGetString(root, "delivery") ?? "steer";
+        if (string.Equals(delivery, "steer", StringComparison.Ordinal) && !string.IsNullOrEmpty(requestedId))
+        {
+            state.SteerRequestIds.Enqueue(requestedId);
+        }
+
         var created = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        if (hasModel && Matches(state.Options.SteerModelIds, providerId, modelId))
+        {
+            await HandleSteerablePromptAsync(response, session, state, inboxId, promptText, delivery, created, cancellationToken);
+            return;
+        }
+
         session.Messages.Add(new { id = inboxId, time = new { created }, type = "user", text = promptText });
 
         state.Publish("session.inbox.enqueued", new { inboxID = inboxId, sessionID = sessionId });
@@ -817,9 +864,142 @@ public static class OpenCodeFixtureServer
                 time = new { created },
                 type = "user",
                 payload = new { text = promptText },
-                delivery = "steer",
+                delivery,
             },
         }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Answers a prompt to a steerable model. With no steerable turn running, the prompt starts one. With one running, the prompt is a
+    /// steer: it is enqueued for the running turn, or refused when the script says so. It is delivered at the turn's next step boundary.
+    /// </summary>
+    private static async Task HandleSteerablePromptAsync(
+        HttpListenerResponse response,
+        FixtureSession session,
+        FixtureState state,
+        string inboxId,
+        string promptText,
+        string delivery,
+        long created,
+        CancellationToken cancellationToken)
+    {
+        var sessionId = session.Id;
+        var script = state.Options.SteerScript;
+        var activeTurn = Interlocked.Read(ref session.ActiveTurnId);
+        var enqueued = new { inboxID = inboxId, sessionID = sessionId, item = new { type = "user", payload = new { text = promptText }, delivery } };
+        if (activeTurn != 0 && activeTurn == session.SteerTurnId)
+        {
+            if (script.RefuseSteers)
+            {
+                await WriteJsonAsync(response, 400, new { _tag = "InvalidRequestError", message = "Steer refused by the fixture", kind = "Payload" }, cancellationToken);
+                return;
+            }
+
+            if (script.DeliverSteersImmediately)
+            {
+                state.Publish("session.inbox.enqueued", enqueued);
+                state.Publish("session.inbox.delivered", new { sessionID = sessionId, inboxID = inboxId });
+            }
+            else
+            {
+                lock (session.SteerLock)
+                {
+                    session.PendingSteers.Add(inboxId);
+                }
+
+                state.Publish("session.inbox.enqueued", enqueued);
+            }
+        }
+        else
+        {
+            // Idle session: the prompt is its own steer, delivered as the turn starts (OpenCode 2.0.32 probe).
+            var turnId = Interlocked.Increment(ref session.LastTurnId);
+            session.SteerTurnId = turnId;
+            Interlocked.Exchange(ref session.ActiveTurnId, turnId);
+            state.Publish("session.inbox.enqueued", enqueued);
+            state.Publish("session.execution.started", new { sessionID = sessionId });
+            state.Publish("session.inbox.delivered", new { sessionID = sessionId, inboxID = inboxId });
+            _ = Task.Run(() => RunSteerTurnAsync(session, state, script, turnId), CancellationToken.None);
+        }
+
+        await WriteJsonAsync(response, 200, new
+        {
+            data = new
+            {
+                id = inboxId,
+                sessionID = sessionId,
+                time = new { created },
+                type = "user",
+                payload = new { text = promptText },
+                delivery,
+            },
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Runs the steerable turn: a first step, a step boundary that delivers the steers pending at that moment, and success. A steer that
+    /// arrives after the boundary stays undelivered, and the turn ends without it, as the probe observed.
+    /// </summary>
+    private static async Task RunSteerTurnAsync(FixtureSession session, FixtureState state, OpenCodeFixtureSteerScript script, long turnId)
+    {
+        var sessionId = session.Id;
+        await Task.Delay(script.StepDelay).ConfigureAwait(false);
+        if (Interlocked.Read(ref session.ActiveTurnId) != turnId)
+        {
+            // Interrupted during the first step: the pending steers are never delivered.
+            lock (session.SteerLock)
+            {
+                session.PendingSteers.Clear();
+            }
+
+            return;
+        }
+
+        var stepId = $"msg_{Guid.NewGuid():N}";
+        state.Publish("session.text.ended", new { sessionID = sessionId, assistantMessageID = stepId, ordinal = 0, text = "STEER-STEP-1" });
+        state.Publish("session.step.ended", new { sessionID = sessionId, assistantMessageID = stepId, finish = "stop", rawFinish = "stop" });
+
+        var delivered = new List<string>();
+        lock (session.SteerLock)
+        {
+            if (script.DeliverSteers)
+            {
+                delivered.AddRange(session.PendingSteers);
+            }
+
+            session.PendingSteers.Clear();
+        }
+
+        foreach (var inboxId in delivered)
+        {
+            state.Publish("session.inbox.delivered", new { sessionID = sessionId, inboxID = inboxId });
+        }
+
+        if (delivered.Count > 0)
+        {
+            // The steers join the turn's context, so one more step answers them before the turn ends.
+            var answerId = $"msg_{Guid.NewGuid():N}";
+            state.Publish("session.text.ended", new { sessionID = sessionId, assistantMessageID = answerId, ordinal = 0, text = "STEER-STEP-2" });
+            state.Publish("session.step.ended", new { sessionID = sessionId, assistantMessageID = answerId, finish = "stop", rawFinish = "stop" });
+        }
+
+        if (Interlocked.CompareExchange(ref session.ActiveTurnId, 0, turnId) != turnId)
+        {
+            return;
+        }
+
+        lock (session.SteerLock)
+        {
+            session.PendingSteers.Clear();
+        }
+
+        if (script.FailTurn)
+        {
+            state.Publish("session.execution.failed", new { sessionID = sessionId, error = new { type = "provider.no-route", message = "Turn failed after the steer." } });
+            return;
+        }
+
+        state.Publish("session.execution.succeeded", new { sessionID = sessionId });
     }
 
     private static async Task StreamEventsAsync(HttpListenerResponse response, FixtureState state, CancellationToken cancellationToken)
@@ -1147,6 +1327,9 @@ The canonical OpenCode console project `HagiCode.Libs.OpenCode.Console` owns the
 
         public long InterruptRequestCount;
 
+        /// <summary>The message ids of the prompts that asked for <c>delivery: "steer"</c>, in arrival order.</summary>
+        public ConcurrentQueue<string> SteerRequestIds { get; } = new();
+
         public long ModelListingRequestCount;
 
         public void Subscribe(Channel<string> channel)
@@ -1210,6 +1393,14 @@ The canonical OpenCode console project `HagiCode.Libs.OpenCode.Console` owns the
         public long InterruptedTurnId;
 
         public long LastTurnId;
+
+        /// <summary>The id of the running steerable turn, or 0. Steers reach the session only while it is the active turn.</summary>
+        public long SteerTurnId;
+
+        /// <summary>Steers accepted by the running steerable turn and not yet delivered at a step boundary. Guarded by <see cref="SteerLock"/>.</summary>
+        public List<string> PendingSteers { get; } = [];
+
+        public object SteerLock { get; } = new();
 
     }
 
@@ -1282,6 +1473,7 @@ public sealed class OpenCodeFixtureServerHandle : IAsyncDisposable
     private readonly Func<long> _interruptCount;
     private readonly Func<string?> _lastPromptBody;
     private readonly Func<long> _modelListingCount;
+    private readonly Func<IReadOnlyList<string>> _steerRequestIds;
     private readonly object _sync = new();
     private int _disposed;
 
@@ -1295,8 +1487,10 @@ public sealed class OpenCodeFixtureServerHandle : IAsyncDisposable
         Func<IReadOnlyList<OpenCodeFixtureFormSnapshot>> formSnapshot,
         Func<long> interruptCount,
         Func<string?> lastPromptBody,
-        Func<long> modelListingCount)
+        Func<long> modelListingCount,
+        Func<IReadOnlyList<string>> steerRequestIds)
     {
+        _steerRequestIds = steerRequestIds;
         _listener = listener;
         BaseUri = baseUri;
         _loopTask = loopTask;
@@ -1324,6 +1518,12 @@ public sealed class OpenCodeFixtureServerHandle : IAsyncDisposable
     /// Tests parse it to check the <c>files</c> object that reached the server.
     /// </summary>
     public string? LastPromptBody => _lastPromptBody();
+
+    /// <summary>
+    /// The message ids of the prompts that asked for <c>delivery: "steer"</c>, in arrival order, including refused ones. A steer the
+    /// caller never sent does not appear here.
+    /// </summary>
+    public IReadOnlyList<string> SteerRequestIds => _steerRequestIds();
 
     /// <summary>
     /// The number of <c>GET /api/model</c> requests the simulated server has received.

@@ -53,6 +53,7 @@ public class OpenCodeProvider : ICliProvider<OpenCodeOptions>
         }
 
         OpenCodeAgentWorkTurn.ValidateTimeouts(options.AgentWorkWaitTimeout, options.AgentWorkSettleInterval);
+        ValidateSteerDeliveryTimeout(options);
 
         var runtime = await _standaloneServerClient.AcquireAsync(ToStandaloneOptions(options), cancellationToken).ConfigureAwait(false);
         var sessionResolution = await ResolveSessionAsync(runtime, options, cancellationToken).ConfigureAwait(false);
@@ -72,14 +73,25 @@ public class OpenCodeProvider : ICliProvider<OpenCodeOptions>
         }
 
         var request = OpenCodeSessionPromptRequest.FromText(prompt);
-        if (options.UserInputHandler is not null || options.EmitAgentWorkSnapshots)
+        if (options.UserInputHandler is not null || options.EmitAgentWorkSnapshots || options.Steering is not null)
         {
-            // Queue path: questions and agent work snapshots are yielded in stream order while the prompt runs on its own task.
+            // Queue path: questions, agent work snapshots and steer outcomes are yielded in stream order while the prompt runs on its own task.
             yield return lifecycleMessage;
 
-            await foreach (var message in StreamTurnAsync(runtime.Client, sessionResolution.SessionId, request, options, debugContext, cancellationToken).ConfigureAwait(false))
+            // A steered run is attached only while this iterator runs, so a consumer that stops early detaches the handle too.
+            var steering = options.Steering is null
+                ? null
+                : new OpenCodeSteerTurn(runtime.Client, sessionResolution.SessionId, options.Steering, options.SteerDeliveryTimeout);
+            try
             {
-                yield return message;
+                await foreach (var message in StreamTurnAsync(runtime.Client, sessionResolution.SessionId, request, options, steering, debugContext, cancellationToken).ConfigureAwait(false))
+                {
+                    yield return message;
+                }
+            }
+            finally
+            {
+                steering?.Dispose();
             }
 
             yield break;
@@ -100,6 +112,23 @@ public class OpenCodeProvider : ICliProvider<OpenCodeOptions>
     }
 
     /// <summary>
+    /// Rejects a steer delivery timeout that is not positive and finite, before any request is sent. Checked only when a steering handle is set.
+    /// </summary>
+    private static void ValidateSteerDeliveryTimeout(OpenCodeOptions options)
+    {
+        if (options.Steering is null)
+        {
+            return;
+        }
+
+        var timeout = options.SteerDeliveryTimeout;
+        if (timeout <= TimeSpan.Zero || timeout == Timeout.InfiniteTimeSpan)
+        {
+            throw new ArgumentOutOfRangeException(nameof(options.SteerDeliveryTimeout), timeout, "SteerDeliveryTimeout must be positive and finite.");
+        }
+    }
+
+    /// <summary>
     /// Runs a turn on the queue path: the prompt runs on a background task, and each question or agent work snapshot is queued in the
     /// order it happens. The queue is drained until the turn ends. Then the assistant and terminal messages follow.
     /// </summary>
@@ -108,6 +137,7 @@ public class OpenCodeProvider : ICliProvider<OpenCodeOptions>
         string sessionId,
         OpenCodeSessionPromptRequest request,
         OpenCodeOptions options,
+        OpenCodeSteerTurn? steering,
         OpenCodeMessageDebugContext debugContext,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
@@ -131,7 +161,7 @@ public class OpenCodeProvider : ICliProvider<OpenCodeOptions>
         {
             try
             {
-                return await client.PromptAsync(sessionId, request, interaction, agentWork, turnToken).ConfigureAwait(false);
+                return await client.PromptAsync(sessionId, request, interaction, agentWork, steering, turnToken).ConfigureAwait(false);
             }
             finally
             {

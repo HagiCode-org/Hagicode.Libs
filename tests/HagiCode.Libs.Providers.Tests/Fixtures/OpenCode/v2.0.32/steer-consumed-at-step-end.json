@@ -1,0 +1,376 @@
+{
+  "_header": {
+    "opencodeVersion": "2.0.32",
+    "model": "opencode/big-pickle",
+    "recordedWith": "isolated scratch HOME, ephemeral port",
+    "scenario": "steer enqueued while the final text streams: delivered at step end, then one more step in the same execution"
+  },
+  "steer": {
+    "request": {
+      "text": "Also end your reply with the word STEERED.",
+      "id": "msg_b_steer",
+      "delivery": "steer"
+    },
+    "status": 200,
+    "response": {
+      "data": {
+        "id": "msg_b_steer",
+        "sessionID": "ses_e89268616ffeaccrtyfNhUALAS",
+        "time": {
+          "created": 1792995329254
+        },
+        "type": "user",
+        "payload": {
+          "text": "Also end your reply with the word STEERED."
+        },
+        "delivery": "steer"
+      }
+    }
+  },
+  "events": [
+    {
+      "dt_ms": 25,
+      "type": "session.inbox.enqueued",
+      "data": {
+        "id": "evt_176d979f1001hm97wQ7bV1WzXK",
+        "created": 1792995326449,
+        "type": "session.inbox.enqueued",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "inboxID": "msg_b_main",
+          "sessionID": "ses_e89268616ffeaccrtyfNhUALAS",
+          "item": {
+            "type": "user",
+            "payload": {
+              "text": "Write the sentence 'alpha beta gamma delta epsilon' three times, one per line, then stop."
+            },
+            "delivery": "steer"
+          }
+        },
+        "durable": {
+          "aggregateID": "ses_e89268616ffeaccrtyfNhUALAS",
+          "seq": 2,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 25,
+      "type": "session.execution.started",
+      "data": {
+        "id": "evt_176d979f2001D2dBtKZuHo3cAn",
+        "created": 1792995326450,
+        "type": "session.execution.started",
+        "data": {
+          "sessionID": "ses_e89268616ffeaccrtyfNhUALAS"
+        },
+        "durable": {
+          "aggregateID": "ses_e89268616ffeaccrtyfNhUALAS",
+          "seq": 3,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 25,
+      "type": "session.inbox.delivered",
+      "data": {
+        "id": "evt_176d979f80015NEQ7eALQVqy66",
+        "created": 1792995326456,
+        "type": "session.inbox.delivered",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e89268616ffeaccrtyfNhUALAS",
+          "inboxID": "msg_b_main"
+        },
+        "durable": {
+          "aggregateID": "ses_e89268616ffeaccrtyfNhUALAS",
+          "seq": 5,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 2613,
+      "type": "session.step.started",
+      "data": {
+        "id": "evt_176d984210019jRrQiVQ7Ou1pR",
+        "created": 1792995329057,
+        "type": "session.step.started",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e89268616ffeaccrtyfNhUALAS",
+          "agent": "build",
+          "model": {
+            "id": "big-pickle",
+            "providerID": "opencode",
+            "variant": "default"
+          },
+          "assistantMessageID": "msg_176d979fc001kB4yt2IcTM1pTl",
+          "started": 1792995326470
+        },
+        "durable": {
+          "aggregateID": "ses_e89268616ffeaccrtyfNhUALAS",
+          "seq": 6,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 2733,
+      "type": "session.text.started",
+      "data": {
+        "id": "evt_176d9849b001wax9Nco43qGOKi",
+        "created": 1792995329179,
+        "type": "session.text.started",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e89268616ffeaccrtyfNhUALAS",
+          "assistantMessageID": "msg_176d979fc001kB4yt2IcTM1pTl",
+          "ordinal": 0
+        },
+        "durable": {
+          "aggregateID": "ses_e89268616ffeaccrtyfNhUALAS",
+          "seq": 8,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 2809,
+      "type": "session.inbox.enqueued",
+      "data": {
+        "id": "evt_176d984e60016MA9sIJKnxoJvi",
+        "created": 1792995329254,
+        "type": "session.inbox.enqueued",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "inboxID": "msg_b_steer",
+          "sessionID": "ses_e89268616ffeaccrtyfNhUALAS",
+          "item": {
+            "type": "user",
+            "payload": {
+              "text": "Also end your reply with the word STEERED."
+            },
+            "delivery": "steer"
+          }
+        },
+        "durable": {
+          "aggregateID": "ses_e89268616ffeaccrtyfNhUALAS",
+          "seq": 9,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 3005,
+      "type": "session.text.ended",
+      "data": {
+        "id": "evt_176d98599001ZI2qEcygrqlScK",
+        "created": 1792995329433,
+        "type": "session.text.ended",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e89268616ffeaccrtyfNhUALAS",
+          "assistantMessageID": "msg_176d979fc001kB4yt2IcTM1pTl",
+          "ordinal": 0,
+          "text": "alpha beta gamma delta epsilon\nalpha beta gamma delta epsilon\nalpha beta gamma delta epsilon"
+        },
+        "durable": {
+          "aggregateID": "ses_e89268616ffeaccrtyfNhUALAS",
+          "seq": 11,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 3005,
+      "type": "session.step.ended",
+      "data": {
+        "id": "evt_176d9859b001DyvcDfZ2NtCy6f",
+        "created": 1792995329435,
+        "type": "session.step.ended",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e89268616ffeaccrtyfNhUALAS",
+          "assistantMessageID": "msg_176d979fc001kB4yt2IcTM1pTl",
+          "finish": "stop",
+          "rawFinish": "stop",
+          "cost": 0,
+          "tokens": {
+            "input": 93,
+            "output": 18,
+            "reasoning": 50,
+            "cache": {
+              "read": 5248,
+              "write": 0
+            }
+          }
+        },
+        "durable": {
+          "aggregateID": "ses_e89268616ffeaccrtyfNhUALAS",
+          "seq": 13,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 3005,
+      "type": "session.inbox.delivered",
+      "data": {
+        "id": "evt_176d985a0001QL3XatgsrzALt6",
+        "created": 1792995329440,
+        "type": "session.inbox.delivered",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e89268616ffeaccrtyfNhUALAS",
+          "inboxID": "msg_b_steer"
+        },
+        "durable": {
+          "aggregateID": "ses_e89268616ffeaccrtyfNhUALAS",
+          "seq": 14,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 5748,
+      "type": "session.step.started",
+      "data": {
+        "id": "evt_176d9905f001n2GhTnaV2p0joP",
+        "created": 1792995332191,
+        "type": "session.step.started",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e89268616ffeaccrtyfNhUALAS",
+          "agent": "build",
+          "model": {
+            "id": "big-pickle",
+            "providerID": "opencode",
+            "variant": "default"
+          },
+          "assistantMessageID": "msg_176d985a30018TX58SlvyAn98J",
+          "started": 1792995329450
+        },
+        "durable": {
+          "aggregateID": "ses_e89268616ffeaccrtyfNhUALAS",
+          "seq": 15,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 5868,
+      "type": "session.text.started",
+      "data": {
+        "id": "evt_176d990d9001XS3hXLffsq3yE7",
+        "created": 1792995332313,
+        "type": "session.text.started",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e89268616ffeaccrtyfNhUALAS",
+          "assistantMessageID": "msg_176d985a30018TX58SlvyAn98J",
+          "ordinal": 0
+        },
+        "durable": {
+          "aggregateID": "ses_e89268616ffeaccrtyfNhUALAS",
+          "seq": 17,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 5882,
+      "type": "session.text.ended",
+      "data": {
+        "id": "evt_176d990e3002pgchQ6O5FH6FZx",
+        "created": 1792995332323,
+        "type": "session.text.ended",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e89268616ffeaccrtyfNhUALAS",
+          "assistantMessageID": "msg_176d985a30018TX58SlvyAn98J",
+          "ordinal": 0,
+          "text": "alpha beta gamma delta epsilon\nalpha beta gamma delta epsilon\nalpha beta gamma delta epsilon\nSTEERED"
+        },
+        "durable": {
+          "aggregateID": "ses_e89268616ffeaccrtyfNhUALAS",
+          "seq": 19,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 5882,
+      "type": "session.step.ended",
+      "data": {
+        "id": "evt_176d990e5001QwbiptivKhyC5O",
+        "created": 1792995332325,
+        "type": "session.step.ended",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e89268616ffeaccrtyfNhUALAS",
+          "assistantMessageID": "msg_176d985a30018TX58SlvyAn98J",
+          "finish": "stop",
+          "rawFinish": "stop",
+          "cost": 0,
+          "tokens": {
+            "input": 176,
+            "output": 22,
+            "reasoning": 56,
+            "cache": {
+              "read": 5248,
+              "write": 0
+            }
+          }
+        },
+        "durable": {
+          "aggregateID": "ses_e89268616ffeaccrtyfNhUALAS",
+          "seq": 21,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 5882,
+      "type": "session.execution.succeeded",
+      "data": {
+        "id": "evt_176d990e8001WJKMlcopUk8LzU",
+        "created": 1792995332328,
+        "type": "session.execution.succeeded",
+        "data": {
+          "sessionID": "ses_e89268616ffeaccrtyfNhUALAS"
+        },
+        "durable": {
+          "aggregateID": "ses_e89268616ffeaccrtyfNhUALAS",
+          "seq": 22,
+          "version": 1
+        }
+      }
+    }
+  ]
+}

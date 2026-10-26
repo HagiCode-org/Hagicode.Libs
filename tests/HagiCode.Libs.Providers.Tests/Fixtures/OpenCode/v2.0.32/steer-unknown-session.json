@@ -1,0 +1,19 @@
+{
+  "_header": {
+    "opencodeVersion": "2.0.32",
+    "model": "opencode/big-pickle",
+    "recordedWith": "isolated scratch HOME, ephemeral port",
+    "scenario": "steer to a session id OpenCode does not know: refused with 404, no inbox event"
+  },
+  "request": {
+    "text": "x",
+    "id": "msg_iii",
+    "delivery": "steer"
+  },
+  "status": 404,
+  "response": {
+    "_tag": "SessionNotFoundError",
+    "sessionID": "ses_doesnotexist000000000000",
+    "message": "Session not found: ses_doesnotexist000000000000"
+  }
+}

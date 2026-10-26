@@ -1,0 +1,609 @@
+{
+  "_header": {
+    "opencodeVersion": "2.0.32",
+    "model": "opencode/big-pickle",
+    "recordedWith": "isolated scratch HOME, ephemeral port",
+    "scenario": "steer sent while a question form is pending: accepted, form unchanged, delivered only after the form reply"
+  },
+  "formsBeforeSteer": {
+    "status": 200,
+    "response": {
+      "data": [
+        {
+          "id": "frm_176da167d001xt7QkQ6U3MPuIv",
+          "sessionID": "ses_e8925f225ffePge4Aggs7d7mZp",
+          "title": "Questions",
+          "metadata": {
+            "kind": "question",
+            "tool": {
+              "messageID": "msg_176da0df5001ohTrATqj4MOoO1",
+              "id": "call_00_9uh3c395yqxa8xr2ggljgxbk"
+            }
+          },
+          "fields": [
+            {
+              "key": "q0",
+              "title": "Colour",
+              "description": "Pick a colour",
+              "type": "string",
+              "options": [
+                {
+                  "value": "Red",
+                  "label": "Red",
+                  "description": "Choose red"
+                },
+                {
+                  "value": "Blue",
+                  "label": "Blue",
+                  "description": "Choose blue"
+                }
+              ],
+              "custom": true
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "steer": {
+    "request": {
+      "text": "Also end your reply with the word STEERED.",
+      "id": "msg_f_steer",
+      "delivery": "steer"
+    },
+    "status": 200,
+    "response": {
+      "data": {
+        "id": "msg_f_steer",
+        "sessionID": "ses_e8925f225ffePge4Aggs7d7mZp",
+        "time": {
+          "created": 1792995368535
+        },
+        "type": "user",
+        "payload": {
+          "text": "Also end your reply with the word STEERED."
+        },
+        "delivery": "steer"
+      }
+    }
+  },
+  "formsAfterSteer": {
+    "status": 200,
+    "response": {
+      "data": [
+        {
+          "id": "frm_176da167d001xt7QkQ6U3MPuIv",
+          "sessionID": "ses_e8925f225ffePge4Aggs7d7mZp",
+          "title": "Questions",
+          "metadata": {
+            "kind": "question",
+            "tool": {
+              "messageID": "msg_176da0df5001ohTrATqj4MOoO1",
+              "id": "call_00_9uh3c395yqxa8xr2ggljgxbk"
+            }
+          },
+          "fields": [
+            {
+              "key": "q0",
+              "title": "Colour",
+              "description": "Pick a colour",
+              "type": "string",
+              "options": [
+                {
+                  "value": "Red",
+                  "label": "Red",
+                  "description": "Choose red"
+                },
+                {
+                  "value": "Blue",
+                  "label": "Blue",
+                  "description": "Choose blue"
+                }
+              ],
+              "custom": true
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "reply": {
+    "status": 204,
+    "request": {
+      "answer": {
+        "q0": "Red"
+      }
+    }
+  },
+  "events": [
+    {
+      "dt_ms": 25,
+      "type": "session.inbox.enqueued",
+      "data": {
+        "id": "evt_176da0de7001cnQ1P2BL6Arj2u",
+        "created": 1792995364327,
+        "type": "session.inbox.enqueued",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "inboxID": "msg_f_main",
+          "sessionID": "ses_e8925f225ffePge4Aggs7d7mZp",
+          "item": {
+            "type": "user",
+            "payload": {
+              "text": "Use the question tool to ask me one question with the header 'Colour' and the question 'Pick a colour'. Offer exactly two options: 'Red' and 'Blue'. Wait for my answer. Then reply with exactly: chose <answer>."
+            },
+            "delivery": "steer"
+          }
+        },
+        "durable": {
+          "aggregateID": "ses_e8925f225ffePge4Aggs7d7mZp",
+          "seq": 2,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 25,
+      "type": "session.execution.started",
+      "data": {
+        "id": "evt_176da0de90018kUj3mfhTOGjI7",
+        "created": 1792995364329,
+        "type": "session.execution.started",
+        "data": {
+          "sessionID": "ses_e8925f225ffePge4Aggs7d7mZp"
+        },
+        "durable": {
+          "aggregateID": "ses_e8925f225ffePge4Aggs7d7mZp",
+          "seq": 3,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 25,
+      "type": "session.inbox.delivered",
+      "data": {
+        "id": "evt_176da0df1001ffohsQjVvrFAqZ",
+        "created": 1792995364337,
+        "type": "session.inbox.delivered",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e8925f225ffePge4Aggs7d7mZp",
+          "inboxID": "msg_f_main"
+        },
+        "durable": {
+          "aggregateID": "ses_e8925f225ffePge4Aggs7d7mZp",
+          "seq": 5,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 1829,
+      "type": "session.step.started",
+      "data": {
+        "id": "evt_176da1508001mfuEy5iE8Br2O4",
+        "created": 1792995366152,
+        "type": "session.step.started",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e8925f225ffePge4Aggs7d7mZp",
+          "agent": "build",
+          "model": {
+            "id": "big-pickle",
+            "providerID": "opencode",
+            "variant": "default"
+          },
+          "assistantMessageID": "msg_176da0df5001ohTrATqj4MOoO1",
+          "started": 1792995364349
+        },
+        "durable": {
+          "aggregateID": "ses_e8925f225ffePge4Aggs7d7mZp",
+          "seq": 6,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 1829,
+      "type": "session.tool.input.started",
+      "data": {
+        "id": "evt_176da1509001JeWmgUGTswcNmj",
+        "created": 1792995366153,
+        "type": "session.tool.input.started",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e8925f225ffePge4Aggs7d7mZp",
+          "assistantMessageID": "msg_176da0df5001ohTrATqj4MOoO1",
+          "id": "call_00_9uh3c395yqxa8xr2ggljgxbk",
+          "name": "question"
+        },
+        "durable": {
+          "aggregateID": "ses_e8925f225ffePge4Aggs7d7mZp",
+          "seq": 7,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 2200,
+      "type": "session.tool.input.ended",
+      "data": {
+        "id": "evt_176da1674001P41ssvf9VqqoFo",
+        "created": 1792995366516,
+        "type": "session.tool.input.ended",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e8925f225ffePge4Aggs7d7mZp",
+          "assistantMessageID": "msg_176da0df5001ohTrATqj4MOoO1",
+          "id": "call_00_9uh3c395yqxa8xr2ggljgxbk",
+          "text": "{\"questions\": [{\"question\": \"Pick a colour\", \"header\": \"Colour\", \"options\": [{\"label\": \"Red\", \"description\": \"Choose red\"}, {\"label\": \"Blue\", \"description\": \"Choose blue\"}]}]}"
+        },
+        "durable": {
+          "aggregateID": "ses_e8925f225ffePge4Aggs7d7mZp",
+          "seq": 8,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 2200,
+      "type": "session.tool.called",
+      "data": {
+        "id": "evt_176da1679001B7HF47A4rvO5R0",
+        "created": 1792995366521,
+        "type": "session.tool.called",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e8925f225ffePge4Aggs7d7mZp",
+          "assistantMessageID": "msg_176da0df5001ohTrATqj4MOoO1",
+          "id": "call_00_9uh3c395yqxa8xr2ggljgxbk",
+          "input": {
+            "questions": [
+              {
+                "question": "Pick a colour",
+                "header": "Colour",
+                "options": [
+                  {
+                    "label": "Red",
+                    "description": "Choose red"
+                  },
+                  {
+                    "label": "Blue",
+                    "description": "Choose blue"
+                  }
+                ]
+              }
+            ]
+          },
+          "executed": false
+        },
+        "durable": {
+          "aggregateID": "ses_e8925f225ffePge4Aggs7d7mZp",
+          "seq": 9,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 2200,
+      "type": "form.created",
+      "data": {
+        "id": "evt_176da167d002jWQW5zRyJ0h3mb",
+        "created": 1792995366525,
+        "type": "form.created",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "form": {
+            "id": "frm_176da167d001xt7QkQ6U3MPuIv",
+            "sessionID": "ses_e8925f225ffePge4Aggs7d7mZp",
+            "title": "Questions",
+            "metadata": {
+              "kind": "question",
+              "tool": {
+                "messageID": "msg_176da0df5001ohTrATqj4MOoO1",
+                "id": "call_00_9uh3c395yqxa8xr2ggljgxbk"
+              }
+            },
+            "fields": [
+              {
+                "key": "q0",
+                "title": "Colour",
+                "description": "Pick a colour",
+                "type": "string",
+                "options": [
+                  {
+                    "value": "Red",
+                    "label": "Red",
+                    "description": "Choose red"
+                  },
+                  {
+                    "value": "Blue",
+                    "label": "Blue",
+                    "description": "Choose blue"
+                  }
+                ],
+                "custom": true
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "dt_ms": 4211,
+      "type": "session.inbox.enqueued",
+      "data": {
+        "id": "evt_176da1e57001z1y6GaSRYfkjdg",
+        "created": 1792995368535,
+        "type": "session.inbox.enqueued",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "inboxID": "msg_f_steer",
+          "sessionID": "ses_e8925f225ffePge4Aggs7d7mZp",
+          "item": {
+            "type": "user",
+            "payload": {
+              "text": "Also end your reply with the word STEERED."
+            },
+            "delivery": "steer"
+          }
+        },
+        "durable": {
+          "aggregateID": "ses_e8925f225ffePge4Aggs7d7mZp",
+          "seq": 11,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 8238,
+      "type": "form.replied",
+      "data": {
+        "id": "evt_176da2dfe001RZpSD2f3Rn6R14",
+        "created": 1792995372542,
+        "type": "form.replied",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "id": "frm_176da167d001xt7QkQ6U3MPuIv",
+          "sessionID": "ses_e8925f225ffePge4Aggs7d7mZp",
+          "answer": {
+            "q0": "Red"
+          }
+        }
+      }
+    },
+    {
+      "dt_ms": 8238,
+      "type": "session.tool.success",
+      "data": {
+        "id": "evt_176da2dff001NCX3oti0nhNBPT",
+        "created": 1792995372543,
+        "type": "session.tool.success",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e8925f225ffePge4Aggs7d7mZp",
+          "assistantMessageID": "msg_176da0df5001ohTrATqj4MOoO1",
+          "id": "call_00_9uh3c395yqxa8xr2ggljgxbk",
+          "content": [
+            {
+              "type": "text",
+              "text": "User has answered your questions: \"Pick a colour\"=\"Red\". You can now continue with the user's answers in mind."
+            }
+          ],
+          "metadata": {
+            "answers": [
+              [
+                "Red"
+              ]
+            ],
+            "truncated": false
+          },
+          "executed": false
+        },
+        "durable": {
+          "aggregateID": "ses_e8925f225ffePge4Aggs7d7mZp",
+          "seq": 12,
+          "version": 2
+        }
+      }
+    },
+    {
+      "dt_ms": 8238,
+      "type": "session.step.ended",
+      "data": {
+        "id": "evt_176da2e01001qxoP9aIFC53mmZ",
+        "created": 1792995372545,
+        "type": "session.step.ended",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e8925f225ffePge4Aggs7d7mZp",
+          "assistantMessageID": "msg_176da0df5001ohTrATqj4MOoO1",
+          "finish": "tool-calls",
+          "rawFinish": "tool_calls",
+          "cost": 0,
+          "tokens": {
+            "input": 123,
+            "output": 84,
+            "reasoning": 0,
+            "cache": {
+              "read": 5248,
+              "write": 0
+            }
+          }
+        },
+        "durable": {
+          "aggregateID": "ses_e8925f225ffePge4Aggs7d7mZp",
+          "seq": 13,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 8238,
+      "type": "session.inbox.delivered",
+      "data": {
+        "id": "evt_176da2e06001MyJQFtrxR36MzG",
+        "created": 1792995372550,
+        "type": "session.inbox.delivered",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e8925f225ffePge4Aggs7d7mZp",
+          "inboxID": "msg_f_steer"
+        },
+        "durable": {
+          "aggregateID": "ses_e8925f225ffePge4Aggs7d7mZp",
+          "seq": 14,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 11866,
+      "type": "session.step.started",
+      "data": {
+        "id": "evt_176da3c380013B50VuJs4QPFbv",
+        "created": 1792995376184,
+        "type": "session.step.started",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e8925f225ffePge4Aggs7d7mZp",
+          "agent": "build",
+          "model": {
+            "id": "big-pickle",
+            "providerID": "opencode",
+            "variant": "default"
+          },
+          "assistantMessageID": "msg_176da2e09001S2NnfRZTwpnEy8",
+          "started": 1792995372562
+        },
+        "durable": {
+          "aggregateID": "ses_e8925f225ffePge4Aggs7d7mZp",
+          "seq": 15,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 11866,
+      "type": "session.text.started",
+      "data": {
+        "id": "evt_176da3c3a001lN5ltwYI2fzimm",
+        "created": 1792995376186,
+        "type": "session.text.started",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e8925f225ffePge4Aggs7d7mZp",
+          "assistantMessageID": "msg_176da2e09001S2NnfRZTwpnEy8",
+          "ordinal": 0
+        },
+        "durable": {
+          "aggregateID": "ses_e8925f225ffePge4Aggs7d7mZp",
+          "seq": 16,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 11869,
+      "type": "session.text.ended",
+      "data": {
+        "id": "evt_176da3c3c002wmBuPJqJsWemnK",
+        "created": 1792995376188,
+        "type": "session.text.ended",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e8925f225ffePge4Aggs7d7mZp",
+          "assistantMessageID": "msg_176da2e09001S2NnfRZTwpnEy8",
+          "ordinal": 0,
+          "text": "chose Red\n\nSTEERED"
+        },
+        "durable": {
+          "aggregateID": "ses_e8925f225ffePge4Aggs7d7mZp",
+          "seq": 17,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 11869,
+      "type": "session.step.ended",
+      "data": {
+        "id": "evt_176da3c3e001b9o3F5tdvZ05ja",
+        "created": 1792995376190,
+        "type": "session.step.ended",
+        "location": {
+          "directory": "/scratch/work"
+        },
+        "data": {
+          "sessionID": "ses_e8925f225ffePge4Aggs7d7mZp",
+          "assistantMessageID": "msg_176da2e09001S2NnfRZTwpnEy8",
+          "finish": "stop",
+          "rawFinish": "stop",
+          "cost": 0,
+          "tokens": {
+            "input": 255,
+            "output": 8,
+            "reasoning": 0,
+            "cache": {
+              "read": 5248,
+              "write": 0
+            }
+          }
+        },
+        "durable": {
+          "aggregateID": "ses_e8925f225ffePge4Aggs7d7mZp",
+          "seq": 19,
+          "version": 1
+        }
+      }
+    },
+    {
+      "dt_ms": 11869,
+      "type": "session.execution.succeeded",
+      "data": {
+        "id": "evt_176da3c41001JGXwUg87F4fLKw",
+        "created": 1792995376193,
+        "type": "session.execution.succeeded",
+        "data": {
+          "sessionID": "ses_e8925f225ffePge4Aggs7d7mZp"
+        },
+        "durable": {
+          "aggregateID": "ses_e8925f225ffePge4Aggs7d7mZp",
+          "seq": 20,
+          "version": 1
+        }
+      }
+    }
+  ]
+}
