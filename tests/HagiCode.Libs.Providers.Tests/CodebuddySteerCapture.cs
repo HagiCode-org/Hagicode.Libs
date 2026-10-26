@@ -1,4 +1,4 @@
-// verified except held-steer resume (provisional until P4, P6 and P7 are complete)
+// verified except held-steer resume
 namespace HagiCode.Libs.Providers.Tests;
 
 // Real CodeBuddy 2.169.0 captures for codebuddy-run-steering (tasks 1.1 to 1.9). The fixtures in Fixtures/Codebuddy are sanitized:
@@ -29,7 +29,9 @@ namespace HagiCode.Libs.Providers.Tests;
 //    (steer-acp-text-stream.jsonl, injected at the boundary after the first model response; the turn then finished normally).
 //  * P4 window: an idle session answers { steered: false, reason: "idle" } to a steer, both before any turn and after a turn's
 //    last result with the process still up (steer-acp-idle-edges.jsonl). An unknown session answers JSON-RPC -32602.
-//    Not recorded: a steer in the instant between the last model output and idle, and the moment just before stdin closes.
+//    Last moment (2026-10-26, hy3): a steer sent as the first answer chunk arrived was acknowledged, echoed with its id before the
+//    prompt reply, and used in the final text ("OKOK LATEX"). Not recorded: a steer written just before stdin closes, because the
+//    harness closes stdin only after the turn has ended.
 //  * P5 teardown: a steer accepted during a tool call, then session/cancel, produced no user_message_chunk, and the turn answered
 //    stopReason cancelled. The next prompt in the same process answered "OK" only, so the held text did not run later
 //    (steer-acp-cancel-held.jsonl). Esc is a TUI key with no ACP equivalent; session/cancel is the teardown recorded here.
@@ -37,6 +39,13 @@ namespace HagiCode.Libs.Providers.Tests;
 //  * P6 edge inputs on an idle session (no model turn): empty contentBlocks is JSON-RPC -32602 "Missing or empty contentBlocks
 //    array"; empty text, missing text, non-string text, whitespace-only text and a leading "/" command each answer
 //    { steered: false } with no reason, before the run-state check; valid text answers reason "idle".
-//    Not recorded (need a live turn): two identical texts, a steer equal to the prompt, a steer while a permission request is pending.
-//  * P7 version: `codebuddy --version` prints 2.169.0. The initialize result has no agentInfo.version field, so the version gate
-//    cannot read it from ACP without an extra process. The lowest working version is not recorded: only 2.169.0 was probed.
+//  * P6 during a live turn (hy3, 2026-10-26): two steers with identical text and different ids were both acknowledged and each
+//    was echoed under its own id; a steer equal to the prompt was acknowledged and echoed under its own id, and the prompt itself
+//    was not echoed. A leading "/" steer during a run answers { steered: false } (refused, not rewritten).
+//  * P6 steer while a permission request is pending (no -y, the permission held for 9 s): the steer was acknowledged while the
+//    request was pending, and its echo arrived after the permission was answered, at the next boundary; the final text used it.
+//  * P7 version: `codebuddy --version` prints the version. The initialize result has no agentInfo.version field, so the version gate
+//    reads it with an extra process. Probed on 2026-10-26 with an idle steer and one hy3 tool-call turn each: 2.140.0 and 2.143.0
+//    acknowledge the steer (session/steer exists, and 2.140.0 acts on it) but echo no injection; 2.143.1, 2.144.0 and 2.145.0
+//    echo the steer text with no messageId; 2.146.0, 2.147.0, 2.155.0 and 2.169.0 echo it with messageId equal to the steer id.
+//    The minimum is 2.146.0. Each boundary version was run once, and 2.143.0 twice, so the boundary is sampled, not exhaustive.

@@ -198,6 +198,34 @@ public sealed class AcpJsonRpcClientPermissionTests
         return enumerator.Current;
     }
 
+    // Steering writes a second request while session/prompt is pending (codebuddy-run-steering, task 3A.1). The writes must stay
+    // whole and each reply must reach the request it answers, even when the two writes are split like a stream writer's.
+    [Test]
+    public async Task A_request_written_while_another_is_pending_stays_whole_and_each_reply_reaches_its_own_request()
+    {
+        var transport = new PermissionTestTransport { SplitWrites = true, AutoRespond = false };
+        await using var client = new AcpJsonRpcClient(transport);
+        await client.ConnectAsync();
+
+        var prompt = client.InvokeAsync<JsonElement>("session/prompt", new { sessionId = "session-1", prompt = Array.Empty<object>() });
+        var steer = client.InvokeAsync<JsonElement>("session/steer", new { sessionId = "session-1", contentBlocks = new[] { new { type = "text", text = "steer" } } });
+
+        var promptLine = await transport.WaitForLineAsync(0);
+        var steerLine = await transport.WaitForLineAsync(1);
+        JsonDocument.Parse(promptLine).RootElement.GetProperty("method").GetString().ShouldBe("session/prompt");
+        JsonDocument.Parse(steerLine).RootElement.GetProperty("method").GetString().ShouldBe("session/steer");
+
+        transport.Deliver("""{"jsonrpc":"2.0","id":2,"result":{"steered":true,"ownerRequestId":"owner-1"}}""");
+        transport.Deliver("""{"jsonrpc":"2.0","id":1,"result":{"stopReason":"end_turn"}}""");
+
+        (await steer).GetProperty("steered").GetBoolean().ShouldBeTrue();
+        (await prompt).GetProperty("stopReason").GetString().ShouldBe("end_turn");
+        foreach (var line in transport.Lines)
+        {
+            Should.NotThrow(() => JsonDocument.Parse(line).Dispose());
+        }
+    }
+
     /// <summary>
     /// Delivers scripted agent frames and records every line the client writes. With <see cref="SplitWrites" /> each write is
     /// two awaited halves, like a stream writer's write followed by a flush, so unserialized writes would interleave.
@@ -211,6 +239,9 @@ public sealed class AcpJsonRpcClientPermissionTests
         private readonly List<(int Index, TaskCompletionSource<string> Waiter)> _lineWaiters = [];
 
         public bool SplitWrites { get; init; }
+
+        /// <summary>When true (the default), every request written is answered with an empty result at once.</summary>
+        public bool AutoRespond { get; init; } = true;
 
         public Action? OnFirstHalfWritten { get; set; }
 
@@ -340,6 +371,11 @@ public sealed class AcpJsonRpcClientPermissionTests
         /// <summary>Answers a client request (a frame with a method and an id) with an empty result.</summary>
         private void RespondTo(string message)
         {
+            if (!AutoRespond)
+            {
+                return;
+            }
+
             using var document = JsonDocument.Parse(message);
             var root = document.RootElement;
             if (root.TryGetProperty("method", out _) && root.TryGetProperty("id", out var id))

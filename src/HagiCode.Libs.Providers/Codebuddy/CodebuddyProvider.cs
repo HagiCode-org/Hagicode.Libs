@@ -1,5 +1,8 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using HagiCode.Libs.Core.Acp;
 using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Environment;
@@ -16,10 +19,18 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
 {
     private static readonly string[] DefaultExecutableCandidates = ["codebuddy", "codebuddy-cli"];
     private static readonly TimeSpan DefaultStartupTimeout = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan CliVersionTimeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// The lowest CodeBuddy CLI version verified to echo an injected steer with the message id the steer carried. Versions
+    /// 2.140.0 to 2.145.0 acknowledge the steer, and some echo its text, but none echo the id, so their injection cannot be matched.
+    /// </summary>
+    internal static readonly Version MinimumSteerCliVersion = new(2, 146, 0);
 
     private readonly CliExecutableResolver _executableResolver;
     private readonly CliProcessManager _processManager;
     private readonly IRuntimeEnvironmentResolver? _runtimeEnvironmentResolver;
+    private readonly ConcurrentDictionary<string, Task<Version?>> _cliVersions = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="CodebuddyProvider" /> class.
@@ -189,29 +200,63 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
         ProcessStartContext startContext,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        await using var sessionClient = CreateSessionClient(startContext);
-        using var startupCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        startupCts.CancelAfter(options.StartupTimeout ?? DefaultStartupTimeout);
-
-        await sessionClient.ConnectAsync(startupCts.Token).ConfigureAwait(false);
-        await sessionClient.InitializeAsync(startupCts.Token).ConfigureAwait(false);
-        var sessionHandle = await sessionClient.StartSessionAsync(
-            workingDirectory,
-            options.SessionId,
-            options.Model,
-            startupCts.Token).ConfigureAwait(false);
-        await EnsureModeAsync(sessionClient, sessionHandle.SessionId, options.ModeId, startupCts.Token).ConfigureAwait(false);
-
-        yield return CodebuddyAcpMessageMapper.CreateSessionLifecycleMessage(sessionHandle);
-
-        await foreach (var message in StreamPromptAttemptAsync(
-                           sessionClient,
-                           sessionHandle.SessionId,
-                           sessionHandle.IsResumed,
-                           prompt,
-                           cancellationToken).ConfigureAwait(false))
+        CodebuddySteerTracker? steerTracker = null;
+        try
         {
-            yield return message;
+            await using var sessionClient = CreateSessionClient(startContext);
+            using var startupCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            startupCts.CancelAfter(options.StartupTimeout ?? DefaultStartupTimeout);
+
+            await sessionClient.ConnectAsync(startupCts.Token).ConfigureAwait(false);
+            await sessionClient.InitializeAsync(startupCts.Token).ConfigureAwait(false);
+            var sessionHandle = await sessionClient.StartSessionAsync(
+                workingDirectory,
+                options.SessionId,
+                options.Model,
+                startupCts.Token).ConfigureAwait(false);
+            await EnsureModeAsync(sessionClient, sessionHandle.SessionId, options.ModeId, startupCts.Token).ConfigureAwait(false);
+
+            if (options.Steering is { } steering &&
+                await IsSteerableCliAsync(startContext.ExecutablePath, startupCts.Token).ConfigureAwait(false))
+            {
+                var steerSessionId = sessionHandle.SessionId;
+                steerTracker = new CodebuddySteerTracker(
+                    (steerId, text, token) => SendSteerAsync(sessionClient, steerSessionId, steerId, text, token),
+                    options.SteerDeliveryTimeout);
+                steering.Attach((steerId, text, token) => steerTracker.SteerAsync(steerId, text, token));
+            }
+
+            try
+            {
+                yield return CodebuddyAcpMessageMapper.CreateSessionLifecycleMessage(sessionHandle);
+
+                await foreach (var message in StreamPromptAttemptAsync(
+                                   sessionClient,
+                                   sessionHandle.SessionId,
+                                   sessionHandle.IsResumed,
+                                   prompt,
+                                   steerTracker,
+                                   cancellationToken).ConfigureAwait(false))
+                {
+                    yield return message;
+                }
+            }
+            finally
+            {
+                // Stop accepting steers before the process is disposed. Outcomes are settled after the disposal, below.
+                options.Steering?.Detach();
+                steerTracker?.CloseWindow();
+            }
+        }
+        finally
+        {
+            if (steerTracker is not null)
+            {
+                foreach (var (steerId, outcome) in steerTracker.Finish())
+                {
+                    options.Steering!.Report(steerId, outcome);
+                }
+            }
         }
     }
 
@@ -238,6 +283,68 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
         }
 
         return _executableResolver.ResolveProviderExecutable("Codebuddy", DefaultExecutableCandidates, runtimeEnvironment).ResolvedPath;
+    }
+
+    private static Task<JsonElement> SendSteerAsync(
+        IAcpSessionClient sessionClient,
+        string sessionId,
+        string steerId,
+        string text,
+        CancellationToken cancellationToken)
+    {
+        // The raw request path is the one the session client exposes for methods outside the bootstrap set; the ACP client
+        // serializes writes, and the reply is matched to its own request id.
+        return sessionClient.InvokeBootstrapMethodAsync(
+            "session/steer",
+            new
+            {
+                sessionId,
+                contentBlocks = new object[] { new { type = "text", text } },
+                clientUserMessageId = steerId
+            },
+            cancellationToken);
+    }
+
+    private async Task<bool> IsSteerableCliAsync(string executablePath, CancellationToken cancellationToken)
+    {
+        var version = await _cliVersions
+            .GetOrAdd(executablePath, path => ReadCliVersionAsync(path, CancellationToken.None))
+            .WaitAsync(cancellationToken)
+            .ConfigureAwait(false);
+        return version is not null && version >= MinimumSteerCliVersion;
+    }
+
+    /// <summary>
+    /// Reads the CLI version from <c>--version</c>. The ACP initialize result does not carry it. A failure returns <see langword="null" />,
+    /// which leaves steering detached.
+    /// </summary>
+    protected virtual async Task<Version?> ReadCliVersionAsync(string executablePath, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var process = new Process
+            {
+                StartInfo = new ProcessStartInfo(executablePath, "--version")
+                {
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                }
+            };
+            process.Start();
+            var output = await process.StandardOutput.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(CliVersionTimeout);
+            await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
+
+            var match = Regex.Match(output, @"\d+\.\d+\.\d+");
+            return match.Success && Version.TryParse(match.Value, out var version) ? version : null;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
     }
 
     private static void ValidateSteerDeliveryTimeout(CodebuddyOptions options)
@@ -298,6 +405,7 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
         string sessionId,
         Task<JsonElement> promptTask,
         bool isResumedSession,
+        CodebuddySteerTracker? steerTracker,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var sawAssistantText = false;
@@ -339,6 +447,12 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
             {
                 yield return CodebuddyAcpMessageMapper.CreateTerminalFailureMessage(sessionId, streamFailure);
                 yield break;
+            }
+
+            // The echo of an injected steer is consumption, not conversation output.
+            if (steerTracker?.Observe(notification) == true)
+            {
+                continue;
             }
 
             if (isResumedSession &&
@@ -399,6 +513,7 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
 
                 if (IsTerminalMessage(message.Type))
                 {
+                    steerTracker?.CloseWindow();
                     if (string.Equals(message.Type, "terminal.failed", StringComparison.OrdinalIgnoreCase))
                     {
                         yield return message;
@@ -417,6 +532,8 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
                 break;
             }
         }
+
+        steerTracker?.CloseWindow();
 
         JsonElement promptResult;
         Exception? promptFailure = null;
@@ -519,10 +636,11 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
         string sessionId,
         bool isResumedSession,
         string prompt,
+        CodebuddySteerTracker? steerTracker,
         CancellationToken cancellationToken)
     {
         var promptTask = sessionClient.SendPromptAsync(sessionId, prompt, cancellationToken);
-        return StreamPromptMessagesAsync(sessionClient, sessionId, promptTask, isResumedSession, cancellationToken);
+        return StreamPromptMessagesAsync(sessionClient, sessionId, promptTask, isResumedSession, steerTracker, cancellationToken);
     }
 
     private static IEnumerable<CliMessage> BuildFallbackMessages(
