@@ -280,7 +280,38 @@ var result = await steering.SteerAsync("steer-1", "switch to lakes"); // Sent or
 - `Sent` means the line was written. Whether the CLI consumed it is reported later through `OutcomeObserved`, exactly once per accepted steer: `Consumed` when the echo arrives, `NotConsumed` when the run ends first. A run ends first on a timeout, on cancellation, when the CLI exits, or when an error result ends it.
 - A `result` does not end the run while an accepted steer is unconsumed. The run waits up to `SteerDeliveryTimeout` for the echo and then ends with the steer reported as `NotConsumed`.
 - `SteerAsync` returns `NotSteerable` and writes nothing when the handle is not attached (the CLI is not connected yet, or the run has ended), a steer with the same id is still outstanding, or the write fails.
-- Only the Claude Code provider supports steering. Priority `now` and images in a steer are not offered.
+- Priority `now` and images in a steer are not offered for Claude Code. Pi steering is described in the next section.
+
+## Pi run steering
+
+`PiOptions.Steering` (default `null`, nothing changes) lets the host send follow-up messages to a Pi run that is already executing. Create one `PiRunSteering` per run and pass it in the options. `SteerAsync` is meaningful only while `ExecuteAsync` is being iterated, so drive the stream on its own task:
+
+```csharp
+var steering = new PiRunSteering();
+steering.OutcomeObserved += (_, args) => RecordOutcome(args.SteerId, args.Outcome);
+
+var options = new PiOptions
+{
+    UserInputHandler = (request, cancellationToken) => Task.FromResult<PiUserInputResponse?>(null), // selects RPC mode
+    Steering = steering,
+    SteerDeliveryTimeout = TimeSpan.FromSeconds(30) // default; must be positive
+};
+
+var run = Task.Run(async () =>
+{
+    await foreach (var message in provider.ExecuteAsync(options, "Refactor the parser", cancellationToken))
+    {
+        Handle(message);
+    }
+});
+
+var result = await steering.SteerAsync("steer-1", "also update the tests"); // Sent or NotSteerable
+```
+
+- Steering needs RPC mode, which a `UserInputHandler` selects. A JSON print run (no handler, or every tool disabled) never attaches the channel: `SteerAsync` returns `NotSteerable` and writes nothing. The Pi command line is the same with or without the channel.
+- `Sent` means Pi acknowledged the steer as queued (or handled it). Pi injects queued steers one per turn, after the current turn's tool calls and before its next model call. Each accepted steer gets exactly one outcome through `OutcomeObserved`: `Consumed` when Pi injects it, `NotConsumed` when the run ends first, by cancellation, when Pi exits, or when Pi settles with the steer still pending.
+- `SteerDeliveryTimeout` bounds only the wait for Pi's reply to a steer; Pi answered in 3 to 30 ms when recorded. A reply that does not arrive in time makes the steer `NotSteerable`. Consumption is never timed, so a long tool call does not produce `NotConsumed`. The value must be positive for every RPC run; zero or negative is rejected before any process starts.
+- `NotSteerable` (nothing was written) covers: no attached run (before the prompt started, after the run ended, or after the enumeration was abandoned), a prompt that Pi handled or rejected, an empty or whitespace message (Pi would run it as an empty turn), a steer after Pi reported `agent_end`, an id that an earlier steer of the same run already used, and a steer Pi refused (for example a missing message). The caller then sends the message as an ordinary follow-up.
 
 ## Pi interactive questions
 
