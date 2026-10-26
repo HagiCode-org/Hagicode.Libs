@@ -96,12 +96,16 @@ internal sealed class OmpRpcOutcome
 /// <param name="ExitTimeout">
 /// How long OMP gets to settle after an abort, and to exit after its input is closed, before the process is stopped.
 /// </param>
+/// <param name="Steering">The steering channel of the run, attached while the agent runs; <see langword="null" /> for no steering.</param>
+/// <param name="SteerDeliveryTimeout">How long a steer waits for OMP's reply. Defaults to <see cref="OmpOptions.DefaultSteerDeliveryTimeout" />.</param>
 internal sealed record OmpRpcSessionSettings(
     string? RequestedSessionId,
     string? WorkingDirectory,
     Func<OmpUserInputRequest, CancellationToken, Task<OmpUserInputResponse?>> UserInputHandler,
     TimeSpan QuestionTimeout,
-    TimeSpan ExitTimeout);
+    TimeSpan ExitTimeout,
+    OmpRunSteering? Steering = null,
+    TimeSpan? SteerDeliveryTimeout = null);
 
 /// <summary>
 /// Runs <see cref="OmpOptions.UserInputHandler" /> for the <c>ask</c> requests of one RPC execution, one background task per
@@ -306,6 +310,220 @@ internal sealed class OmpPendingQuestions : IDisposable
 }
 
 /// <summary>
+/// The steers of one RPC run that are still open: accepted steers waiting for OMP to take them into the run, and steers
+/// waiting for OMP's answer. It resolves every steer exactly once.
+/// </summary>
+/// <remarks>
+/// OMP takes queued steers into the run one per turn, in queue order, and writes each one as a user message flagged
+/// <c>steering</c> with the steer's text. So the oldest open steer with that text is the one consumed, which keeps two steers
+/// with identical text correct. The run's own prompt echo has no flag, so it never matches. The accepting window and a steer's
+/// registration share one lock: a steer is either tracked or refused, never written and dropped.
+/// </remarks>
+internal sealed class OmpSteerTracker(OmpRunSteering? steering)
+{
+    private readonly object _gate = new();
+    private readonly HashSet<string> _steerIds = [];
+    private readonly Dictionary<string, PendingSteer> _openByRequestId = [];
+    private OmpSteerWindow _window = OmpSteerWindow.NotOpened;
+    private int _sequence;
+
+    /// <summary>Opens the accepting window once OMP has started the agent. Returns false when the window was opened or closed before.</summary>
+    public bool TryOpen()
+    {
+        lock (_gate)
+        {
+            if (_window != OmpSteerWindow.NotOpened)
+            {
+                return false;
+            }
+
+            _window = OmpSteerWindow.Accepting;
+            return true;
+        }
+    }
+
+    /// <summary>Registers a steer before it is written. A refused steer (window not open, or an id already used) is never written.</summary>
+    public bool TryRegister(string steerId, string text, out PendingSteer? steer)
+    {
+        lock (_gate)
+        {
+            if (_window != OmpSteerWindow.Accepting || !_steerIds.Add(steerId))
+            {
+                steer = null;
+                return false;
+            }
+
+            steer = new PendingSteer(steerId, OmpRpcProtocol.SteerRequestIdPrefix + (++_sequence), text, _sequence);
+            _openByRequestId[steer.RequestId] = steer;
+            return true;
+        }
+    }
+
+    /// <summary>Drops a steer that was not accepted (no reply in time, a write that failed, or a cancelled caller).</summary>
+    public void Abandon(PendingSteer steer)
+    {
+        lock (_gate)
+        {
+            _openByRequestId.Remove(steer.RequestId);
+        }
+    }
+
+    /// <summary>Reads OMP's answer to a steer: success accepts it (and consumes it when OMP already took it), failure refuses it.</summary>
+    public void OnReply(OmpSteerReply reply)
+    {
+        PendingSteer? steer;
+        var result = OmpSteerResult.NotSteerable;
+        var consumed = false;
+        lock (_gate)
+        {
+            if (!_openByRequestId.TryGetValue(reply.RequestId, out steer))
+            {
+                return;
+            }
+
+            if (!reply.Success)
+            {
+                _openByRequestId.Remove(reply.RequestId);
+            }
+            else if (steer.State == OmpSteerState.Injected)
+            {
+                // OMP took the message into the run before its reply was read, so the steer is consumed as soon as it is accepted.
+                _openByRequestId.Remove(reply.RequestId);
+                result = OmpSteerResult.Sent;
+                consumed = true;
+            }
+            else
+            {
+                steer.State = OmpSteerState.Accepted;
+                result = OmpSteerResult.Sent;
+            }
+        }
+
+        steer.Reply.TrySetResult(result);
+        if (consumed)
+        {
+            steering?.Report(steer.SteerId, OmpSteerOutcome.Consumed);
+        }
+    }
+
+    /// <summary>Reads a steering user message: the oldest open steer with its text is the one OMP took into the run.</summary>
+    public void OnSteeringMessage(string text)
+    {
+        PendingSteer? taken;
+        var consumed = false;
+        lock (_gate)
+        {
+            taken = _openByRequestId.Values
+                .Where(steer => steer.State != OmpSteerState.Injected && string.Equals(steer.Text, text, StringComparison.Ordinal))
+                .OrderBy(static steer => steer.Sequence)
+                .FirstOrDefault();
+            if (taken is null)
+            {
+                return;
+            }
+
+            // Written but not answered yet: the reply completes the steer, and it is reported as consumed then.
+            if (taken.State == OmpSteerState.Accepted)
+            {
+                _openByRequestId.Remove(taken.RequestId);
+                consumed = true;
+            }
+            else
+            {
+                taken.State = OmpSteerState.Injected;
+            }
+        }
+
+        if (consumed)
+        {
+            steering?.Report(taken.SteerId, OmpSteerOutcome.Consumed);
+        }
+    }
+
+    /// <summary>Closes the accepting window: OMP takes no steer that arrives after the agent's yielding <c>agent_end</c>.</summary>
+    public void CloseWindow()
+    {
+        lock (_gate)
+        {
+            _window = OmpSteerWindow.Closed;
+        }
+    }
+
+    /// <summary>
+    /// Ends the run: closes the window and resolves every open steer. An injected steer is consumed, an accepted one was not
+    /// taken into the run (not consumed), and a written one never got an answer (not steerable). Safe to call more than once.
+    /// </summary>
+    public void Finish()
+    {
+        List<PendingSteer> open;
+        lock (_gate)
+        {
+            _window = OmpSteerWindow.Closed;
+            open = [.. _openByRequestId.Values.OrderBy(static steer => steer.Sequence)];
+            _openByRequestId.Clear();
+        }
+
+        foreach (var steer in open)
+        {
+            switch (steer.State)
+            {
+                case OmpSteerState.Injected:
+                    steer.Reply.TrySetResult(OmpSteerResult.Sent);
+                    steering?.Report(steer.SteerId, OmpSteerOutcome.Consumed);
+                    break;
+
+                case OmpSteerState.Accepted:
+                    steering?.Report(steer.SteerId, OmpSteerOutcome.NotConsumed);
+                    break;
+
+                default:
+                    steer.Reply.TrySetResult(OmpSteerResult.NotSteerable);
+                    break;
+            }
+        }
+    }
+
+    internal sealed class PendingSteer(string steerId, string requestId, string text, int sequence)
+    {
+        public string SteerId { get; } = steerId;
+
+        public string RequestId { get; } = requestId;
+
+        public string Text { get; } = text;
+
+        public int Sequence { get; } = sequence;
+
+        public OmpSteerState State { get; set; }
+
+        public TaskCompletionSource<OmpSteerResult> Reply { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
+}
+
+internal enum OmpSteerState
+{
+    /// <summary>Written to OMP, no answer yet.</summary>
+    Written,
+
+    /// <summary>OMP answered success; not taken into the run yet.</summary>
+    Accepted,
+
+    /// <summary>OMP took the message into the run before its answer was read.</summary>
+    Injected
+}
+
+internal enum OmpSteerWindow
+{
+    /// <summary>OMP has not started the agent for the prompt yet.</summary>
+    NotOpened,
+
+    /// <summary>The agent runs and OMP still takes steers.</summary>
+    Accepting,
+
+    /// <summary>The yielding agent_end was read, or the run ended.</summary>
+    Closed
+}
+
+/// <summary>
 /// Drives one <c>omp --mode rpc-ui</c> process: the <c>set_ask_dialog</c> and <c>get_state</c> handshake, the prompt, the
 /// <c>ask</c> requests and the end of the run, and turns OMP's output into the shared message contract of the JSON print path.
 /// </summary>
@@ -332,6 +550,8 @@ internal sealed class OmpRpcSession
     private readonly OmpRpcSessionSettings _settings;
     private readonly OmpRpcOutcome _outcome;
     private readonly OmpRpcWriter _writer;
+    private readonly OmpSteerTracker _steerTracker;
+    private readonly TimeSpan _steerReplyTimeout;
 
     private OmpPendingQuestions? _questions;
     private string _prompt = string.Empty;
@@ -341,6 +561,7 @@ internal sealed class OmpRpcSession
     private bool _promptSent;
     private bool _settled;
     private bool _endedWithoutAgent;
+    private bool _interruptModeRejected;
     private string? _promptStatus;
     private JsonElement? _promptError;
 
@@ -362,6 +583,8 @@ internal sealed class OmpRpcSession
         _settings = settings;
         _outcome = outcome;
         _writer = new OmpRpcWriter(process);
+        _steerTracker = new OmpSteerTracker(settings.Steering);
+        _steerReplyTimeout = settings.SteerDeliveryTimeout ?? OmpOptions.DefaultSteerDeliveryTimeout;
     }
 
     /// <summary>
@@ -432,6 +655,10 @@ internal sealed class OmpRpcSession
                 }
             }
 
+            // The read loop is over, so no steer is accepted any more and every open steer gets its outcome before the terminal
+            // messages (or the cancellation) below.
+            EndSteering();
+
             if (pendingException is not null)
             {
                 if (pendingException.SourceException is OperationCanceledException && cancellationToken.IsCancellationRequested)
@@ -456,6 +683,10 @@ internal sealed class OmpRpcSession
         }
         finally
         {
+            // Whichever way the run ends (settled, cancelled, OMP exited, or the consumer stopped), no steer is accepted any more and
+            // the handle is detached, so a later steer is not steerable.
+            EndSteering();
+
             questions.CancelOutstanding();
             await questions.WaitForOutstandingAsync(DialogDrainTimeout).ConfigureAwait(false);
 
@@ -509,7 +740,23 @@ internal sealed class OmpRpcSession
             case OmpRpcProtocol.MessageUpdateType:
                 return LineResult.From(_eventState.ProcessOutputLine(WithoutStaleSnapshot(frame, line)));
 
+            case OmpRpcProtocol.AgentStartType:
+                OpenSteerWindow();
+                return LineResult.From(_eventState.ProcessOutputLine(line));
+
+            case OmpRpcProtocol.AgentEndType:
+                // The yielding agent_end closes the accepting window. The run itself goes on until session_settled, as it always did.
+                _steerTracker.CloseWindow();
+                return LineResult.From(_eventState.ProcessOutputLine(line));
+
             default:
+                // The steer OMP takes into the run is recorded here and never emitted as conversation output.
+                if (OmpRpcProtocol.ReadSteeringUserMessageText(frame) is { } steeredText)
+                {
+                    _steerTracker.OnSteeringMessage(steeredText);
+                    return LineResult.None;
+                }
+
                 return LineResult.From(_eventState.ProcessOutputLine(line));
         }
     }
@@ -565,8 +812,19 @@ internal sealed class OmpRpcSession
             case OmpRpcProtocol.PromptRequestId:
                 return HandlePromptResponse(response);
 
+            case OmpRpcProtocol.SetInterruptModeRequestId:
+                // A build that refuses the wait mode cannot keep a running tool's result, so the run is not steered.
+                _interruptModeRejected = !IsSuccess(response);
+                return LineResult.None;
+
             default:
-                // Only the answers to commands the provider wrote carry its ids; the answer to abort needs no action.
+                // Only the answers to commands the provider wrote carry its ids; the answers to steer commands carry their own
+                // id prefix and go to the steer tracker. The answer to abort needs no action.
+                if (OmpRpcProtocol.TryReadSteerReply(response, out var steerReply))
+                {
+                    _steerTracker.OnReply(steerReply);
+                }
+
                 return LineResult.None;
         }
     }
@@ -588,6 +846,13 @@ internal sealed class OmpRpcSession
 
         _sessionId = sessionId;
         var messages = _eventState.ProcessOutputLine(BuildSessionRecord(sessionId));
+
+        // With a steering handle, the wait mode is set before the prompt: the default mode backgrounds a running tool call when a
+        // steer arrives and replaces its result. Without a handle the command sequence is unchanged.
+        if (_settings.Steering is not null)
+        {
+            await _writer.TrySendAsync(OmpRpcProtocol.BuildSetInterruptMode(), cancellationToken).ConfigureAwait(false);
+        }
 
         // The prompt follows the state reply, so the session message always precedes the run's own messages. A false result
         // means OMP is already gone; the read loop reports how it ended.
@@ -677,6 +942,56 @@ internal sealed class OmpRpcSession
         // sees what it sees when a user presses escape.
         await _writer.TrySendAsync(OmpRpcProtocol.BuildDialogCancelled(dialogId), cancellationToken).ConfigureAwait(false);
         return LineResult.None;
+    }
+
+    /// <summary>
+    /// Attaches the steering channel once OMP has started the agent, unless the wait mode was refused. A later agent start (a
+    /// background job waking the agent after the yielding <c>agent_end</c>) does not reopen the window.
+    /// </summary>
+    private void OpenSteerWindow()
+    {
+        if (_settings.Steering is { } steering && !_interruptModeRejected && _steerTracker.TryOpen())
+        {
+            steering.Attach(SteerRequestAsync);
+        }
+    }
+
+    /// <summary>
+    /// Closes the steering window, resolves every open steer and detaches the channel. Safe to call more than once.
+    /// </summary>
+    private void EndSteering()
+    {
+        _steerTracker.Finish();
+        _settings.Steering?.Detach();
+    }
+
+    /// <summary>
+    /// Writes one steer through the shared writer and waits, bounded, for OMP's answer. The steer is accepted only when OMP answers
+    /// success; its outcome then arrives through the steer tracker.
+    /// </summary>
+    private async Task<OmpSteerResult> SteerRequestAsync(string steerId, string text, CancellationToken cancellationToken)
+    {
+        if (!_steerTracker.TryRegister(steerId, text, out var steer))
+        {
+            return OmpSteerResult.NotSteerable;
+        }
+
+        try
+        {
+            if (!await _writer.TrySendAsync(OmpRpcProtocol.BuildSteer(steer!.RequestId, text), cancellationToken).ConfigureAwait(false))
+            {
+                _steerTracker.Abandon(steer);
+                return OmpSteerResult.NotSteerable;
+            }
+
+            return await steer.Reply.Task.WaitAsync(_steerReplyTimeout, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is TimeoutException or OperationCanceledException)
+        {
+            // No answer in time (or the caller gave up): the steer is not accepted, so it must not be tracked for an outcome.
+            _steerTracker.Abandon(steer!);
+            return OmpSteerResult.NotSteerable;
+        }
     }
 
     /// <summary>

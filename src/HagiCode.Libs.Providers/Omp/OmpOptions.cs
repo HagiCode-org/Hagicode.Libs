@@ -119,4 +119,29 @@ public sealed record OmpOptions
     /// The default value of <see cref="QuestionTimeout" />.
     /// </summary>
     public static readonly TimeSpan DefaultQuestionTimeout = TimeSpan.FromMinutes(30);
+
+    /// <summary>
+    /// Gets or sets the channel that steers the run: a follow-up user message sent to the same OMP process while it runs.
+    /// It is <see langword="null" /> by default, and it takes effect only for a run in <c>rpc-ui</c> mode (see
+    /// <see cref="UserInputHandler" />); a JSON print run never attaches it, so every steer on it is not steerable.
+    /// </summary>
+    /// <remarks>
+    /// Create a new <see cref="OmpRunSteering" /> for each execution. Its outcomes arrive through
+    /// <see cref="OmpRunSteering.OutcomeObserved" /> while the run is iterated.
+    /// </remarks>
+    public OmpRunSteering? Steering { get; init; }
+
+    /// <summary>
+    /// Gets or sets how long a steer may wait for OMP's reply to the <c>steer</c> command. A reply that does not come in time
+    /// makes the steer not steerable. It does not bound consumption: a steer OMP holds is waited for until OMP takes it into the
+    /// run or the run ends. The default is 30 seconds. A value that is not positive is rejected with an
+    /// <see cref="ArgumentOutOfRangeException" /> before any process starts, when <see cref="Steering" /> is set on an
+    /// <c>rpc-ui</c> run.
+    /// </summary>
+    public TimeSpan SteerDeliveryTimeout { get; init; } = DefaultSteerDeliveryTimeout;
+
+    /// <summary>
+    /// The default value of <see cref="SteerDeliveryTimeout" />.
+    /// </summary>
+    public static readonly TimeSpan DefaultSteerDeliveryTimeout = TimeSpan.FromSeconds(30);
 }

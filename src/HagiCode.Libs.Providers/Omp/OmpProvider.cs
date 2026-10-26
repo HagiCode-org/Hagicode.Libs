@@ -84,6 +84,11 @@ public class OmpProvider : ICliProvider<OmpOptions>
             ValidateQuestionTimeout(options);
         }
 
+        if (usesRpc && options.Steering is not null)
+        {
+            ValidateSteerDeliveryTimeout(options);
+        }
+
         try
         {
             var runtimeEnvironment = await ResolveRuntimeEnvironmentAsync(cancellationToken).ConfigureAwait(false);
@@ -445,7 +450,9 @@ public class OmpProvider : ICliProvider<OmpOptions>
             ResolveWorkingDirectory(options),
             options.UserInputHandler!,
             options.QuestionTimeout,
-            RpcExitTimeout);
+            RpcExitTimeout,
+            options.Steering,
+            options.SteerDeliveryTimeout);
         var session = new OmpRpcSession(process, _eventMapper.CreateStreamingState(options.SessionId), settings, outcome);
 
         await foreach (var message in session.RunAsync(prompt, cancellationToken).ConfigureAwait(false))
@@ -497,6 +504,17 @@ public class OmpProvider : ICliProvider<OmpOptions>
                 nameof(options),
                 options.QuestionTimeout,
                 "QuestionTimeout must be positive or Timeout.InfiniteTimeSpan.");
+        }
+    }
+
+    private static void ValidateSteerDeliveryTimeout(OmpOptions options)
+    {
+        if (options.SteerDeliveryTimeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.SteerDeliveryTimeout,
+                "SteerDeliveryTimeout must be positive.");
         }
     }
 

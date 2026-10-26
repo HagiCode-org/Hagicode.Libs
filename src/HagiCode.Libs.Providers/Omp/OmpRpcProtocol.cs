@@ -12,6 +12,10 @@ internal static class OmpRpcProtocol
     public const string StateRequestId = "hagicode-get-state";
     public const string PromptRequestId = "hagicode-prompt";
     public const string AbortRequestId = "hagicode-abort";
+    public const string SetInterruptModeRequestId = "hagicode-set-interrupt-mode";
+
+    /// <summary>The id prefix of every <c>steer</c> command the provider writes; the reply carries the same id.</summary>
+    public const string SteerRequestIdPrefix = "hagicode-steer-";
 
     public const string ResponseType = "response";
     public const string ExtensionUiRequestType = OmpUserInputRequest.MessageType;
@@ -20,6 +24,18 @@ internal static class OmpRpcProtocol
     public const string ReadyType = "ready";
     public const string AvailableCommandsUpdateType = "available_commands_update";
     public const string MessageUpdateType = "message_update";
+    public const string MessageStartType = "message_start";
+    public const string AgentStartType = "agent_start";
+    public const string AgentEndType = "agent_end";
+
+    public const string SteerCommand = "steer";
+    public const string SetInterruptModeCommand = "set_interrupt_mode";
+
+    /// <summary>
+    /// The interrupt mode that keeps a running tool call's real result when a steer arrives. The default, <c>immediate</c>,
+    /// backgrounds the running tool and replaces its result with a placeholder.
+    /// </summary>
+    public const string InterruptModeWait = "wait";
 
     /// <summary>
     /// The <c>extension_ui_request</c> method OMP sends to close an open dialog itself; <c>targetId</c> names the dialog.
@@ -59,6 +75,74 @@ internal static class OmpRpcProtocol
         ["id"] = AbortRequestId,
         ["type"] = "abort"
     });
+
+    /// <summary>
+    /// Sets the interrupt mode to <c>wait</c>, so a steer does not background a running tool call.
+    /// </summary>
+    public static string BuildSetInterruptMode() => Serialize(new Dictionary<string, object?>
+    {
+        ["id"] = SetInterruptModeRequestId,
+        ["type"] = SetInterruptModeCommand,
+        ["mode"] = InterruptModeWait
+    });
+
+    /// <summary>
+    /// Writes one steer. OMP takes the message into the run after the current turn or tool call.
+    /// </summary>
+    public static string BuildSteer(string requestId, string message) => Serialize(new Dictionary<string, object?>
+    {
+        ["id"] = requestId,
+        ["type"] = SteerCommand,
+        ["message"] = message
+    });
+
+    /// <summary>
+    /// Reads the answer to a <c>steer</c> command the provider wrote: a response to the command with a
+    /// <c>hagicode-steer-</c> id. Anything else, including a response to another command, is not a steer reply.
+    /// </summary>
+    public static bool TryReadSteerReply(JsonElement frame, out OmpSteerReply reply)
+    {
+        reply = default;
+        if (ReadString(frame, "type") != ResponseType
+            || ReadString(frame, "command") != SteerCommand
+            || ReadString(frame, "id") is not { Length: > 0 } requestId
+            || !requestId.StartsWith(SteerRequestIdPrefix, StringComparison.Ordinal)
+            || !frame.TryGetProperty("success", out var success)
+            || success.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+        {
+            return false;
+        }
+
+        reply = new OmpSteerReply(requestId, success.ValueKind == JsonValueKind.True);
+        return true;
+    }
+
+    /// <summary>
+    /// Reads the text of a steering <c>message_start</c>: the single text block of a user message that OMP flags as
+    /// <c>steering</c>, the record it writes when it takes a steer into the run. It returns <see langword="null" /> for any
+    /// other frame, including the run's own prompt echo (not flagged) and a user message with more than one block.
+    /// </summary>
+    /// <remarks>
+    /// Only <c>message_start</c> counts. OMP repeats the same message in <c>message_end</c>, and counting that too would consume
+    /// the next steer that has the same text.
+    /// </remarks>
+    public static string? ReadSteeringUserMessageText(JsonElement frame)
+    {
+        if (ReadString(frame, "type") != MessageStartType
+            || !frame.TryGetProperty("message", out var message)
+            || message.ValueKind != JsonValueKind.Object
+            || ReadString(message, "role") != "user"
+            || ReadBoolean(message, "steering") != true
+            || !message.TryGetProperty("content", out var content)
+            || content.ValueKind != JsonValueKind.Array
+            || content.GetArrayLength() != 1)
+        {
+            return null;
+        }
+
+        var block = content[0];
+        return ReadString(block, "type") == "text" ? ReadString(block, "text") : null;
+    }
 
     /// <summary>
     /// Answers an <c>ask</c> request: one entry per question, in the order of the request.
@@ -131,3 +215,8 @@ internal static class OmpRpcProtocol
 
     private static string Serialize(Dictionary<string, object?> record) => JsonSerializer.Serialize(record);
 }
+
+/// <summary>
+/// OMP's answer to one <c>steer</c> command: the request id the provider wrote and whether OMP accepted the message.
+/// </summary>
+internal readonly record struct OmpSteerReply(string RequestId, bool Success);
