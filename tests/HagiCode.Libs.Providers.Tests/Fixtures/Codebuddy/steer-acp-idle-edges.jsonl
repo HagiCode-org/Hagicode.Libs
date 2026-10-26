@@ -1,0 +1,8 @@
+{"case": "empty contentBlocks", "reply": {"error": -32602, "data": "Missing or empty \"contentBlocks\" array"}}
+{"case": "empty text", "reply": {"steered": false}}
+{"case": "missing text field", "reply": {"steered": false}}
+{"case": "non-string text", "reply": {"steered": false}}
+{"case": "whitespace text", "reply": {"steered": false}}
+{"case": "slash command text", "reply": {"steered": false}}
+{"case": "valid text", "reply": {"steered": false, "reason": "idle"}}
+{"case": "after last result (process up)", "reply": {"steered": false, "reason": "idle"}}

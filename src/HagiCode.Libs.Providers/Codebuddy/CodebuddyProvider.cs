@@ -51,6 +51,7 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
+        ValidateSteerDeliveryTimeout(options);
 
         var runtimeEnvironment = await ResolveRuntimeEnvironmentAsync(cancellationToken).ConfigureAwait(false);
         var executablePath = ResolveExecutablePath(options, runtimeEnvironment)
@@ -237,6 +238,17 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
         }
 
         return _executableResolver.ResolveProviderExecutable("Codebuddy", DefaultExecutableCandidates, runtimeEnvironment).ResolvedPath;
+    }
+
+    private static void ValidateSteerDeliveryTimeout(CodebuddyOptions options)
+    {
+        if (options.Steering is not null && options.SteerDeliveryTimeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.SteerDeliveryTimeout,
+                "SteerDeliveryTimeout must be positive.");
+        }
     }
 
     private static string ResolveWorkingDirectory(string? workingDirectory)

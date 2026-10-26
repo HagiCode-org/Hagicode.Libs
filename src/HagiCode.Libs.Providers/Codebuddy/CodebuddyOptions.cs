@@ -52,4 +52,25 @@ public sealed record CodebuddyOptions
     /// Tokens are boundary-trimmed individually and whitespace-only tokens are ignored.
     /// </summary>
     public IReadOnlyList<string> ExtraArguments { get; init; } = [];
+
+    /// <summary>
+    /// Gets or sets the per-execution steering channel. Leave it unset for a run that never steers.
+    /// </summary>
+    /// <remarks>
+    /// Create a new <see cref="CodebuddyRunSteering" /> for each execution. Its outcomes arrive through
+    /// <see cref="CodebuddyRunSteering.OutcomeObserved" /> while the run is iterated.
+    /// </remarks>
+    public CodebuddyRunSteering? Steering { get; init; }
+
+    /// <summary>
+    /// Gets or sets how long a steer may wait for CodeBuddy's acknowledgement. A steer without one in time is not steerable.
+    /// It does not bound consumption. The default is 30 seconds. When a steering channel is supplied, a value that is not positive
+    /// is rejected with an <see cref="ArgumentOutOfRangeException" /> before any process starts.
+    /// </summary>
+    public TimeSpan SteerDeliveryTimeout { get; init; } = DefaultSteerDeliveryTimeout;
+
+    /// <summary>
+    /// The default value of <see cref="SteerDeliveryTimeout" />.
+    /// </summary>
+    public static readonly TimeSpan DefaultSteerDeliveryTimeout = TimeSpan.FromSeconds(30);
 }
