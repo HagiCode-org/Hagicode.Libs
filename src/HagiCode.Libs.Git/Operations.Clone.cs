@@ -5,8 +5,18 @@ namespace HagiCode.Libs.Git;
 public sealed partial class GitClient
 {
     /// <inheritdoc />
-    public async Task<GitResult<GitCloneOutcome>> EnsureCloneAsync(string remoteUrl, string targetPath, CancellationToken cancellationToken = default)
+    public Task<GitResult<GitCloneOutcome>> EnsureCloneAsync(string remoteUrl, string targetPath, CancellationToken cancellationToken = default) =>
+        EnsureCloneAsync(remoteUrl, targetPath, new GitCloneOptions(), cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<GitResult<GitCloneOutcome>> EnsureCloneAsync(
+        string remoteUrl,
+        string targetPath,
+        GitCloneOptions options,
+        CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(options);
+
         if (string.IsNullOrWhiteSpace(remoteUrl))
         {
             return GitResult<GitCloneOutcome>.Fail(new GitFailure(GitFailureCode.InvalidArgument, "The repository remote URL is missing."));
@@ -15,6 +25,30 @@ public sealed partial class GitClient
         if (string.IsNullOrWhiteSpace(targetPath))
         {
             return GitResult<GitCloneOutcome>.Fail(new GitFailure(GitFailureCode.InvalidArgument, "The repository target path is missing."));
+        }
+
+        // The protocol check runs before any file-system change or process, so a refused remote leaves nothing behind.
+        IReadOnlyList<string>? allowedProtocols = null;
+        if (options.AllowedProtocols is not null)
+        {
+            var normalized = options.AllowedProtocols.Select(protocol => protocol?.Trim().ToLowerInvariant() ?? string.Empty).ToList();
+            var invalid = normalized.FirstOrDefault(protocol => !IsProtocolName(protocol));
+            if (invalid is not null)
+            {
+                return GitResult<GitCloneOutcome>.Fail(new GitFailure(
+                    GitFailureCode.InvalidArgument,
+                    $"The allowed protocol '{invalid}' is not a valid protocol name."));
+            }
+
+            var protocol = DeriveProtocol(remoteUrl);
+            if (!normalized.Contains(protocol, StringComparer.Ordinal))
+            {
+                return GitResult<GitCloneOutcome>.Fail(new GitFailure(
+                    GitFailureCode.UnsupportedProtocol,
+                    $"The remote uses the '{protocol}' protocol, which is not in the allowed list ({string.Join(", ", normalized)}). Nothing was cloned."));
+            }
+
+            allowedProtocols = normalized;
         }
 
         var fullPath = Path.GetFullPath(targetPath);
@@ -82,7 +116,7 @@ public sealed partial class GitClient
 
         var clone = await RunAsync(
             parent,
-            ["clone", "--quiet", "--", remoteUrl, fullPath],
+            [.. ProtocolGuardArguments(allowedProtocols), "clone", "--quiet", "--", remoteUrl, fullPath],
             CommandKind.Remote,
             cancellationToken).ConfigureAwait(false);
 
@@ -96,6 +130,58 @@ public sealed partial class GitClient
 
         return GitResult<GitCloneOutcome>.Fail(ToFailure(clone, GitFailureCode.CloneFailed, $"Failed to clone the repository into '{fullPath}'."));
     }
+
+    /// <summary>
+    /// Builds the <c>-c</c> options that make git refuse every protocol except the allowed ones. Git's own default is kept for
+    /// <c>null</c>, which means no allowlist.
+    /// </summary>
+    private static IReadOnlyList<string> ProtocolGuardArguments(IReadOnlyList<string>? allowedProtocols)
+    {
+        if (allowedProtocols is null)
+        {
+            return [];
+        }
+
+        var arguments = new List<string> { "-c", "protocol.allow=never" };
+        foreach (var protocol in allowedProtocols)
+        {
+            arguments.Add("-c");
+            arguments.Add($"protocol.{protocol}.allow=always");
+        }
+
+        return arguments;
+    }
+
+    /// <summary>
+    /// Derives the transport git would use for <paramref name="remoteUrl" />. A <c>scheme://</c> URL gives its scheme. A remote helper
+    /// (<c>ext::command</c>) gives the name before <c>::</c>, so it is its own protocol. An scp-style <c>[user@]host:path</c> remote
+    /// gives <c>ssh</c>. Anything else is a local path, which git serves as <c>file</c>.
+    /// </summary>
+    private static string DeriveProtocol(string remoteUrl)
+    {
+        var schemeEnd = remoteUrl.IndexOf("://", StringComparison.Ordinal);
+        if (schemeEnd > 0 && IsProtocolName(remoteUrl[..schemeEnd]))
+        {
+            return remoteUrl[..schemeEnd].ToLowerInvariant();
+        }
+
+        var helperEnd = remoteUrl.IndexOf("::", StringComparison.Ordinal);
+        if (helperEnd > 0 && IsProtocolName(remoteUrl[..helperEnd]))
+        {
+            return remoteUrl[..helperEnd].ToLowerInvariant();
+        }
+
+        // Git treats a colon before any slash as scp-style, except a one-letter drive such as C:\repo.
+        var colon = remoteUrl.IndexOf(':');
+        var slash = remoteUrl.IndexOf('/');
+        var isScpStyle = colon >= 0 && (slash < 0 || colon < slash) && !(colon == 1 && char.IsAsciiLetter(remoteUrl[0]));
+        return isScpStyle ? "ssh" : "file";
+    }
+
+    private static bool IsProtocolName(string value) =>
+        value.Length > 0
+        && char.IsAsciiLetter(value[0])
+        && value.All(character => char.IsAsciiLetterOrDigit(character) || character is '+' or '-' or '.');
 
     private static void TryDeleteIncompleteClone(string fullPath)
     {

@@ -58,5 +58,14 @@ public enum GitFailureCode
     CommandFailed,
 
     /// <summary>The git command did not finish within its timeout. The process tree was terminated.</summary>
-    Timeout
+    Timeout,
+
+    /// <summary>The remote uses a transport protocol that is not in the caller's allowlist. No git process was started and no directory was created.</summary>
+    UnsupportedProtocol,
+
+    /// <summary>The checkout was not removed because it has commits that are not on its upstream, has no upstream, or has a detached HEAD.</summary>
+    UnpushedCommits,
+
+    /// <summary>The checkout could not be removed completely. Some entries may already be deleted; the message names the path that failed.</summary>
+    RemoveFailed
 }

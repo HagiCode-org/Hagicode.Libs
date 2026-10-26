@@ -43,6 +43,21 @@ public sealed record GitRebaseOutcome
 /// <param name="ReusedExistingRepository">True when a matching repository was already present and nothing was cloned.</param>
 public sealed record GitCloneOutcome(string RepositoryPath, bool ReusedExistingRepository);
 
+/// <summary>Options for <see cref="IGitClient.EnsureCloneAsync(string, string, GitCloneOptions, CancellationToken)" />.</summary>
+/// <param name="AllowedProtocols">
+/// The transport protocols the remote may use, such as <c>https</c> or <c>ssh</c>. <see langword="null" /> keeps every protocol git supports.
+/// An empty list refuses every remote.
+/// </param>
+public sealed record GitCloneOptions(IReadOnlyCollection<string>? AllowedProtocols = null);
+
+/// <summary>Options for <see cref="IGitClient.RemoveRepositoryAsync" />.</summary>
+/// <param name="Force">Skip the dirty and unpushed-commit checks. The structural checks (standalone root, no links) always apply.</param>
+public sealed record GitRemoveOptions(bool Force = false);
+
+/// <summary>The result of removing a repository checkout.</summary>
+/// <param name="RepositoryPath">The full path of the removed checkout.</param>
+public sealed record GitRemoveOutcome(string RepositoryPath);
+
 /// <summary>Options for <see cref="IGitClient.ScanForRepositoriesAsync" />.</summary>
 /// <param name="MaxDepth">How many folder levels below the root are visited. The root itself is checked at depth 0.</param>
 /// <param name="ExcludeHidden">Skip folders whose name starts with a dot.</param>

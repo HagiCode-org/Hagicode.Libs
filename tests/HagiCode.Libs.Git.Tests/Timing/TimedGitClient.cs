@@ -72,6 +72,12 @@ public sealed class TimedGitClient : IGitClient
     public Task<GitResult<GitCloneOutcome>> EnsureCloneAsync(string remoteUrl, string targetPath, CancellationToken cancellationToken = default) =>
         Measure(nameof(EnsureCloneAsync), () => _inner.EnsureCloneAsync(remoteUrl, targetPath, cancellationToken), Outcome);
 
+    public Task<GitResult<GitCloneOutcome>> EnsureCloneAsync(string remoteUrl, string targetPath, GitCloneOptions options, CancellationToken cancellationToken = default) =>
+        Measure(nameof(EnsureCloneAsync), () => _inner.EnsureCloneAsync(remoteUrl, targetPath, options, cancellationToken), Outcome);
+
+    public Task<GitResult<GitRemoveOutcome>> RemoveRepositoryAsync(string repositoryPath, GitRemoveOptions? options = null, CancellationToken cancellationToken = default) =>
+        Measure(nameof(RemoveRepositoryAsync), () => _inner.RemoveRepositoryAsync(repositoryPath, options, cancellationToken), Outcome);
+
     public Task<GitResult<IReadOnlyList<string>>> ScanForRepositoriesAsync(
         string rootPath,
         GitScanOptions? options = null,

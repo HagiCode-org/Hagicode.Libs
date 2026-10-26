@@ -90,6 +90,21 @@ public interface IGitClient
     /// </summary>
     Task<GitResult<GitCloneOutcome>> EnsureCloneAsync(string remoteUrl, string targetPath, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Ensures a repository exists as <see cref="EnsureCloneAsync(string, string, CancellationToken)" /> does, but first refuses a remote whose
+    /// protocol is not in <see cref="GitCloneOptions.AllowedProtocols" />. The refusal happens before any git process starts or any directory is created.
+    /// Git itself is also told to refuse every other protocol, so a redirect cannot leave the allowlist.
+    /// </summary>
+    Task<GitResult<GitCloneOutcome>> EnsureCloneAsync(string remoteUrl, string targetPath, GitCloneOptions options, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Deletes the checkout of a standalone repository. Only a repository root whose <c>.git</c> is a directory qualifies: linked worktrees,
+    /// submodules, subdirectories, links and filesystem roots are refused even with <see cref="GitRemoveOptions.Force" />. Without force, a dirty
+    /// tree (<see cref="GitFailureCode.WorkingTreeDirty" />) and commits that are not on the upstream (<see cref="GitFailureCode.UnpushedCommits" />) are refused.
+    /// Links inside the checkout are removed as links and never followed.
+    /// </summary>
+    Task<GitResult<GitRemoveOutcome>> RemoveRepositoryAsync(string repositoryPath, GitRemoveOptions? options = null, CancellationToken cancellationToken = default);
+
     /// <summary>Finds repositories under <paramref name="rootPath" /> within the limits in <paramref name="options" />. Does not descend into a repository.</summary>
     Task<GitResult<IReadOnlyList<string>>> ScanForRepositoriesAsync(
         string rootPath,
