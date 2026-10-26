@@ -72,6 +72,222 @@ internal sealed class PiRpcWriter(IPiRpcProcess process)
 }
 
 /// <summary>
+/// The steers of one RPC run that are still open: accepted steers waiting for Pi to inject them, and steers waiting for Pi's
+/// answer. It resolves every steer exactly once.
+/// </summary>
+/// <remarks>
+/// Pi injects queued steers one per turn, in queue order, and writes each injection as a user message with the steer's text.
+/// So the oldest open steer with the injected text is the one consumed; this keeps two steers with identical text correct. The
+/// first user message of a run is the prompt itself and is never matched. Reading <c>agent_end</c> closes the accepting window
+/// under the same lock as a steer's registration: a steer is either tracked or refused, never written and dropped.
+/// </remarks>
+internal sealed class PiSteerTracker(PiRunSteering? steering)
+{
+    private readonly object _gate = new();
+    private readonly HashSet<string> _steerIds = [];
+    private readonly Dictionary<string, PendingSteer> _openByRequestId = [];
+    private string _prompt = string.Empty;
+    private bool _promptEchoPending;
+    private bool _accepting;
+    private int _sequence;
+
+    /// <summary>Opens the accepting window once Pi has started the prompt.</summary>
+    public void Open(string prompt)
+    {
+        lock (_gate)
+        {
+            _prompt = prompt;
+            _promptEchoPending = true;
+            _accepting = true;
+        }
+    }
+
+    /// <summary>Registers a steer before it is written. A refused steer (window closed, or an id already used) is never written.</summary>
+    public bool TryRegister(string steerId, string text, out PendingSteer? steer)
+    {
+        lock (_gate)
+        {
+            if (!_accepting || !_steerIds.Add(steerId))
+            {
+                steer = null;
+                return false;
+            }
+
+            steer = new PendingSteer(steerId, PiRpcProtocol.SteerRequestIdPrefix + (++_sequence), text, _sequence);
+            _openByRequestId[steer.RequestId] = steer;
+            return true;
+        }
+    }
+
+    /// <summary>Drops a steer that was not accepted (no reply in time, a write that failed, or a cancelled caller).</summary>
+    public void Abandon(PendingSteer steer)
+    {
+        lock (_gate)
+        {
+            _openByRequestId.Remove(steer.RequestId);
+        }
+    }
+
+    /// <summary>Reads Pi's answer to a steer: queued accepts it, handled consumes it at once, anything else refuses it.</summary>
+    public void OnReply(SteerReply reply)
+    {
+        PendingSteer? steer;
+        PiSteerResult? result = null;
+        PiSteerOutcome? outcome = null;
+        lock (_gate)
+        {
+            if (!_openByRequestId.TryGetValue(reply.RequestId, out steer))
+            {
+                return;
+            }
+
+            if (!reply.Success || reply.Disposition is not (PiRpcProtocol.DispositionQueued or PiRpcProtocol.DispositionHandled))
+            {
+                _openByRequestId.Remove(reply.RequestId);
+                result = PiSteerResult.NotSteerable;
+            }
+            else if (reply.Disposition == PiRpcProtocol.DispositionHandled)
+            {
+                _openByRequestId.Remove(reply.RequestId);
+                result = PiSteerResult.Sent;
+                outcome = PiSteerOutcome.Consumed;
+            }
+            else if (steer.State == PiSteerState.Injected)
+            {
+                // Pi injected the message before its reply was read, so the steer is consumed as soon as it is accepted.
+                _openByRequestId.Remove(reply.RequestId);
+                result = PiSteerResult.Sent;
+                outcome = PiSteerOutcome.Consumed;
+            }
+            else
+            {
+                steer.State = PiSteerState.Accepted;
+                result = PiSteerResult.Sent;
+            }
+        }
+
+        steer.Reply.TrySetResult(result!.Value);
+        if (outcome is { } resolved)
+        {
+            steering?.Report(steer.SteerId, resolved);
+        }
+    }
+
+    /// <summary>Reads a user message. The run's first user message is the prompt; any other resolves the oldest open steer with its text.</summary>
+    public void OnUserMessage(string text)
+    {
+        PendingSteer? injected;
+        var answered = false;
+        lock (_gate)
+        {
+            if (_promptEchoPending)
+            {
+                _promptEchoPending = false;
+                if (string.Equals(text, _prompt, StringComparison.Ordinal))
+                {
+                    return;
+                }
+            }
+
+            injected = _openByRequestId.Values
+                .Where(steer => steer.State != PiSteerState.Injected && string.Equals(steer.Text, text, StringComparison.Ordinal))
+                .OrderBy(static steer => steer.Sequence)
+                .FirstOrDefault();
+            if (injected is null)
+            {
+                return;
+            }
+
+            // Written but not yet answered: the reply completes the steer, and it reports Consumed then.
+            answered = injected.State == PiSteerState.Accepted;
+            if (answered)
+            {
+                _openByRequestId.Remove(injected.RequestId);
+            }
+            else
+            {
+                injected.State = PiSteerState.Injected;
+            }
+        }
+
+        if (answered)
+        {
+            steering?.Report(injected.SteerId, PiSteerOutcome.Consumed);
+        }
+    }
+
+    /// <summary>Closes the accepting window: Pi writes no injection for a steer that arrives after <c>agent_end</c>.</summary>
+    public void CloseWindow()
+    {
+        lock (_gate)
+        {
+            _accepting = false;
+        }
+    }
+
+    /// <summary>
+    /// Ends the run: closes the window and resolves every open steer. An injected steer is consumed, an accepted one was not
+    /// injected before the run ended (not consumed), and a written one never got an answer (not steerable).
+    /// </summary>
+    public void Finish()
+    {
+        List<PendingSteer> open;
+        lock (_gate)
+        {
+            _accepting = false;
+            open = [.. _openByRequestId.Values.OrderBy(static steer => steer.Sequence)];
+            _openByRequestId.Clear();
+        }
+
+        foreach (var steer in open)
+        {
+            switch (steer.State)
+            {
+                case PiSteerState.Injected:
+                    steer.Reply.TrySetResult(PiSteerResult.Sent);
+                    steering?.Report(steer.SteerId, PiSteerOutcome.Consumed);
+                    break;
+
+                case PiSteerState.Accepted:
+                    steering?.Report(steer.SteerId, PiSteerOutcome.NotConsumed);
+                    break;
+
+                default:
+                    steer.Reply.TrySetResult(PiSteerResult.NotSteerable);
+                    break;
+            }
+        }
+    }
+
+    internal sealed class PendingSteer(string steerId, string requestId, string text, int sequence)
+    {
+        public string SteerId { get; } = steerId;
+
+        public string RequestId { get; } = requestId;
+
+        public string Text { get; } = text;
+
+        public int Sequence { get; } = sequence;
+
+        public PiSteerState State { get; set; }
+
+        public TaskCompletionSource<PiSteerResult> Reply { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
+}
+
+internal enum PiSteerState
+{
+    /// <summary>Written to Pi, no answer yet.</summary>
+    Written,
+
+    /// <summary>Pi answered queued; not injected yet.</summary>
+    Accepted,
+
+    /// <summary>Pi injected the message before its answer was read.</summary>
+    Injected
+}
+
+/// <summary>
 /// What an RPC run found out besides its messages.
 /// </summary>
 internal sealed class PiRpcOutcome
@@ -91,12 +307,16 @@ internal sealed class PiRpcOutcome
 /// <param name="UserInputHandler">Answers the question dialogs.</param>
 /// <param name="QuestionTimeout">How long a question may stay unanswered.</param>
 /// <param name="ExitTimeout">How long Pi gets to exit after its input is closed before the process is stopped.</param>
+/// <param name="Steering">The steering channel of the run, attached while the prompt runs; <see langword="null" /> for no steering.</param>
+/// <param name="SteerDeliveryTimeout">How long a steer waits for Pi's reply. Defaults to <see cref="PiOptions.DefaultSteerDeliveryTimeout" />.</param>
 internal sealed record PiRpcSessionSettings(
     string? RequestedSessionId,
     string? WorkingDirectory,
     Func<PiUserInputRequest, CancellationToken, Task<PiUserInputResponse?>> UserInputHandler,
     TimeSpan QuestionTimeout,
-    TimeSpan ExitTimeout);
+    TimeSpan ExitTimeout,
+    PiRunSteering? Steering = null,
+    TimeSpan? SteerDeliveryTimeout = null);
 
 /// <summary>
 /// Drives one <c>pi --mode rpc</c> process: the <c>get_state</c> handshake, the prompt, the question dialogs and the end of
@@ -123,6 +343,8 @@ internal sealed class PiRpcSession
     private readonly PiRpcSessionSettings _settings;
     private readonly PiRpcOutcome _outcome;
     private readonly PiRpcWriter _writer;
+    private readonly PiSteerTracker _steerTracker;
+    private readonly TimeSpan _steerReplyTimeout;
 
     private PiPendingDialogs? _dialogs;
     private string _prompt = string.Empty;
@@ -151,6 +373,8 @@ internal sealed class PiRpcSession
         _settings = settings;
         _outcome = outcome;
         _writer = new PiRpcWriter(process);
+        _steerTracker = new PiSteerTracker(settings.Steering);
+        _steerReplyTimeout = settings.SteerDeliveryTimeout ?? PiOptions.DefaultSteerDeliveryTimeout;
     }
 
     /// <summary>
@@ -245,6 +469,11 @@ internal sealed class PiRpcSession
         }
         finally
         {
+            // Whichever way the run ends (settled, cancelled, Pi exited, or the consumer stopped), no steer is accepted any more,
+            // every open steer gets its one outcome, and the handle is detached so a later steer is not steerable.
+            _steerTracker.Finish();
+            _settings.Steering?.Detach();
+
             dialogs.CancelOutstanding();
             await dialogs.WaitForOutstandingAsync(DialogDrainTimeout).ConfigureAwait(false);
 
@@ -290,7 +519,18 @@ internal sealed class PiRpcSession
                 _settled = true;
                 return LineResult.End;
 
+            case PiRpcProtocol.AgentEndType:
+                // Pi writes no injection for a steer that arrives after agent_end, so the accepting window closes here. The run
+                // itself goes on until agent_settled, as it always did.
+                _steerTracker.CloseWindow();
+                return LineResult.From(_eventState.ProcessOutputLine(line));
+
             default:
+                if (PiRpcProtocol.ReadUserMessageText(record) is { } userText)
+                {
+                    _steerTracker.OnUserMessage(userText);
+                }
+
                 return LineResult.From(_eventState.ProcessOutputLine(line));
         }
     }
@@ -306,7 +546,13 @@ internal sealed class PiRpcSession
                 return HandlePromptResponse(response);
 
             default:
-                // Only the answers to commands the provider wrote carry its ids; the answer to abort needs no action.
+                // Only the answers to commands the provider wrote carry its ids. The answer to abort needs no action; the
+                // answers to steer commands carry their own id prefix and go to the steer tracker.
+                if (PiRpcProtocol.TryReadSteerReply(response, out var steerReply))
+                {
+                    _steerTracker.OnReply(steerReply);
+                }
+
                 return LineResult.None;
         }
     }
@@ -349,6 +595,13 @@ internal sealed class PiRpcSession
         {
             _promptHandled = true;
             return LineResult.End;
+        }
+
+        // The prompt started a run: from now on a steer may be written, and it is refused once agent_end was read.
+        if (_settings.Steering is not null)
+        {
+            _steerTracker.Open(_prompt);
+            _settings.Steering.Attach(SteerRequestAsync);
         }
 
         return LineResult.None;
@@ -447,6 +700,35 @@ internal sealed class PiRpcSession
         // Pi handles the abort before it notices the closed input, then exits; it never exits on its own otherwise.
         await _writer.CloseAsync().ConfigureAwait(false);
         await StopProcessAsync(closeInputFirst: false).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Writes one steer through the shared writer and waits, bounded, for Pi's answer. The steer is accepted only when Pi answers
+    /// queued or handled; its outcome then arrives through the steer tracker.
+    /// </summary>
+    private async Task<PiSteerResult> SteerRequestAsync(string steerId, string text, CancellationToken cancellationToken)
+    {
+        if (!_steerTracker.TryRegister(steerId, text, out var steer))
+        {
+            return PiSteerResult.NotSteerable;
+        }
+
+        try
+        {
+            if (!await _writer.TrySendAsync(PiRpcProtocol.BuildSteer(steer!.RequestId, text), cancellationToken).ConfigureAwait(false))
+            {
+                _steerTracker.Abandon(steer);
+                return PiSteerResult.NotSteerable;
+            }
+
+            return await steer.Reply.Task.WaitAsync(_steerReplyTimeout, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is TimeoutException or OperationCanceledException)
+        {
+            // No answer in time (or the caller gave up): the steer is not accepted, so it must not be tracked for an outcome.
+            _steerTracker.Abandon(steer!);
+            return PiSteerResult.NotSteerable;
+        }
     }
 
     private async Task StopProcessAsync(bool closeInputFirst = true)

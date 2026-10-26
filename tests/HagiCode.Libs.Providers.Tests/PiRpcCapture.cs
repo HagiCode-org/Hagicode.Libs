@@ -29,6 +29,38 @@ namespace HagiCode.Libs.Providers.Tests;
 //    editor to undefined and confirm to false.
 //  * Transport: a dialog title of 4 MB (a 9 MB line, with U+2028 inside the JSON string) arrived intact and a 700 KB answer
 //    value went back intact.
+//
+// Findings recorded for openspec change pi-run-steering (tasks 1.1 to 1.3). Captured 2026-10-26 with pi 1.2.0 --mode rpc, no
+// extensions, one haiku call per run through a local OpenAI-compatible gateway, under a throwaway --session-dir. Fixtures:
+// Fixtures/Pi/steer-*.jsonl (stdout only; the steer inputs are described below). Model, response ids, session id and paths are
+// replaced as in the captures above. The steer inputs are: (a) steer during a bash tool call, (b) steer during text
+// streaming, (c) two steers with identical text during a tool call, (d) steer written right after agent_end, (e) an empty
+// message, (f) a steer without a message key and a steer with a numeric message.
+//  * Reply: { id: "hagicode-steer-<n>", type: "response", command: "steer", success: true, data: { disposition: "queued" } }.
+//    It carries the command id only. Latency was 3 ms mid-run and about 30 ms at run start (both within the same read batch).
+//  * Injection (D3): a user message_start whose content is one text block with exactly the steer text. It arrives at the start
+//    of the next turn, after the turn_end of the turn that ran the tool or streamed the text, and before the next model call.
+//    Pi delivers one steer per turn (steeringMode one-at-a-time): with two steers queued, two turns follow, one per steer.
+//  * queue_update { steering: [...] } follows each queue change, but its drop is not a reliable signal: in one capture the
+//    removal came right before the injection, in another only after it. The message_start text is the signal the provider uses.
+//  * A steer is accepted mid tool call (a) and mid text stream (b) alike. It is consumed at the turn boundary, never inside the
+//    turn that was running.
+//  * Identical texts (c): both steers are queued (two queue_update lines) and injected in order, one per turn. Matching the
+//    oldest pending text FIFO resolves them correctly.
+//  * Empty message (e): the reply is success true with disposition queued, and the empty text is injected as a real user turn
+//    that costs a model call. The provider must refuse an empty or whitespace message itself and never write it.
+//  * Missing or non-string message (f): success false, nothing queued, no injection. Error texts:
+//    "Cannot read properties of undefined (reading 'startsWith')" (no message key) and "text.startsWith is not a function"
+//    (numeric message). Pi reports a bad steer on the same response shape it uses for prompts.
+//  * Steer written at agent_end (d): no reply, no injection. agent_settled followed in the same millisecond and pi exited 0. A
+//    steer that arrives after agent_end is not processed, so the provider closes its accepting window at agent_end.
+//  * Pending steers at settle: in every capture, every queued steer was injected before agent_end. Nothing in the captures
+//    shows Pi continuing a queued steer after agent_settled. Design D4 therefore resolves a still-pending steer at agent_settled
+//    as NotConsumed at once and uses no settle wait.
+//  * End-to-end check (task 5.2, same day): the real pi through PiProvider and the shared CliProcessManager (memory-cap launch
+//    path included), throwaway session directory, one tool call per run. (a) one steer: steer-1 Sent, then steer-1 Consumed.
+//    (c) two identical steers: steer-1 Sent and steer-2 Sent, then steer-1 Consumed and steer-2 Consumed, one outcome each.
+//    The event types of the run were session.started, tool.call, tool.update, tool.completed, assistant, terminal.completed.
 internal static class PiRpcCapture
 {
     public static IReadOnlyList<string> Lines(string jsonLines)

@@ -84,6 +84,11 @@ public class PiProvider : ICliProvider<PiOptions>
             ValidateQuestionTimeout(options);
         }
 
+        if (usesRpc)
+        {
+            ValidateSteerDeliveryTimeout(options);
+        }
+
         try
         {
             var runtimeEnvironment = await ResolveRuntimeEnvironmentAsync(cancellationToken).ConfigureAwait(false);
@@ -440,7 +445,9 @@ public class PiProvider : ICliProvider<PiOptions>
             ResolveWorkingDirectory(options),
             options.UserInputHandler!,
             options.QuestionTimeout,
-            RpcExitTimeout);
+            RpcExitTimeout,
+            options.Steering,
+            options.SteerDeliveryTimeout);
         var session = new PiRpcSession(process, _eventMapper.CreateStreamingState(options.SessionId), settings, outcome);
 
         await foreach (var message in session.RunAsync(prompt, cancellationToken).ConfigureAwait(false))
@@ -465,6 +472,17 @@ public class PiProvider : ICliProvider<PiOptions>
                 nameof(options),
                 options.QuestionTimeout,
                 "QuestionTimeout must be positive or Timeout.InfiniteTimeSpan.");
+        }
+    }
+
+    private static void ValidateSteerDeliveryTimeout(PiOptions options)
+    {
+        if (options.SteerDeliveryTimeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.SteerDeliveryTimeout,
+                "SteerDeliveryTimeout must be positive.");
         }
     }
 

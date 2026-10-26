@@ -12,6 +12,18 @@ internal static class PiRpcProtocol
     public const string PromptRequestId = "hagicode-prompt";
     public const string AbortRequestId = "hagicode-abort";
 
+    /// <summary>
+    /// The id prefix of the <c>steer</c> commands the provider writes. Pi echoes only the command id, so the provider maps each id
+    /// back to its steer.
+    /// </summary>
+    public const string SteerRequestIdPrefix = "hagicode-steer-";
+
+    public const string SteerCommand = "steer";
+    public const string MessageStartType = "message_start";
+    public const string AgentEndType = "agent_end";
+    public const string DispositionQueued = "queued";
+    public const string DispositionHandled = "handled";
+
     public const string ResponseType = "response";
     public const string AgentSettledType = "agent_settled";
     public const string ExtensionUiRequestType = PiUserInputRequest.MessageType;
@@ -41,6 +53,68 @@ internal static class PiRpcProtocol
         ["id"] = AbortRequestId,
         ["type"] = "abort"
     });
+
+    /// <summary>
+    /// Asks Pi to deliver a follow-up message after the current turn's tool calls. Pi answers with a <c>steer</c> response
+    /// whose disposition is <c>queued</c> or <c>handled</c>, or with success false.
+    /// </summary>
+    public static string BuildSteer(string requestId, string message) => Serialize(new Dictionary<string, object?>
+    {
+        ["id"] = requestId,
+        ["type"] = SteerCommand,
+        ["message"] = message
+    });
+
+    /// <summary>
+    /// Reads the answer to a <c>steer</c> command the provider wrote: a response to the command with a
+    /// <c>hagicode-steer-</c> id. Anything else, including a response to another command, is not a steer reply.
+    /// </summary>
+    public static bool TryReadSteerReply(JsonElement record, out SteerReply reply)
+    {
+        reply = default;
+        if (ReadString(record, "type") != ResponseType
+            || ReadString(record, "command") != SteerCommand
+            || ReadString(record, "id") is not { Length: > 0 } requestId
+            || !requestId.StartsWith(SteerRequestIdPrefix, StringComparison.Ordinal)
+            || !record.TryGetProperty("success", out var success)
+            || success.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+        {
+            return false;
+        }
+
+        var disposition = record.TryGetProperty("data", out var data) ? ReadString(data, "disposition") : null;
+        reply = new SteerReply(requestId, success.ValueKind == JsonValueKind.True, disposition);
+        return true;
+    }
+
+    /// <summary>
+    /// Reads the text of a user <c>message_start</c>: the text of its single text block, or a plain string content. This is the
+    /// record Pi writes when it injects a steer into the run. It returns <see langword="null" /> for any other record, for an
+    /// assistant message, and for a user message with more than one block.
+    /// </summary>
+    public static string? ReadUserMessageText(JsonElement record)
+    {
+        if (ReadString(record, "type") != MessageStartType
+            || !record.TryGetProperty("message", out var message)
+            || ReadString(message, "role") != "user"
+            || !message.TryGetProperty("content", out var content))
+        {
+            return null;
+        }
+
+        if (content.ValueKind == JsonValueKind.String)
+        {
+            return content.GetString();
+        }
+
+        if (content.ValueKind != JsonValueKind.Array || content.GetArrayLength() != 1)
+        {
+            return null;
+        }
+
+        var block = content[0];
+        return ReadString(block, "type") == "text" ? ReadString(block, "text") : null;
+    }
 
     /// <summary>
     /// Answers a dialog with a value (the <c>input</c> of a question).
@@ -91,3 +165,9 @@ internal static class PiRpcProtocol
 
     private static string Serialize(Dictionary<string, object?> record) => JsonSerializer.Serialize(record);
 }
+
+/// <summary>
+/// The answer to one <c>steer</c> command: the request id it answers, whether Pi accepted it, and the disposition
+/// (<c>queued</c> or <c>handled</c>) when it did.
+/// </summary>
+internal readonly record struct SteerReply(string RequestId, bool Success, string? Disposition);

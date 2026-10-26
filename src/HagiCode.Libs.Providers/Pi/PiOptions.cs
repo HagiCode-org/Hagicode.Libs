@@ -123,4 +123,28 @@ public sealed record PiOptions
     /// The default value of <see cref="QuestionTimeout" />.
     /// </summary>
     public static readonly TimeSpan DefaultQuestionTimeout = TimeSpan.FromMinutes(30);
+
+    /// <summary>
+    /// Gets or sets the channel that steers the run: follow-up messages sent while Pi is running the prompt. It is
+    /// <see langword="null" /> by default, which keeps the run exactly as it was. It takes effect only on an RPC run (see
+    /// <see cref="UserInputHandler" />); a JSON print run never attaches it, so every steer on it is not steerable.
+    /// </summary>
+    /// <remarks>
+    /// Create a new <see cref="PiRunSteering" /> for each execution. Its outcomes arrive through
+    /// <see cref="PiRunSteering.OutcomeObserved" /> while the run is iterated.
+    /// </remarks>
+    public PiRunSteering? Steering { get; init; }
+
+    /// <summary>
+    /// Gets or sets how long a steer may wait for Pi's reply to the <c>steer</c> command. A reply that does not come in time
+    /// makes the steer not steerable. It does not bound consumption: a steer Pi holds is waited for until Pi injects it or the
+    /// run ends. The default is 30 seconds. A value that is not positive is rejected with an <see cref="ArgumentOutOfRangeException" />
+    /// before any process starts, for every RPC run.
+    /// </summary>
+    public TimeSpan SteerDeliveryTimeout { get; init; } = DefaultSteerDeliveryTimeout;
+
+    /// <summary>
+    /// The default value of <see cref="SteerDeliveryTimeout" />.
+    /// </summary>
+    public static readonly TimeSpan DefaultSteerDeliveryTimeout = TimeSpan.FromSeconds(30);
 }
