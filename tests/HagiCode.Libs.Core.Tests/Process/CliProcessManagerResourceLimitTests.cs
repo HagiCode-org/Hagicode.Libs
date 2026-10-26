@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Process;
 
@@ -195,6 +196,7 @@ public sealed class CliProcessManagerResourceLimitTests
 
     [Test]
     [Category("Integration")]
+    [SupportedOSPlatform("linux")]
     public async Task The_version_probe_stays_unwrapped_under_a_cpu_only_limit()
     {
         RequireUnix();

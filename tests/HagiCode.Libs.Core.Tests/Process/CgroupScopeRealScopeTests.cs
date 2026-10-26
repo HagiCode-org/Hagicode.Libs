@@ -92,6 +92,38 @@ public sealed class CgroupScopeRealScopeTests
     }
 
     [Test]
+    public async Task A_cpu_limited_agent_command_runs_in_its_own_scope_with_the_quota_and_an_unlimited_one_starts_unwrapped()
+    {
+        RealScope.RequireUserScope();
+        RealScope.RequireCpuController();
+        // Prints the command's own cgroup and its cpu.max, separated by a pipe so the value may contain spaces.
+        const string script = "cgroup=$(sed -n 's/^0:://p' /proc/self/cgroup); printf '%s|%s' \"$cgroup\" \"$(cat \"/sys/fs/cgroup$cgroup/cpu.max\")\"";
+        var testCgroup = RealScope.ReadCgroupPath(System.Environment.ProcessId);
+
+        var limited = ResourceLimitTestSupport.CreateManager(new FixedCpuLimitProvider(100), RealScope.Probe);
+        var limitedResult = await limited.ExecuteAsync(new ProcessStartContext { ExecutablePath = "/bin/sh", Arguments = ["-c", script] });
+
+        limitedResult.ExitCode.ShouldBe(0);
+        limitedResult.ResolvedExecutablePath.ShouldBe("/bin/sh");
+        limitedResult.CommandPreview.ShouldNotContain("systemd-run");
+        var limitedParts = limitedResult.StandardOutput.Trim().Split('|', 2);
+        limitedParts[0].ShouldEndWith(".scope");
+        limitedParts[0].ShouldNotBe(testCgroup, "a command under a CPU limit must not share the cgroup of the caller's terminal");
+        limitedParts[1].ShouldBe("100000 100000");
+
+        var unlimited = ResourceLimitTestSupport.CreateManager(new FixedCpuLimitProvider(null), RealScope.Probe);
+        var unlimitedResult = await unlimited.ExecuteAsync(new ProcessStartContext { ExecutablePath = "/bin/sh", Arguments = ["-c", script] });
+
+        unlimitedResult.ExitCode.ShouldBe(0);
+        unlimitedResult.StandardOutput.Trim().Split('|', 2)[0].ShouldBe(testCgroup, "without a limit the command starts unwrapped in the caller's cgroup");
+    }
+
+    private sealed class FixedCpuLimitProvider(int? cpuPercent) : ICliResourceLimitProvider
+    {
+        public CliResourceLimits? GetCurrent() => cpuPercent is { } percent ? new CliResourceLimits(null, percent) : null;
+    }
+
+    [Test]
     public async Task A_wrapped_agent_passes_stdin_stdout_and_exit_code_through_inside_a_limited_scope()
     {
         RealScope.RequireUserScope();
