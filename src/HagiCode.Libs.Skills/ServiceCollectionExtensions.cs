@@ -1,3 +1,4 @@
+using HagiCode.Libs.Skills.Discovery;
 using HagiCode.Libs.Skills.OnlineApi;
 using HagiCode.Libs.Skills.OnlineApi.Providers;
 using Microsoft.Extensions.DependencyInjection;
@@ -20,6 +21,7 @@ public static class ServiceCollectionExtensions
         }
 
         services.TryAddSingleton<IOnlineApiEndpointProvider, VercelOnlineApiEndpointProvider>();
+        services.TryAddSingleton<ISkillFolderScanner, SkillFolderScanner>();
         services.AddHttpClient<IOnlineApiClient, OnlineApiClient>((serviceProvider, client) =>
         {
             var options = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<OnlineApiOptions>>().Value;

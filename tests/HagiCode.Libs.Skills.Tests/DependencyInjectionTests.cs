@@ -1,4 +1,5 @@
 using HagiCode.Libs.Skills;
+using HagiCode.Libs.Skills.Discovery;
 using HagiCode.Libs.Skills.OnlineApi;
 using HagiCode.Libs.Skills.OnlineApi.Providers;
 using Microsoft.Extensions.DependencyInjection;
@@ -21,6 +22,20 @@ public sealed class DependencyInjectionTests
 
         client.ShouldBeOfType<OnlineApiClient>();
         provider.ShouldBeOfType<VercelOnlineApiEndpointProvider>();
+    }
+
+    [Test]
+    public void AddHagiCodeSkills_registers_the_skill_folder_scanner_as_a_singleton()
+    {
+        var services = new ServiceCollection();
+        services.AddHagiCodeSkills();
+
+        using var serviceProvider = services.BuildServiceProvider();
+        var first = serviceProvider.GetRequiredService<ISkillFolderScanner>();
+        var second = serviceProvider.GetRequiredService<ISkillFolderScanner>();
+
+        first.ShouldBeOfType<SkillFolderScanner>();
+        second.ShouldBeSameAs(first);
     }
 
     [Test]
