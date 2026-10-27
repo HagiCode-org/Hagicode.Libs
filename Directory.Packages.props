@@ -26,5 +26,6 @@
     <PackageVersion Include="NetVips.Native.linux-x64" Version="8.18.7" />
     <PackageVersion Include="NetVips.Native.osx-x64" Version="8.18.7" />
     <PackageVersion Include="NetVips.Native.osx-arm64" Version="8.18.7" />
+    <PackageVersion Include="YamlDotNet" Version="18.1.0" />
   </ItemGroup>
 </Project>
