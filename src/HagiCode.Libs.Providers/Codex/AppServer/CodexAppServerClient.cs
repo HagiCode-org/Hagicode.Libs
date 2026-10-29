@@ -400,7 +400,7 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
         {
             try
             {
-                await _readLoop.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+                await _readLoop.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
             }
             catch (Exception)
             {
