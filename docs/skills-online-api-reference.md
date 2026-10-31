@@ -22,7 +22,7 @@ Only the first two are online skill-discovery interfaces. The remaining endpoint
 | Well-known index with path | `GET` | `https://<host>/<path>/.well-known/skills/index.json` | Discover all skills scoped under a site path | Yes |
 | Well-known skill file | `GET` | `https://<host>/.well-known/skills/<skill>/SKILL.md` | Fetch one skill definition | Indirectly |
 | Well-known extra files | `GET` | `https://<host>/.well-known/skills/<skill>/<file>` | Fetch supporting files declared by the index | No |
-| Audit | `GET` | `https://add-skill.vercel.sh/audit?source=<source>&skills=<csv>` | Fetch skill audit metadata | No |
+| Audit | `GET` | `https://skills.sh/tele/audit?source=<source>&skills=<csv>` | Fetch skill audit metadata | No |
 | Telemetry | `GET` | `https://add-skill.vercel.sh/t?...` | Send anonymous CLI usage events | No |
 | GitHub repo metadata | `GET` | `https://api.github.com/repos/<owner>/<repo>` | Detect whether a repository is private | No |
 | GitHub tree metadata | `GET` | `https://api.github.com/repos/<ownerRepo>/git/trees/<branch>?recursive=1` | Resolve a folder hash for update checks | No |
@@ -136,7 +136,7 @@ These requests are derived from the `files` array in `index.json`.
 ### Endpoint
 
 ```text
-GET https://add-skill.vercel.sh/audit?source=<source>&skills=<csv>
+GET https://skills.sh/tele/audit?source=<source>&skills=<csv>
 ```
 
 ### Where it is used
@@ -153,24 +153,45 @@ GET https://add-skill.vercel.sh/audit?source=<source>&skills=<csv>
 
 ### Expected response shape
 
+The payload is keyed by skill slug first, then by provider key (`ath`, `socket`, `snyk`):
+
 ```json
 {
-  "some-source": {
-    "some-skill": {
+  "some-skill": {
+    "ath": {
       "risk": "low",
       "alerts": 0,
       "score": 95,
+      "analyzedAt": "2026-03-21T00:00:00Z"
+    },
+    "socket": {
+      "risk": "high",
+      "alerts": 3,
+      "score": 62,
       "analyzedAt": "2026-03-21T00:00:00Z"
     }
   }
 }
 ```
 
+In `HagiCode.Libs.Skills`, `AuditMetadataResponse.Skills` exposes this shape as `skill slug -> provider key -> AuditSkillMetadata`. Keys are matched case-insensitively and kept as received.
+
+### Parsing rules (Libs)
+
+- `risk` is kept as the raw string, or null when absent. Unknown values such as `dangerous` are not rejected; consumers decide how to show them.
+- `alerts` and `score` accept JSON integers, whole-number doubles, and numeric strings. Anything else (fractions, non-numeric text) is read as absent.
+- `analyzedAt` is kept as the raw string, or null when absent.
+- Unknown properties are ignored.
+- A provider value that is not an object is dropped. Other providers and skills are still returned.
+- A body that is not a JSON object (for example an array or `null`) fails with `OnlineApiValidationException`. A non-success HTTP status fails with `OnlineApiHttpException`.
+
 ### Notes
 
 - The CLI treats this as optional metadata.
 - A timeout or error returns `null` and does not block installation.
 - Current timeout is `3000` ms.
+- The default base address is `https://skills.sh/` (`OnlineApiOptions.AuditBaseUri`). Overriding the base address keeps the `tele/audit` path.
+- Libs' own `RequestTimeout` (30 s) still applies to the HTTP call. The 3-second limit is enforced by the core consumer, not by this client.
 
 ## 4. Telemetry API
 
@@ -273,7 +294,7 @@ If the question is "what online interfaces are used to obtain skills?", the answ
 If the question is "what online APIs exist in this codebase besides search?", the answer is:
 
 1. Well-known skill discovery endpoints
-2. Audit API on `add-skill.vercel.sh`
+2. Audit API on `skills.sh` (`tele/audit`)
 3. Telemetry API on `add-skill.vercel.sh`
 4. GitHub repository metadata API
 5. GitHub trees API
