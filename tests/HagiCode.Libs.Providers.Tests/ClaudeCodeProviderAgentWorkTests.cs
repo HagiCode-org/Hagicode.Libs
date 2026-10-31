@@ -478,6 +478,64 @@ public sealed partial class ClaudeCodeProviderTests
         provider.DisposedTransportCount.ShouldBe(1);
     }
 
+    [Test]
+    public async Task ExecuteAsync_passes_subagent_messages_through_with_parent_tool_use_id_and_joins_the_item_by_tool_use_id()
+    {
+        // The launching call is toolu_1. The CLI sends that id as the subagent item's tool_use_id and as the
+        // parent_tool_use_id of every message the subagent writes, which is the join key of the web panel (design D5).
+        // The fixture follows the wire shapes of the captured streams in ClaudeAgentWorkCapture; it is hand-written, not a
+        // live capture, so a real foreground subagent is still to be checked (design open question).
+        // The provider adds its own envelope to every delivered message (requested_session_id, runtime_fingerprint,
+        // event_timestamp), so the comparison is per CLI property, not byte-for-byte: every property the CLI sent must
+        // arrive with the same raw value, parent_tool_use_id included.
+        var fixture = SubagentFixture("subagent-with-parent-tool-use");
+        var messages = await CollectAsync(CreateProvider(messageBatches: [fixture]));
+
+        var expected = fixture.Where(static message => ParentToolUseIdOf(message) == "toolu_1").ToList();
+        var delivered = messages.Where(static message => ParentToolUseIdOf(message) == "toolu_1").ToList();
+        expected.Count.ShouldBe(4);
+        delivered.Count.ShouldBe(expected.Count);
+        for (var index = 0; index < expected.Count; index++)
+        {
+            delivered[index].Type.ShouldBe(expected[index].Type);
+            foreach (var property in expected[index].Content.EnumerateObject())
+            {
+                delivered[index].Content.TryGetProperty(property.Name, out var value).ShouldBeTrue(property.Name);
+                value.GetRawText().ShouldBe(property.Value.GetRawText(), property.Name);
+            }
+        }
+
+        messages.Count(static message => message.Type == "result").ShouldBe(1);
+
+        var item = Snapshots(messages)[^1].Items.ShouldHaveSingleItem();
+        item.Kind.ShouldBe(AgentWorkKinds.Subagent);
+        item.Id.ShouldBe("claude:sub-1");
+        item.ToolUseId.ShouldBe("toolu_1");
+        item.Status.ShouldBe(AgentWorkStatuses.Completed);
+    }
+
+    private static List<CliMessage> SubagentFixture(string name)
+    {
+        return File.ReadAllLines(Path.Combine(AppContext.BaseDirectory, "Fixtures", "ClaudeCode", "subagent", $"{name}.jsonl"))
+            .Where(static line => !string.IsNullOrWhiteSpace(line))
+            .Select(static line =>
+            {
+                using var document = JsonDocument.Parse(line);
+                var root = document.RootElement.Clone();
+                return new CliMessage(root.GetProperty("type").GetString()!, root);
+            })
+            .ToList();
+    }
+
+    private static string? ParentToolUseIdOf(CliMessage message)
+    {
+        return message.Content.ValueKind == JsonValueKind.Object
+               && message.Content.TryGetProperty("parent_tool_use_id", out var parent)
+               && parent.ValueKind == JsonValueKind.String
+            ? parent.GetString()
+            : null;
+    }
+
     private static List<AgentWorkSnapshot> Snapshots(IEnumerable<CliMessage> messages)
     {
         var snapshots = new List<AgentWorkSnapshot>();
