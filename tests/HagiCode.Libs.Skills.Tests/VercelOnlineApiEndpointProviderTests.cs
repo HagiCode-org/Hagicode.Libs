@@ -14,7 +14,8 @@ public sealed class VercelOnlineApiEndpointProviderTests
 
         provider.GetSearchEndpoint().BaseUri.AbsoluteUri.ShouldBe("https://skills.sh/");
         provider.GetSearchEndpoint().RelativePathTemplate.ShouldBe("api/search");
-        provider.GetAuditEndpoint().BaseUri.AbsoluteUri.ShouldBe("https://add-skill.vercel.sh/");
+        provider.GetAuditEndpoint().BaseUri.AbsoluteUri.ShouldBe("https://skills.sh/");
+        provider.GetAuditEndpoint().RelativePathTemplate.ShouldBe("tele/audit");
         provider.GetTelemetryEndpoint().BaseUri.AbsoluteUri.ShouldBe("https://add-skill.vercel.sh/");
         provider.GetGitHubRepositoryEndpoint().BaseUri.AbsoluteUri.ShouldBe("https://api.github.com/");
         provider.GetGitHubTreeEndpoint().RelativePathTemplate.ShouldBe("repos/{owner}/{repo}/git/trees/{branch}");
@@ -34,6 +35,7 @@ public sealed class VercelOnlineApiEndpointProviderTests
 
         provider.GetSearchEndpoint().BaseUri.AbsoluteUri.ShouldBe("https://search.example/");
         provider.GetAuditEndpoint().BaseUri.AbsoluteUri.ShouldBe("https://audit.example/");
+        provider.GetAuditEndpoint().RelativePathTemplate.ShouldBe("tele/audit");
         provider.GetTelemetryEndpoint().BaseUri.AbsoluteUri.ShouldBe("https://telemetry.example/");
         provider.GetGitHubRepositoryEndpoint().BaseUri.AbsoluteUri.ShouldBe("https://github-proxy.example/");
         provider.GetGitHubRepositoryEndpoint().DefaultHeaders!["User-Agent"].ShouldBe("skills-tests");

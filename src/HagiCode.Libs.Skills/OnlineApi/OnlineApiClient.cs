@@ -147,8 +147,53 @@ public sealed class OnlineApiClient : IOnlineApiClient
             });
 
         using var httpRequest = CreateRequest(HttpMethod.Get, requestUri, endpoint.DefaultHeaders);
-        var payload = await SendForJsonAsync<Dictionary<string, Dictionary<string, AuditSkillMetadata>>>(endpoint.Operation, httpRequest, cancellationToken);
-        return new AuditMetadataResponse { Sources = payload };
+        var payload = await SendForJsonAsync<JsonElement>(endpoint.Operation, httpRequest, cancellationToken);
+        return new AuditMetadataResponse { Skills = ParseAuditSkills(endpoint.Operation, payload, requestUri) };
+    }
+
+    private static Dictionary<string, Dictionary<string, AuditSkillMetadata>> ParseAuditSkills(
+        OnlineApiOperation operation,
+        JsonElement payload,
+        Uri requestUri)
+    {
+        if (payload.ValueKind != JsonValueKind.Object)
+        {
+            throw new OnlineApiValidationException(
+                operation,
+                "The audit payload must be a JSON object keyed by skill slug.",
+                requestUri);
+        }
+
+        var skills = new Dictionary<string, Dictionary<string, AuditSkillMetadata>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var skill in payload.EnumerateObject())
+        {
+            if (skill.Value.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var providers = new Dictionary<string, AuditSkillMetadata>(StringComparer.OrdinalIgnoreCase);
+            foreach (var provider in skill.Value.EnumerateObject())
+            {
+                if (provider.Value.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    providers[provider.Name] = provider.Value.Deserialize<AuditSkillMetadata>(JsonOptions)!;
+                }
+                catch (JsonException)
+                {
+                    // An unreadable provider entry is dropped; the rest of the payload is still returned.
+                }
+            }
+
+            skills[skill.Name] = providers;
+        }
+
+        return skills;
     }
 
     public async Task<TelemetryTrackResult> TrackTelemetryAsync(TelemetryEventRequest request, CancellationToken cancellationToken = default)

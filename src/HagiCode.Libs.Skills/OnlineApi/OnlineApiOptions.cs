@@ -6,7 +6,7 @@ public sealed class OnlineApiOptions
 
     public Uri SearchBaseUri { get; set; } = new("https://skills.sh/");
 
-    public Uri AuditBaseUri { get; set; } = new("https://add-skill.vercel.sh/");
+    public Uri AuditBaseUri { get; set; } = new("https://skills.sh/");
 
     public Uri TelemetryBaseUri { get; set; } = new("https://add-skill.vercel.sh/");
 

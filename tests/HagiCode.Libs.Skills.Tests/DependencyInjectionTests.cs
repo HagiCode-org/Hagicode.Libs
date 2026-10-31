@@ -55,7 +55,7 @@ public sealed class DependencyInjectionTests
     {
         public OnlineApiEndpointProfile GetSearchEndpoint() => new(OnlineApiOperation.Search, new Uri("https://custom.example/"), "search");
 
-        public OnlineApiEndpointProfile GetAuditEndpoint() => new(OnlineApiOperation.Audit, new Uri("https://custom.example/"), "audit");
+        public OnlineApiEndpointProfile GetAuditEndpoint() => new(OnlineApiOperation.Audit, new Uri("https://custom.example/"), "tele/audit");
 
         public OnlineApiEndpointProfile GetTelemetryEndpoint() => new(OnlineApiOperation.Telemetry, new Uri("https://custom.example/"), "telemetry");
 

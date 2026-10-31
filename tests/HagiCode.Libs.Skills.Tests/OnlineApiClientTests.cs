@@ -197,6 +197,153 @@ public sealed class OnlineApiClientTests
         exception.Message.ShouldContain("SKILL.md");
     }
 
+    [Test]
+    public async Task GetAuditMetadataAsync_requests_skills_sh_tele_audit_with_source_and_skill()
+    {
+        var handler = new TestHttpMessageHandler((_, _) => Task.FromResult(TestHttpMessageHandler.Json(HttpStatusCode.OK, "{}")));
+        var client = CreateClient(handler);
+
+        await client.GetAuditMetadataAsync(new AuditMetadataRequest
+        {
+            Source = "vercel-labs/skills",
+            Skills = ["find-skills"],
+        });
+
+        handler.Requests.Single().RequestUri!.AbsoluteUri.ShouldBe(
+            "https://skills.sh/tele/audit?source=vercel-labs%2Fskills&skills=find-skills");
+    }
+
+    [Test]
+    public async Task GetAuditMetadataAsync_joins_multiple_skill_slugs_with_commas()
+    {
+        var handler = new TestHttpMessageHandler((_, _) => Task.FromResult(TestHttpMessageHandler.Json(HttpStatusCode.OK, "{}")));
+        var client = CreateClient(handler);
+
+        await client.GetAuditMetadataAsync(new AuditMetadataRequest
+        {
+            Source = "vercel-labs/skills",
+            Skills = ["find-skills", "vercel-react-best-practices"],
+        });
+
+        // The shared query builder percent-encodes the comma; the decoded value is the comma-separated list.
+        Uri.UnescapeDataString(handler.Requests.Single().RequestUri!.Query)
+            .ShouldContain("skills=find-skills,vercel-react-best-practices");
+    }
+
+    [Test]
+    public async Task GetAuditMetadataAsync_reads_all_three_providers_by_skill_then_provider()
+    {
+        var handler = new TestHttpMessageHandler((_, _) => Task.FromResult(TestHttpMessageHandler.Json(
+            HttpStatusCode.OK,
+            """
+            {"find-skills":{
+              "ath":{"risk":"safe","alerts":0,"score":100,"analyzedAt":"2026-10-30T00:00:00.000Z"},
+              "socket":{"risk":"high","alerts":3,"score":62,"analyzedAt":"2026-10-30T00:00:00.000Z"},
+              "snyk":{"risk":"low","alerts":1,"score":"80","analyzedAt":"2026-10-29"}
+            }}
+            """)));
+        var client = CreateClient(handler);
+
+        var response = await client.GetAuditMetadataAsync(new AuditMetadataRequest { Source = "vercel-labs/skills", Skills = ["find-skills"] });
+
+        var providers = response.Skills["find-skills"];
+        providers.Keys.OrderBy(static key => key).ShouldBe(["ath", "snyk", "socket"]);
+        providers["socket"].Risk.ShouldBe("high");
+        providers["socket"].Alerts.ShouldBe(3);
+        providers["socket"].Score.ShouldBe(62);
+        providers["socket"].AnalyzedAt.ShouldBe("2026-10-30T00:00:00.000Z");
+        providers["snyk"].Score.ShouldBe(80);
+    }
+
+    [Test]
+    public async Task GetAuditMetadataAsync_returns_only_the_providers_that_are_present()
+    {
+        var handler = new TestHttpMessageHandler((_, _) => Task.FromResult(TestHttpMessageHandler.Json(
+            HttpStatusCode.OK,
+            """{"find-skills":{"ath":{"risk":"safe"}}}""")));
+        var client = CreateClient(handler);
+
+        var response = await client.GetAuditMetadataAsync(new AuditMetadataRequest { Source = "vercel-labs/skills", Skills = ["find-skills"] });
+
+        response.Skills["find-skills"].Keys.ShouldBe(["ath"]);
+    }
+
+    [Test]
+    public async Task GetAuditMetadataAsync_keeps_unknown_risk_values_as_received()
+    {
+        var handler = new TestHttpMessageHandler((_, _) => Task.FromResult(TestHttpMessageHandler.Json(
+            HttpStatusCode.OK,
+            """{"find-skills":{"snyk":{"risk":"catastrophic"}}}""")));
+        var client = CreateClient(handler);
+
+        var response = await client.GetAuditMetadataAsync(new AuditMetadataRequest { Source = "vercel-labs/skills", Skills = ["find-skills"] });
+
+        response.Skills["find-skills"]["snyk"].Risk.ShouldBe("catastrophic");
+    }
+
+    [Test]
+    public async Task GetAuditMetadataAsync_drops_provider_values_that_are_not_objects()
+    {
+        var handler = new TestHttpMessageHandler((_, _) => Task.FromResult(TestHttpMessageHandler.Json(
+            HttpStatusCode.OK,
+            """{"find-skills":{"ath":"unavailable","socket":{"risk":"low"}}}""")));
+        var client = CreateClient(handler);
+
+        var response = await client.GetAuditMetadataAsync(new AuditMetadataRequest { Source = "vercel-labs/skills", Skills = ["find-skills"] });
+
+        response.Skills["find-skills"].Keys.ShouldBe(["socket"]);
+    }
+
+    [Test]
+    public async Task GetAuditMetadataAsync_fails_with_payload_failure_when_body_is_not_an_object()
+    {
+        var handler = new TestHttpMessageHandler((_, _) => Task.FromResult(TestHttpMessageHandler.Json(HttpStatusCode.OK, "[1,2,3]")));
+        var client = CreateClient(handler);
+
+        await Should.ThrowAsync<OnlineApiValidationException>(() => client.GetAuditMetadataAsync(new AuditMetadataRequest
+        {
+            Source = "vercel-labs/skills",
+            Skills = ["find-skills"],
+        }));
+    }
+
+    [Test]
+    public async Task GetAuditMetadataAsync_fails_with_http_exception_on_server_error()
+    {
+        var handler = new TestHttpMessageHandler((_, _) => Task.FromResult(TestHttpMessageHandler.Json(HttpStatusCode.InternalServerError, "{}")));
+        var client = CreateClient(handler);
+
+        await Should.ThrowAsync<OnlineApiHttpException>(() => client.GetAuditMetadataAsync(new AuditMetadataRequest
+        {
+            Source = "vercel-labs/skills",
+            Skills = ["find-skills"],
+        }));
+    }
+
+    [Test]
+    public async Task GetAuditMetadataAsync_parses_recorded_live_payload_for_find_skills()
+    {
+        // Recorded 2026-10-31 from GET https://skills.sh/tele/audit?source=vercel-labs%2Fskills&skills=find-skills.
+        // ath and snyk omit alerts and score; snyk's analyzedAt has a +00:00 offset with microseconds.
+        var handler = new TestHttpMessageHandler((_, _) => Task.FromResult(TestHttpMessageHandler.Json(
+            HttpStatusCode.OK,
+            """
+            {"find-skills":{"ath":{"risk":"safe","analyzedAt":"2026-09-15T08:00:05.922Z"},"socket":{"risk":"safe","alerts":0,"score":90,"analyzedAt":"2026-09-15T08:00:19.647Z"},"snyk":{"risk":"medium","analyzedAt":"2026-09-15T07:59:46.904821+00:00"}}}
+            """)));
+        var client = CreateClient(handler);
+
+        var response = await client.GetAuditMetadataAsync(new AuditMetadataRequest { Source = "vercel-labs/skills", Skills = ["find-skills"] });
+
+        var providers = response.Skills["find-skills"];
+        providers["ath"].Risk.ShouldBe("safe");
+        providers["ath"].Alerts.ShouldBeNull();
+        providers["ath"].Score.ShouldBeNull();
+        providers["socket"].Score.ShouldBe(90);
+        providers["snyk"].Risk.ShouldBe("medium");
+        providers["snyk"].Alerts.ShouldBeNull();
+        providers["snyk"].AnalyzedAt.ShouldBe("2026-09-15T07:59:46.904821+00:00");
+    }
+
     private static OnlineApiClient CreateClient(
         TestHttpMessageHandler handler,
         Action<OnlineApiOptions>? configure = null)

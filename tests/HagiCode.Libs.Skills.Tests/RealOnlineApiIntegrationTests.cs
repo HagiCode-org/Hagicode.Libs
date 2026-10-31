@@ -69,8 +69,8 @@ public sealed class RealOnlineApiIntegrationTests
             Skills = ["find-skills"],
         });
 
-        response.Sources.Count.ShouldBeGreaterThan(0);
-        response.Sources.ShouldContainKey("find-skills");
+        response.Skills.Count.ShouldBeGreaterThan(0);
+        response.Skills.ShouldContainKey("find-skills");
     }
 
     [Test]

@@ -22,7 +22,7 @@ public sealed class VercelOnlineApiEndpointProvider : IOnlineApiEndpointProvider
         new(
             OnlineApiOperation.Audit,
             EnsureTrailingSlash(_options.AuditBaseUri),
-            "audit");
+            "tele/audit");
 
     public OnlineApiEndpointProfile GetTelemetryEndpoint() =>
         new(
