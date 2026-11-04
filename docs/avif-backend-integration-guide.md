@@ -357,10 +357,10 @@ The AVIF path shares one lookup key with these entries. The PNG ffmpeg entry at 
 | Hero | `repos/newbe/static/images/20200302-008.jpg` | JPEG, 1684x1080 |
 | Hero | `repos/newbe/static/images/pindao.jpg` | JPEG, 1376x2446 |
 | Hero | `hagicode-hero-1920x1080.png` | PNG, RGB, 1920x1080 |
-| Hero | `repos/web/public/pwa/icon-512.png` | PNG, RGBA, 512x512 (alpha) |
+| Hero | `repos/web/web/public/pwa/icon-512.png` | PNG, RGBA, 512x512 (alpha) |
 | Hero | `repos/newbe/static/images/20200618-001.png` | PNG, palette with transparency, 601x441 (alpha) |
-| Thumbnail | `repos/web/public/theme-backgrounds/school-1.webp` | WebP, RGB, 1024x1024 |
-| Thumbnail | `repos/web/public/theme-backgrounds/space-travel-3.webp` | WebP, RGB, 1024x1024 |
+| Thumbnail | `repos/web/web/public/theme-backgrounds/school-1.webp` | WebP, RGB, 1024x1024 |
+| Thumbnail | `repos/web/web/public/theme-backgrounds/space-travel-3.webp` | WebP, RGB, 1024x1024 |
 | Thumbnail | `repos/newbe/static/images/20210717-001.jpg` | JPEG, 2527x1136 |
 | Thumbnail | `repos/newbe/static/images/20200302-004.jpg` | JPEG, 1210x1080 |
 | Thumbnail | `repos/newbe/static/images/20200302-002.jpg` | JPEG, 1634x1080 |
