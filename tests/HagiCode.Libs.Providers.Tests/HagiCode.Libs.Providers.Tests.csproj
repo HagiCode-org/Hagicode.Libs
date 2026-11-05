@@ -6,6 +6,8 @@
 
   <ItemGroup>
     <None Include="Fixtures\Pi\*.jsonl" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Fixtures\Pi\images\*.png" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Fixtures\Dsh\*.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Fixtures\Codebuddy\*" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Fixtures\Omp\*.jsonl" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Fixtures\Reasonix\v2.41.0\*.jsonl" CopyToOutputDirectory="PreserveNewest" />
