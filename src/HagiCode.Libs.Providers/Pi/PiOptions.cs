@@ -92,6 +92,13 @@ public sealed record PiOptions
     public IReadOnlyList<string> ExtraArguments { get; init; } = [];
 
     /// <summary>
+    /// Gets or sets the prepared chat images sent inline with the prompt. They travel in the <c>images</c> field of the RPC
+    /// <c>prompt</c> command, so a run that carries any image starts Pi in RPC mode, whether or not a question handler is set.
+    /// The default is empty, which keeps the run exactly as it was. The bytes are never written to disk or to the command line.
+    /// </summary>
+    public IReadOnlyList<PiImageAttachment> Images { get; init; } = [];
+
+    /// <summary>
     /// Gets or sets the callback that answers the interactive questions the agent asks through the bundled
     /// <c>ask_user_question</c> extension tool. It is <see langword="null" /> by default, which keeps the provider exactly as
     /// it was: Pi runs in JSON print mode with no extension.

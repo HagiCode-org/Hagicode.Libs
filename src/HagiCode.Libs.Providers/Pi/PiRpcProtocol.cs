@@ -41,12 +41,31 @@ internal static class PiRpcProtocol
         ["type"] = "get_state"
     });
 
-    public static string BuildPrompt(string message) => Serialize(new Dictionary<string, object?>
+    /// <summary>
+    /// Builds the <c>prompt</c> command. With no images the frame is exactly the text-only frame; with images it adds an
+    /// <c>images</c> array of <c>{ type: image, data: base64, mimeType }</c> entries in their given order.
+    /// </summary>
+    public static string BuildPrompt(string message, IReadOnlyList<PiImageAttachment>? images = null)
     {
-        ["id"] = PromptRequestId,
-        ["type"] = "prompt",
-        ["message"] = message
-    });
+        var record = new Dictionary<string, object?>
+        {
+            ["id"] = PromptRequestId,
+            ["type"] = "prompt",
+            ["message"] = message
+        };
+
+        if (images is { Count: > 0 })
+        {
+            record["images"] = images.Select(static image => new Dictionary<string, object?>
+            {
+                ["type"] = "image",
+                ["data"] = Convert.ToBase64String(image.Bytes),
+                ["mimeType"] = image.MediaType
+            }).ToArray();
+        }
+
+        return Serialize(record);
+    }
 
     public static string BuildAbort() => Serialize(new Dictionary<string, object?>
     {
@@ -107,13 +126,31 @@ internal static class PiRpcProtocol
             return content.GetString();
         }
 
-        if (content.ValueKind != JsonValueKind.Array || content.GetArrayLength() != 1)
+        if (content.ValueKind != JsonValueKind.Array)
         {
             return null;
         }
 
-        var block = content[0];
-        return ReadString(block, "type") == "text" ? ReadString(block, "text") : null;
+        // A prompt that carries images is echoed as its text block plus one image block per image. The image blocks carry no
+        // text, so they are skipped; any other block shape is not a plain text message.
+        string? text = null;
+        foreach (var block in content.EnumerateArray())
+        {
+            var blockType = ReadString(block, "type");
+            if (blockType == "image")
+            {
+                continue;
+            }
+
+            if (blockType != "text" || text is not null)
+            {
+                return null;
+            }
+
+            text = ReadString(block, "text");
+        }
+
+        return text;
     }
 
     /// <summary>

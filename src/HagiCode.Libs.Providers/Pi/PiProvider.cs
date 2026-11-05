@@ -76,8 +76,8 @@ public class PiProvider : ICliProvider<PiOptions>
 
         ValidateThinkingLevel(options.Thinking);
 
-        // A handler switches the run to RPC mode; without one (or with every tool disabled) nothing below differs from the
-        // JSON print path.
+        // A handler or an inline image switches the run to RPC mode; without either (or with every tool disabled and no image)
+        // nothing below differs from the JSON print path.
         var usesRpc = UsesRpc(options);
         if (options.UserInputHandler is not null)
         {
@@ -99,7 +99,7 @@ public class PiProvider : ICliProvider<PiOptions>
             {
                 ExecutablePath = executablePath,
                 Arguments = usesRpc
-                    ? BuildRpcCommandArguments(options, PiQuestionExtension.EnsureExtracted())
+                    ? BuildRpcCommandArguments(options, ResolveQuestionExtensionPath(options))
                     : BuildCommandArguments(options, prompt),
                 WorkingDirectory = ResolveWorkingDirectory(options),
                 EnvironmentVariables = BuildEnvironmentVariables(options, runtimeEnvironment),
@@ -144,6 +144,24 @@ public class PiProvider : ICliProvider<PiOptions>
                 "Running the request in JSON print mode without questions. Pi said: {PiOutput}",
                 PiUserInputRequest.QuestionToolName,
                 outcome.QuestionToolConflict);
+
+            if (options.Images.Count > 0)
+            {
+                // Print mode cannot carry the images, and a run must not drop them silently. The same run goes on in RPC mode
+                // without the question extension, so the images still reach the prompt.
+                _logger.LogWarning(
+                    "Pi run carries {ImageCount} inline image(s); continuing in RPC mode without the {ToolName} extension.",
+                    options.Images.Count,
+                    PiUserInputRequest.QuestionToolName);
+
+                startContext = startContext! with { Arguments = BuildRpcCommandArguments(options, questionExtensionPath: null) };
+                await foreach (var message in ExecuteRpcProcessAsync(startContext!, options, prompt, new PiRpcOutcome(), cancellationToken).ConfigureAwait(false))
+                {
+                    yield return message;
+                }
+
+                yield break;
+            }
 
             startContext = startContext! with { Arguments = BuildCommandArguments(options, prompt) };
         }
@@ -224,9 +242,12 @@ public class PiProvider : ICliProvider<PiOptions>
     /// Builds the command line of an RPC run: the same options as the JSON print command, the bundled question extension
     /// loaded with <c>-e</c>, the question tool added to a tool allowlist, and no prompt (it is sent as an RPC command).
     /// </summary>
-    internal virtual IReadOnlyList<string> BuildRpcCommandArguments(PiOptions options, string questionExtensionPath)
+    internal virtual IReadOnlyList<string> BuildRpcCommandArguments(PiOptions options, string? questionExtensionPath)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(questionExtensionPath);
+        if (questionExtensionPath is not null)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(questionExtensionPath);
+        }
 
         var arguments = new List<string>
         {
@@ -239,11 +260,24 @@ public class PiProvider : ICliProvider<PiOptions>
     }
 
     /// <summary>
-    /// Whether a request runs in RPC mode: it can be asked questions (a handler is set) and Pi has tools to ask them with.
+    /// Whether a request runs in RPC mode: it carries inline images, or it can be asked questions (a handler is set) and Pi has
+    /// tools to ask them with.
     /// </summary>
     internal static bool UsesRpc(PiOptions options)
     {
-        return options.UserInputHandler is not null && !options.DisableAllTools;
+        return options.Images.Count > 0
+               || (options.UserInputHandler is not null && !options.DisableAllTools);
+    }
+
+    /// <summary>
+    /// The bundled question extension is loaded only when a handler can answer its questions and Pi has tools to ask with.
+    /// Without a handler the extension would only ask questions nobody answers, so it stays out.
+    /// </summary>
+    private static string? ResolveQuestionExtensionPath(PiOptions options)
+    {
+        return options.UserInputHandler is not null && !options.DisableAllTools
+            ? PiQuestionExtension.EnsureExtracted()
+            : null;
     }
 
     private static void AddOptionArguments(List<string> arguments, PiOptions options, string? questionExtensionPath)
@@ -443,11 +477,12 @@ public class PiProvider : ICliProvider<PiOptions>
         var settings = new PiRpcSessionSettings(
             options.SessionId,
             ResolveWorkingDirectory(options),
-            options.UserInputHandler!,
+            options.UserInputHandler,
             options.QuestionTimeout,
             RpcExitTimeout,
             options.Steering,
-            options.SteerDeliveryTimeout);
+            options.SteerDeliveryTimeout,
+            options.Images);
         var session = new PiRpcSession(process, _eventMapper.CreateStreamingState(options.SessionId), settings, outcome);
 
         await foreach (var message in session.RunAsync(prompt, cancellationToken).ConfigureAwait(false))

@@ -1,0 +1,107 @@
+{
+  "providers": {
+    "omniroute": {
+      "baseUrl": "http://127.0.0.1:20128/v1",
+      "api": "openai-completions",
+      "compat": {
+        "supportsDeveloperRole": false
+      },
+      "models": [
+        {
+          "id": "auto/best-coding",
+          "name": "OmniRoute Auto · best-coding",
+          "reasoning": true,
+          "input": [
+            "text"
+          ],
+          "contextWindow": 200000,
+          "maxTokens": 32000
+        },
+        {
+          "id": "auto/coding",
+          "name": "OmniRoute Auto · coding",
+          "reasoning": true,
+          "input": [
+            "text"
+          ],
+          "contextWindow": 200000,
+          "maxTokens": 32000
+        },
+        {
+          "id": "auto/best-reasoning",
+          "name": "OmniRoute Auto · best-reasoning",
+          "reasoning": true,
+          "input": [
+            "text"
+          ],
+          "contextWindow": 200000,
+          "maxTokens": 32000
+        },
+        {
+          "id": "auto/fast",
+          "name": "OmniRoute Auto · fast",
+          "reasoning": true,
+          "input": [
+            "text"
+          ],
+          "contextWindow": 200000,
+          "maxTokens": 32000
+        },
+        {
+          "id": "auto/cheap",
+          "name": "OmniRoute Auto · cheap",
+          "reasoning": true,
+          "input": [
+            "text"
+          ],
+          "contextWindow": 200000,
+          "maxTokens": 32000
+        },
+        {
+          "id": "auto/best-vision",
+          "name": "OmniRoute Auto · best-vision",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "contextWindow": 200000,
+          "maxTokens": 32000
+        },
+        {
+          "id": "cc/claude-opus-5",
+          "name": "Claude Opus 5 (via OmniRoute)",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "contextWindow": 1000000,
+          "maxTokens": 32000
+        },
+        {
+          "id": "cc/claude-sonnet-5",
+          "name": "Claude Sonnet 5 (via OmniRoute)",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "contextWindow": 1000000,
+          "maxTokens": 32000
+        },
+        {
+          "id": "cc/claude-haiku-4-5-20251001",
+          "name": "Claude Haiku 4.5 (via OmniRoute)",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "contextWindow": 200000,
+          "maxTokens": 32000
+        }
+      ]
+    }
+  }
+}

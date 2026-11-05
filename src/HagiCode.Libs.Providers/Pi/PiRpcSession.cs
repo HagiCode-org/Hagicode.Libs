@@ -309,14 +309,16 @@ internal sealed class PiRpcOutcome
 /// <param name="ExitTimeout">How long Pi gets to exit after its input is closed before the process is stopped.</param>
 /// <param name="Steering">The steering channel of the run, attached while the prompt runs; <see langword="null" /> for no steering.</param>
 /// <param name="SteerDeliveryTimeout">How long a steer waits for Pi's reply. Defaults to <see cref="PiOptions.DefaultSteerDeliveryTimeout" />.</param>
+/// <param name="Images">The prepared images sent inline with the first prompt; empty for a text-only prompt.</param>
 internal sealed record PiRpcSessionSettings(
     string? RequestedSessionId,
     string? WorkingDirectory,
-    Func<PiUserInputRequest, CancellationToken, Task<PiUserInputResponse?>> UserInputHandler,
+    Func<PiUserInputRequest, CancellationToken, Task<PiUserInputResponse?>>? UserInputHandler,
     TimeSpan QuestionTimeout,
     TimeSpan ExitTimeout,
     PiRunSteering? Steering = null,
-    TimeSpan? SteerDeliveryTimeout = null);
+    TimeSpan? SteerDeliveryTimeout = null,
+    IReadOnlyList<PiImageAttachment>? Images = null);
 
 /// <summary>
 /// Drives one <c>pi --mode rpc</c> process: the <c>get_state</c> handshake, the prompt, the question dialogs and the end of
@@ -337,6 +339,9 @@ internal sealed class PiRpcSession
     private static readonly TimeSpan DialogDrainTimeout = TimeSpan.FromSeconds(2.5);
     private static readonly TimeSpan AbortWriteTimeout = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan DrainStopTimeout = TimeSpan.FromSeconds(1);
+
+    private static readonly Func<PiUserInputRequest, CancellationToken, Task<PiUserInputResponse?>> DeclineEveryQuestion =
+        static (_, _) => Task.FromResult<PiUserInputResponse?>(null);
 
     private readonly IPiRpcProcess _process;
     private readonly PiJsonEventMapper.StreamingState _eventState;
@@ -386,7 +391,12 @@ internal sealed class PiRpcSession
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         _prompt = prompt;
-        using var dialogs = new PiPendingDialogs(_settings.UserInputHandler, _settings.QuestionTimeout, _writer, cancellationToken);
+        // Without a handler no question is ever started (see HandleDialogAsync); the placeholder only satisfies the constructor.
+        using var dialogs = new PiPendingDialogs(
+            _settings.UserInputHandler ?? DeclineEveryQuestion,
+            _settings.QuestionTimeout,
+            _writer,
+            cancellationToken);
         _dialogs = dialogs;
         var ended = false;
 
@@ -577,7 +587,7 @@ internal sealed class PiRpcSession
 
         // The prompt follows the state reply, so the session message always precedes the run's own messages. A false result
         // means Pi is already gone; the read loop reports how it ended.
-        await _writer.TrySendAsync(PiRpcProtocol.BuildPrompt(_prompt), cancellationToken).ConfigureAwait(false);
+        await _writer.TrySendAsync(PiRpcProtocol.BuildPrompt(_prompt, _settings.Images), cancellationToken).ConfigureAwait(false);
         return LineResult.From(messages);
     }
 
@@ -619,7 +629,11 @@ internal sealed class PiRpcSession
         }
 
         var message = new CliMessage(PiUserInputRequest.MessageType, request);
-        if (method == "input" && PiUserInputRequest.TryFromCliMessage(message, out var question))
+
+        // A run without a handler has nobody to ask, so the bundled question is declined like any other dialog below.
+        if (_settings.UserInputHandler is not null
+            && method == "input"
+            && PiUserInputRequest.TryFromCliMessage(message, out var question))
         {
             // The handler starts before the caller sees the question, exactly as for Claude; its answer is written from its
             // own task, so the read loop never waits for a person.
