@@ -1032,6 +1032,8 @@ public sealed class CopilotUserInputTests
             return new DelegateDisposable(() => SessionEventReceived -= handler);
         }
 
+        public Task SendAsync(MessageOptions options, CancellationToken cancellationToken) => throw new NotSupportedException();
+
         public Task SendAndWaitAsync(MessageOptions options, TimeSpan timeout, CancellationToken cancellationToken)
         {
             return script(this, cancellationToken);

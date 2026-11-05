@@ -16,4 +16,5 @@ internal sealed record CopilotSdkRequest(
     IReadOnlyDictionary<string, string?> EnvironmentVariables,
     Func<CopilotUserInputRequest, CancellationToken, Task<CopilotUserInputResponse?>>? UserInputHandler = null,
     TimeSpan QuestionTimeout = default,
-    IReadOnlyList<CopilotImageAttachment>? Images = null);
+    IReadOnlyList<CopilotImageAttachment>? Images = null,
+    CopilotSteerTurn? Steering = null);

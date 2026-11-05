@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace HagiCode.Libs.Providers.Copilot;
 
 /// <summary>
@@ -134,11 +136,33 @@ public sealed record CopilotOptions
     public IReadOnlyList<CopilotImageAttachment> Images { get; init; } = [];
 
     /// <summary>
-    /// Formats the options without exposing <see cref="GitHubToken" />, <see cref="EnvironmentVariables" /> or image bytes.
+    /// Gets or sets the handle that injects follow-up text into this run's active turn. It is <see langword="null" /> by default,
+    /// and then the run is exactly as it was before steering existed. Create one handle per execution; see <see cref="CopilotRunSteering" />.
+    /// </summary>
+    /// <remarks>
+    /// The handle is not part of the serialized form of the options. The provider attaches it only while the execution is iterated.
+    /// </remarks>
+    [JsonIgnore]
+    public CopilotRunSteering? Steering { get; init; }
+
+    /// <summary>
+    /// Gets or sets how long an accepted steer may wait for the session to show that the running turn took it in. When the limit
+    /// passes, the steer is reported as not consumed. It must be positive. The default is <see cref="DefaultSteerDeliveryTimeout" />.
+    /// </summary>
+    public TimeSpan SteerDeliveryTimeout { get; init; } = DefaultSteerDeliveryTimeout;
+
+    /// <summary>
+    /// The default value of <see cref="SteerDeliveryTimeout" />. The run's own <see cref="IdleTimeout" /> normally ends a run that
+    /// stops producing events before this limit passes.
+    /// </summary>
+    public static readonly TimeSpan DefaultSteerDeliveryTimeout = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// Formats the options without exposing <see cref="GitHubToken" />, <see cref="EnvironmentVariables" />, image bytes or steer text.
     /// </summary>
     public override string ToString()
     {
-        return $"CopilotOptions {{ ExecutablePath = {ExecutablePath}, Model = {Model}, WorkingDirectory = {WorkingDirectory}, SessionId = {SessionId}, Timeout = {Timeout}, IdleTimeout = {IdleTimeout}, StartupTimeout = {StartupTimeout}, AuthSource = {AuthSource}, GitHubToken = {(string.IsNullOrEmpty(GitHubToken) ? "null" : "set")}, CliUrl = {CliUrl}, NoAskUser = {NoAskUser}, UserInputHandler = {(UserInputHandler is null ? "null" : "set")}, QuestionTimeout = {QuestionTimeout}, Images = {Images.Count} }}";
+        return $"CopilotOptions {{ ExecutablePath = {ExecutablePath}, Model = {Model}, WorkingDirectory = {WorkingDirectory}, SessionId = {SessionId}, Timeout = {Timeout}, IdleTimeout = {IdleTimeout}, StartupTimeout = {StartupTimeout}, AuthSource = {AuthSource}, GitHubToken = {(string.IsNullOrEmpty(GitHubToken) ? "null" : "set")}, CliUrl = {CliUrl}, NoAskUser = {NoAskUser}, UserInputHandler = {(UserInputHandler is null ? "null" : "set")}, QuestionTimeout = {QuestionTimeout}, Images = {Images.Count}, Steering = {(Steering is null ? "null" : "set")}, SteerDeliveryTimeout = {SteerDeliveryTimeout} }}";
     }
 }
 

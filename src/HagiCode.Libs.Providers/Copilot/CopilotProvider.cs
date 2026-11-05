@@ -69,25 +69,41 @@ public class CopilotProvider : ICliProvider<CopilotOptions>, ICopilotModelCapabi
                 "Unable to locate a Copilot executable. Install @github/copilot and ensure the CLI or a VS Code Copilot Chat shim is on PATH.",
                 "Copilot",
                 _executableResolver.ResolveProviderExecutable("Copilot", DefaultExecutableCandidates, runtimeEnvironment)));
-        var sdkRequest = BuildSdkRequest(options, prompt, executablePath, runtimeEnvironment);
+        var steering = options.Steering;
+        var steerTurn = steering is null ? null : new CopilotSteerTurn(steering, options.SteerDeliveryTimeout);
+        var sdkRequest = BuildSdkRequest(options, prompt, executablePath, runtimeEnvironment, steerTurn);
 
-        foreach (var diagnostic in CopilotCliCompatibility.BuildCliArgs(options).Diagnostics)
+        // The handle is attached only while this iterator runs. The finally detaches it however the run ends, so a steer
+        // sent later finds nothing to write to.
+        steering?.Attach(steerTurn!.SteerAsync);
+        try
         {
-            yield return CreateDiagnosticMessage(diagnostic);
-        }
-
-        await foreach (var eventData in _gateway.SendPromptAsync(sdkRequest, cancellationToken).ConfigureAwait(false))
-        {
-            var mappedMessage = MapEvent(eventData);
-            if (mappedMessage is null)
+            foreach (var diagnostic in CopilotCliCompatibility.BuildCliArgs(options).Diagnostics)
             {
-                continue;
+                yield return CreateDiagnosticMessage(diagnostic);
             }
 
-            yield return mappedMessage;
-            if (IsTerminalMessage(mappedMessage.Type))
+            await foreach (var eventData in _gateway.SendPromptAsync(sdkRequest, cancellationToken).ConfigureAwait(false))
             {
-                yield break;
+                var mappedMessage = MapEvent(eventData);
+                if (mappedMessage is null)
+                {
+                    continue;
+                }
+
+                yield return mappedMessage;
+                if (IsTerminalMessage(mappedMessage.Type))
+                {
+                    yield break;
+                }
+            }
+        }
+        finally
+        {
+            if (steering is not null)
+            {
+                steerTurn!.Close();
+                steering.Detach();
             }
         }
     }
@@ -148,7 +164,8 @@ public class CopilotProvider : ICliProvider<CopilotOptions>, ICopilotModelCapabi
         CopilotOptions options,
         string prompt,
         string executablePath,
-        IReadOnlyDictionary<string, string?> runtimeEnvironment)
+        IReadOnlyDictionary<string, string?> runtimeEnvironment,
+        CopilotSteerTurn? steering = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
@@ -174,7 +191,8 @@ public class CopilotProvider : ICliProvider<CopilotOptions>, ICopilotModelCapabi
             EnvironmentVariables: BuildEnvironmentVariables(options, runtimeEnvironment),
             UserInputHandler: options.UserInputHandler,
             QuestionTimeout: options.QuestionTimeout,
-            Images: options.Images);
+            Images: options.Images,
+            Steering: steering);
     }
 
     internal virtual IReadOnlyDictionary<string, string?> BuildEnvironmentVariables(
@@ -235,6 +253,11 @@ public class CopilotProvider : ICliProvider<CopilotOptions>, ICopilotModelCapabi
         if (options.IdleTimeout <= TimeSpan.Zero)
         {
             throw new InvalidOperationException("CopilotOptions.IdleTimeout must be greater than zero.");
+        }
+
+        if (options.SteerDeliveryTimeout <= TimeSpan.Zero)
+        {
+            throw new InvalidOperationException("CopilotOptions.SteerDeliveryTimeout must be greater than zero.");
         }
 
         if (options.QuestionTimeout != Timeout.InfiniteTimeSpan && options.QuestionTimeout <= TimeSpan.Zero)

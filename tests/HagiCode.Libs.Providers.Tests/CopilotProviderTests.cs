@@ -1484,6 +1484,8 @@ public sealed class CopilotProviderTests
 
         public IDisposable On(Action<SessionEvent> handler) => new NoopDisposable();
 
+        public Task SendAsync(MessageOptions options, CancellationToken cancellationToken) => throw new NotSupportedException();
+
         public Task SendAndWaitAsync(MessageOptions options, TimeSpan timeout, CancellationToken cancellationToken)
             => Task.CompletedTask;
 
@@ -1681,6 +1683,8 @@ public sealed class CopilotProviderTests
                 return new DelegateDisposable(() => SessionEventReceived -= handler);
             }
 
+            public Task SendAsync(MessageOptions options, CancellationToken cancellationToken) => throw new NotSupportedException();
+
             public async Task SendAndWaitAsync(MessageOptions options, TimeSpan timeout, CancellationToken cancellationToken)
             {
                 var context = new PromptExecutionContext(options.Prompt ?? string.Empty, observedEnvironment, EmitText);
@@ -1766,6 +1770,8 @@ public sealed class CopilotProviderTests
             {
                 return new NoopDisposable();
             }
+
+            public Task SendAsync(MessageOptions options, CancellationToken cancellationToken) => throw new NotSupportedException();
 
             public Task SendAndWaitAsync(MessageOptions options, TimeSpan timeout, CancellationToken cancellationToken)
             {

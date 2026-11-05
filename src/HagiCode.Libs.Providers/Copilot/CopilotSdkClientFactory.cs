@@ -18,6 +18,9 @@ internal interface ICopilotSdkSession : IAsyncDisposable
     IDisposable On(Action<SessionEvent> handler);
 
     Task SendAndWaitAsync(MessageOptions options, TimeSpan timeout, CancellationToken cancellationToken);
+
+    // Returns once the message is queued. The session's message id is not needed: steers are matched by their text.
+    Task SendAsync(MessageOptions options, CancellationToken cancellationToken);
 }
 
 internal interface ICopilotSdkClientFactory
@@ -76,6 +79,13 @@ internal sealed class GitHubCopilotSdkClientFactory : ICopilotSdkClientFactory
         {
             ArgumentNullException.ThrowIfNull(options);
             return session.SendAndWaitAsync(options, timeout, cancellationToken);
+        }
+
+        // The SDK call is made synchronously, before the first await, so the caller's gate orders the send.
+        public async Task SendAsync(MessageOptions options, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(options);
+            await session.SendAsync(options, cancellationToken).ConfigureAwait(false);
         }
 
         public ValueTask DisposeAsync() => session.DisposeAsync();

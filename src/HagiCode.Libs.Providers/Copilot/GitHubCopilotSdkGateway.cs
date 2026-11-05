@@ -640,6 +640,16 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
         };
     }
 
+    // A steer is text only, sent with the immediate mode into the running turn: no attachment, no abort, and no second turn.
+    private static MessageOptions BuildSteerMessageOptions(string text)
+    {
+        return new MessageOptions
+        {
+            Prompt = text,
+            Mode = "immediate"
+        };
+    }
+
     // Images travel only on the one send of a run, as inline blobs. The base64 string exists only for this call.
     private static List<UserMessageAttachment>? BuildAttachments(IReadOnlyList<CopilotImageAttachment>? images)
     {
@@ -700,6 +710,8 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
                         return false;
                     }
 
+                    // Unconfirmed steers are settled before the terminal event, so their outcomes come before the run ends.
+                    request.Steering?.Close();
                     RecordProgress();
                     writer.TryWrite(terminalEvent);
                     return true;
@@ -717,6 +729,12 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
 
                 using var subscription = session.On(evt =>
                 {
+                    // The echo of a steer is the user message with its text. The event is still dispatched below as before.
+                    if (evt is UserMessageEvent userMessage)
+                    {
+                        request.Steering?.ObserveUserMessage(userMessage.Data?.Content);
+                    }
+
                     var dispatchResult = DispatchSessionEvent(evt, sawDelta, pendingQuestions);
                     sawDelta = dispatchResult.SawDelta;
 
@@ -732,6 +750,8 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
 
                         if (normalizedEvent.Type == CopilotSdkStreamEventType.Error)
                         {
+                            // Unconfirmed steers are settled before the error ends the run.
+                            request.Steering?.Close();
                             Interlocked.Exchange(ref terminalEventWritten, 1);
                         }
 
@@ -742,10 +762,18 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
 
                 // With a user-input handler the SDK waits without a limit; the request deadline is enforced by the watchdog so
                 // that time spent waiting for an answer does not count against it.
-                var sendTask = session.SendAndWaitAsync(
+                Func<Task> startTurn = () => session.SendAndWaitAsync(
                     BuildMessageOptions(request),
                     pendingQuestions is null ? request.Timeout : Timeout.InfiniteTimeSpan,
                     requestCancellationTokenSource.Token);
+
+                // A steer is accepted only through the steering run, which starts the turn under its own gate and is closed before
+                // the terminal event. Without steering the turn starts exactly as before.
+                var sendTask = request.Steering is { } steering
+                    ? steering.Start(
+                        (text, steerCancellation) => session.SendAsync(BuildSteerMessageOptions(text), steerCancellation),
+                        startTurn)
+                    : startTurn();
 
                 var idleWatchdogTask = StartIdleWatchdogAsync(
                     request,
@@ -791,6 +819,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
                 }
                 finally
                 {
+                    request.Steering?.Close();
                     requestCancellationTokenSource.Cancel();
                     idleWatchdogCancellationTokenSource.Cancel();
 

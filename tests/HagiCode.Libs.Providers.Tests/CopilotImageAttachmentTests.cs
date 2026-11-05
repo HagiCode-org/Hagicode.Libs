@@ -472,6 +472,8 @@ public sealed class CopilotImageAttachmentTests
 
             public IDisposable On(Action<SessionEvent> handler) => new NoopDisposable();
 
+            public Task SendAsync(MessageOptions options, CancellationToken cancellationToken) => throw new NotSupportedException();
+
             public Task SendAndWaitAsync(MessageOptions options, TimeSpan timeout, CancellationToken cancellationToken)
             {
                 owner.SentMessages.Add(options);
