@@ -6,6 +6,11 @@ namespace HagiCode.Libs.Providers.Codebuddy;
 
 internal static class CodebuddyAcpMessageMapper
 {
+    private const string PermissionDeniedMarker = "Permission denied for tool(s)";
+
+    private const string PermissionDeniedMessage =
+        "图片工具权限被拒绝，图片没有被读取。 (Permission for the image tool was denied, so the image was not read.)";
+
     public static CliMessage CreateSessionLifecycleMessage(AcpSessionHandle sessionHandle)
     {
         return new CliMessage(
@@ -22,6 +27,22 @@ internal static class CodebuddyAcpMessageMapper
         var stopReason = TryGetPromptResultStopReason(promptResult);
         var messageType = IsFailureStopReason(stopReason) ? "terminal.failed" : "terminal.completed";
 
+        if (IsPermissionDeniedPromptResult(promptResult))
+        {
+            // The image tool was refused, so the agent never read the image. Say so instead of a bare cancellation.
+            return new CliMessage(
+                "terminal.failed",
+                JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+                {
+                    ["type"] = "terminal.failed",
+                    ["session_id"] = sessionId,
+                    ["stop_reason"] = stopReason,
+                    ["text"] = PermissionDeniedMessage,
+                    ["message"] = PermissionDeniedMessage,
+                    ["result"] = promptResult
+                }));
+        }
+
         return new CliMessage(
             messageType,
             JsonSerializer.SerializeToElement(new Dictionary<string, object?>
@@ -32,6 +53,44 @@ internal static class CodebuddyAcpMessageMapper
                 ["text"] = TryExtractPromptResultText(promptResult, out var text) ? text : null,
                 ["result"] = promptResult
             }));
+    }
+
+    /// <summary>
+    /// Builds the delivery result for one execution with image attachments. It names each image by id, media type, byte count
+    /// and outcome. It carries no image bytes and no base64 data.
+    /// </summary>
+    public static CliMessage CreateImageDeliveryMessage(string sessionId, IReadOnlyList<CodebuddyImageDeliveryItem> images)
+    {
+        return new CliMessage(
+            "image.delivery",
+            JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+            {
+                ["type"] = "image.delivery",
+                ["session_id"] = sessionId,
+                ["images"] = images.Select(static image => new
+                {
+                    image_id = image.ImageId,
+                    media_type = image.MediaType,
+                    byte_count = image.ByteCount,
+                    delivery = image.Inlined ? "inline" : "manifest",
+                    reason = image.Reason
+                }).ToArray()
+            }));
+    }
+
+    /// <summary>
+    /// Whether a prompt result is a cancellation caused by a refused permission request (CodeBuddy reports the refusal in
+    /// <c>_meta["codebuddy.ai/errorMessage"]</c>). A plain cancellation is not one.
+    /// </summary>
+    public static bool IsPermissionDeniedPromptResult(JsonElement promptResult)
+    {
+        if (!string.Equals(TryGetPromptResultStopReason(promptResult), "cancelled", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var errorMessage = TryGetPromptErrorMessage(promptResult);
+        return errorMessage?.Contains(PermissionDeniedMarker, StringComparison.OrdinalIgnoreCase) == true;
     }
 
     public static CliMessage CreateAssistantMessage(string sessionId, string? text, JsonElement? rawPayload = null)
@@ -389,6 +448,25 @@ internal static class CodebuddyAcpMessageMapper
         }
 
         return parts.Count == 0 ? null : string.Concat(parts);
+    }
+
+    private static string? TryGetPromptErrorMessage(JsonElement promptResult)
+    {
+        if (promptResult.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        if (promptResult.TryGetProperty("_meta", out var meta) &&
+            meta.ValueKind == JsonValueKind.Object &&
+            TryGetString(meta, "codebuddy.ai/errorMessage") is { } errorMessage)
+        {
+            return errorMessage;
+        }
+
+        return promptResult.TryGetProperty("result", out var result)
+            ? TryGetPromptErrorMessage(result)
+            : null;
     }
 
     private static string? TryGetPromptResultStopReason(JsonElement promptResult)

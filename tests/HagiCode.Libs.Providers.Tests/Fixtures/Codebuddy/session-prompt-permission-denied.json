@@ -1,0 +1,20 @@
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "result": {
+    "stopReason": "cancelled",
+    "userMessageId": "01a1aa87-e158-7294-986b-004cc1e37aaf",
+    "_meta": {
+      "timestamp": "2026-11-05T07:06:39.612Z",
+      "codebuddy.ai/requestId": "01a1aa87e15775d499779039f946dd26",
+      "codebuddy.ai/conversationRequestId": "01a1aa87e15775d499779039f946dd26",
+      "codebuddy.ai/traceId": "de380dc004d3c6b592eb0e900a0d6d38",
+      "codebuddy.ai/errorMessage": "Permission denied for tool(s): unknown",
+      "codebuddy.ai/finishReason": "tool_calls",
+      "traceparent": "00-de380dc004d3c6b592eb0e900a0d6d38-be50a6a980320473-01",
+      "baggage": "codebuddy.session_id=01a1aa87-e0a1-709d-a76f-dbb7746cc786,codebuddy.conversation_request_id=01a1aa87e15775d499779039f946dd26",
+      "codebuddy.ai/traceparent": "00-de380dc004d3c6b592eb0e900a0d6d38-be50a6a980320473-01",
+      "codebuddy.ai/outcome": "PERMISSION_DENIED"
+    }
+  }
+}

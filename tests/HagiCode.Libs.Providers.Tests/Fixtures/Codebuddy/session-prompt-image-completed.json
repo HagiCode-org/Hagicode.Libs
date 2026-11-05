@@ -1,0 +1,19 @@
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "result": {
+    "stopReason": "end_turn",
+    "userMessageId": "01a1aa87-e150-70fa-8370-1022f1bfb32b",
+    "_meta": {
+      "timestamp": "2026-11-05T07:06:44.056Z",
+      "codebuddy.ai/requestId": "01a1aa87e14e7bf2bfc501afc677667b",
+      "codebuddy.ai/conversationRequestId": "01a1aa87e14e7bf2bfc501afc677667b",
+      "codebuddy.ai/traceId": "7b5f1d8f06681efc64f77a33c6f03548",
+      "codebuddy.ai/finishReason": "stop",
+      "traceparent": "00-7b5f1d8f06681efc64f77a33c6f03548-bfe802fd0369d151-01",
+      "baggage": "codebuddy.session_id=01a1aa87-e0b1-7cf4-869b-dc52195a1bc4,codebuddy.conversation_request_id=01a1aa87e14e7bf2bfc501afc677667b",
+      "codebuddy.ai/traceparent": "00-7b5f1d8f06681efc64f77a33c6f03548-bfe802fd0369d151-01",
+      "codebuddy.ai/outcome": "SUCCESS"
+    }
+  }
+}

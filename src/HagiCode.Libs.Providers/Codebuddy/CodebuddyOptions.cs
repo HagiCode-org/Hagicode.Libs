@@ -73,4 +73,17 @@ public sealed record CodebuddyOptions
     /// The default value of <see cref="SteerDeliveryTimeout" />.
     /// </summary>
     public static readonly TimeSpan DefaultSteerDeliveryTimeout = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Gets or sets the chat images for this execution. Each image is sent as an inline image block when the connection
+    /// advertises image input and the image passes validation; otherwise its manifest line is appended to the prompt text.
+    /// The list defaults to empty, and an execution with no attachments sends the same prompt frame as before.
+    /// </summary>
+    public IReadOnlyList<CodebuddyImageAttachment> ImageAttachments { get; init; } = [];
+
+    /// <summary>
+    /// Gets or sets whether the automatic permission answer prefers a one-time allowance (<c>allow_once</c>) over a permanent one.
+    /// Set it for an execution that reads images through a permission-gated tool. It applies only to this execution.
+    /// </summary>
+    public bool PreferOneTimePermission { get; init; }
 }

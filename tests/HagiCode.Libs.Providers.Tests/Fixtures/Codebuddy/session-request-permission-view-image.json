@@ -1,0 +1,41 @@
+{
+  "jsonrpc": "2.0",
+  "id": 0,
+  "method": "session/request_permission",
+  "params": {
+    "sessionId": "01a1aa87-e0b1-7cf4-869b-dc52195a1bc4",
+    "options": [
+      {
+        "kind": "allow_always",
+        "name": "Always Allow",
+        "optionId": "allow_always"
+      },
+      {
+        "kind": "allow_once",
+        "name": "Allow",
+        "optionId": "allow"
+      },
+      {
+        "kind": "reject_once",
+        "name": "Reject",
+        "optionId": "reject"
+      }
+    ],
+    "toolCall": {
+      "toolCallId": "chatcmpl-tool-ba0ff5b5f981e876",
+      "rawInput": {
+        "image_path": "/home/newbe36524/.codebuddy/blobs/7c/7c66c11a707b05f39a85eed4c42672d505902aea782fcf821db332e14f547246.png",
+        "query": "Describe this image in detail: what is shown, any text, layout, and visual elements."
+      },
+      "_meta": {
+        "codebuddy.ai/toolName": "ViewImage"
+      }
+    },
+    "_meta": {
+      "codebuddy.ai/requestId": "01a1aa87-f345-7736-a16c-6422c4f2ae64",
+      "traceparent": "00-7b5f1d8f06681efc64f77a33c6f03548-bfe802fd0369d151-01",
+      "baggage": "codebuddy.session_id=01a1aa87-e0b1-7cf4-869b-dc52195a1bc4,codebuddy.conversation_request_id=01a1aa87e14e7bf2bfc501afc677667b",
+      "codebuddy.ai/traceparent": "00-7b5f1d8f06681efc64f77a33c6f03548-bfe802fd0369d151-01"
+    }
+  }
+}

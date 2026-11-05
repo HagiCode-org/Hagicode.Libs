@@ -184,6 +184,20 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
     }
 
     /// <summary>
+    /// Creates the ACP session client for one execution, with the permission preference of that execution. Without the
+    /// preference this is <see cref="CreateSessionClient(ProcessStartContext)" />, so overrides of that method still apply.
+    /// </summary>
+    /// <param name="startContext">The subprocess start context.</param>
+    /// <param name="preferOneTimePermission">Whether the automatic permission answer prefers a one-time allowance.</param>
+    /// <returns>The ACP session client.</returns>
+    protected virtual IAcpSessionClient CreateSessionClient(ProcessStartContext startContext, bool preferOneTimePermission)
+    {
+        return preferOneTimePermission
+            ? new AcpSessionClient(CreateAcpTransport(startContext), preferOneTimePermission: true)
+            : CreateSessionClient(startContext);
+    }
+
+    /// <summary>
     /// Creates the raw ACP transport used by the session client.
     /// </summary>
     /// <param name="startContext">The subprocess start context.</param>
@@ -203,12 +217,15 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
         CodebuddySteerTracker? steerTracker = null;
         try
         {
-            await using var sessionClient = CreateSessionClient(startContext);
+            await using var sessionClient = CreateSessionClient(startContext, options.PreferOneTimePermission);
             using var startupCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             startupCts.CancelAfter(options.StartupTimeout ?? DefaultStartupTimeout);
 
             await sessionClient.ConnectAsync(startupCts.Token).ConfigureAwait(false);
-            await sessionClient.InitializeAsync(startupCts.Token).ConfigureAwait(false);
+            var initializeResult = await sessionClient.InitializeAsync(startupCts.Token).ConfigureAwait(false);
+            // The image capability belongs to this connection and this execution only; it is never stored on the provider.
+            var acceptsInlineImages = CodebuddyImagePromptPlanner.ReadInlineImageCapability(initializeResult);
+            var imagePlan = CodebuddyImagePromptPlanner.Plan(prompt, options.ImageAttachments, acceptsInlineImages);
             var sessionHandle = await sessionClient.StartSessionAsync(
                 workingDirectory,
                 options.SessionId,
@@ -229,12 +246,16 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
             try
             {
                 yield return CodebuddyAcpMessageMapper.CreateSessionLifecycleMessage(sessionHandle);
+                if (imagePlan.Deliveries.Count > 0)
+                {
+                    yield return CodebuddyAcpMessageMapper.CreateImageDeliveryMessage(sessionHandle.SessionId, imagePlan.Deliveries);
+                }
 
                 await foreach (var message in StreamPromptAttemptAsync(
                                    sessionClient,
                                    sessionHandle.SessionId,
                                    sessionHandle.IsResumed,
-                                   prompt,
+                                   imagePlan,
                                    steerTracker,
                                    cancellationToken).ConfigureAwait(false))
                 {
@@ -635,11 +656,14 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
         IAcpSessionClient sessionClient,
         string sessionId,
         bool isResumedSession,
-        string prompt,
+        CodebuddyImagePromptPlan plan,
         CodebuddySteerTracker? steerTracker,
         CancellationToken cancellationToken)
     {
-        var promptTask = sessionClient.SendPromptAsync(sessionId, prompt, cancellationToken);
+        // With no inline image the text-only overload sends the same frame as before image support existed.
+        var promptTask = plan.InlineImages.Count == 0
+            ? sessionClient.SendPromptAsync(sessionId, plan.Text, cancellationToken)
+            : sessionClient.SendPromptAsync(sessionId, plan.Text, plan.InlineImages, cancellationToken);
         return StreamPromptMessagesAsync(sessionClient, sessionId, promptTask, isResumedSession, steerTracker, cancellationToken);
     }
 
@@ -649,6 +673,13 @@ public class CodebuddyProvider : ICliProvider<CodebuddyOptions>
         bool sawAssistantText,
         IAcpSessionClient sessionClient)
     {
+        if (CodebuddyAcpMessageMapper.IsPermissionDeniedPromptResult(promptResult))
+        {
+            // The refusal is the explanation; a stderr diagnostic must not replace it.
+            yield return CodebuddyAcpMessageMapper.CreateTerminalMessage(sessionId, promptResult);
+            yield break;
+        }
+
         if (!sawAssistantText &&
             CodebuddyAcpMessageMapper.TryExtractPromptResultText(promptResult, out var fallbackText) &&
             !CodebuddyAcpMessageMapper.IsFailurePromptResult(promptResult))
