@@ -65,6 +65,30 @@ public interface IAcpSessionClient : IAsyncDisposable
     Task<JsonElement> SendPromptAsync(string sessionId, string prompt, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Sends one prompt through ACP with inline image blocks after the text block.
+    /// </summary>
+    /// <param name="sessionId">The target session identifier.</param>
+    /// <param name="prompt">The prompt text.</param>
+    /// <param name="images">The inline images, sent in order. An empty list sends the same frame as the text-only overload.</param>
+    /// <param name="cancellationToken">Cancels the prompt request.</param>
+    /// <returns>The raw prompt result.</returns>
+    /// <exception cref="NotSupportedException">Thrown by implementations without inline image support when <paramref name="images"/> is not empty.</exception>
+    Task<JsonElement> SendPromptAsync(
+        string sessionId,
+        string prompt,
+        IReadOnlyList<AcpImageBlock> images,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(images);
+        if (images.Count == 0)
+        {
+            return SendPromptAsync(sessionId, prompt, cancellationToken);
+        }
+
+        throw new NotSupportedException($"{GetType().Name} does not support inline image prompts.");
+    }
+
+    /// <summary>
     /// Streams inbound ACP notifications.
     /// </summary>
     /// <param name="cancellationToken">Cancels notification enumeration.</param>

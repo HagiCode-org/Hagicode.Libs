@@ -27,13 +27,18 @@ public sealed class AcpSessionClient : IAcpSessionClient
     /// Optional handler that may decide each <c>session/request_permission</c> request before the default answer applies. It is
     /// passed to the underlying <see cref="AcpJsonRpcClient" />; <see langword="null" /> keeps the default answer for every request.
     /// </param>
+    /// <param name="preferOneTimePermission">
+    /// When <see langword="true" />, the default permission answer prefers a one-time allowance over a permanent one. It applies
+    /// only to this client, so other ACP providers keep their answers.
+    /// </param>
     public AcpSessionClient(
         IAcpTransport transport,
         string? agentNameHint = null,
-        AcpPermissionRequestHandler? permissionRequestHandler = null)
+        AcpPermissionRequestHandler? permissionRequestHandler = null,
+        bool preferOneTimePermission = false)
     {
         ArgumentNullException.ThrowIfNull(transport);
-        _rpcClient = new AcpJsonRpcClient(transport, permissionRequestHandler);
+        _rpcClient = new AcpJsonRpcClient(transport, permissionRequestHandler, preferOneTimePermission);
         _agentNameHint = Process.ArgumentValueNormalizer.NormalizeOptionalValue(agentNameHint);
         _diagnosticsSource = transport as IAcpTransportDiagnosticsSource;
     }
@@ -208,24 +213,47 @@ public sealed class AcpSessionClient : IAcpSessionClient
     }
 
     /// <inheritdoc />
-    public async Task<JsonElement> SendPromptAsync(string sessionId, string prompt, CancellationToken cancellationToken = default)
+    public Task<JsonElement> SendPromptAsync(string sessionId, string prompt, CancellationToken cancellationToken = default)
+    {
+        return SendPromptAsync(sessionId, prompt, Array.Empty<AcpImageBlock>(), cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<JsonElement> SendPromptAsync(
+        string sessionId,
+        string prompt,
+        IReadOnlyList<AcpImageBlock> images,
+        CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
+        ArgumentNullException.ThrowIfNull(images);
+
+        // The text block always comes first; image blocks follow in the order given.
+        var promptBlocks = new List<object>(images.Count + 1)
+        {
+            new
+            {
+                type = "text",
+                text = prompt
+            }
+        };
+        foreach (var image in images)
+        {
+            promptBlocks.Add(new
+            {
+                type = "image",
+                data = image.Base64Data,
+                mimeType = image.MimeType
+            });
+        }
 
         var promptResult = await _rpcClient.InvokeAsync<JsonElement>(
             "session/prompt",
             new
             {
                 sessionId,
-                prompt = new object[]
-                {
-                    new
-                    {
-                        type = "text",
-                        text = prompt
-                    }
-                }
+                prompt = promptBlocks
             },
             cancellationToken).ConfigureAwait(false);
 

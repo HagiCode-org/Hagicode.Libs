@@ -184,6 +184,106 @@ public sealed class AcpJsonRpcClientPermissionTests
         transport.Lines.ShouldBeEmpty();
     }
 
+    // The option shape CodeBuddy sends for a view-image tool call (probe 1.4): the one-time allowance is optionId "allow", kind "allow_once".
+    private const string CodebuddyPermissionOptions = """
+        [{"kind":"allow_always","name":"Always Allow","optionId":"allow_always"},{"kind":"allow_once","name":"Allow","optionId":"allow"},{"kind":"reject_once","name":"Reject","optionId":"reject"}]
+        """;
+
+    [Test]
+    public async Task Without_the_preference_both_allowances_offered_still_select_allow_always()
+    {
+        var transport = new PermissionTestTransport();
+        await using var client = new AcpJsonRpcClient(transport);
+        await client.ConnectAsync();
+
+        transport.Deliver(PermissionRequestWithOptions(21, CodebuddyPermissionOptions));
+
+        (await transport.WaitForLineAsync(0)).ShouldBe(
+            """{"jsonrpc":"2.0","id":21,"result":{"outcome":{"outcome":"selected","optionId":"allow_always"}}}""");
+    }
+
+    [Test]
+    public async Task With_the_preference_both_allowances_offered_select_allow_once_matched_by_kind()
+    {
+        var transport = new PermissionTestTransport();
+        await using var client = new AcpJsonRpcClient(transport, preferOneTimePermission: true);
+        await client.ConnectAsync();
+
+        transport.Deliver(PermissionRequestWithOptions(22, CodebuddyPermissionOptions));
+
+        (await transport.WaitForLineAsync(0)).ShouldBe(
+            """{"jsonrpc":"2.0","id":22,"result":{"outcome":{"outcome":"selected","optionId":"allow"}}}""");
+    }
+
+    [Test]
+    public async Task With_the_preference_and_only_a_permanent_allowance_select_it_rather_than_the_first_listed_option()
+    {
+        var transport = new PermissionTestTransport();
+        await using var client = new AcpJsonRpcClient(transport, preferOneTimePermission: true);
+        await client.ConnectAsync();
+
+        transport.Deliver(PermissionRequestWithOptions(23,
+            """[{"kind":"reject_once","name":"Reject","optionId":"reject"},{"kind":"allow_always","name":"Always Allow","optionId":"allow_always"}]"""));
+
+        (await transport.WaitForLineAsync(0)).ShouldBe(
+            """{"jsonrpc":"2.0","id":23,"result":{"outcome":{"outcome":"selected","optionId":"allow_always"}}}""");
+    }
+
+    [Test]
+    public async Task With_or_without_the_preference_a_request_with_neither_allowance_selects_the_first_option()
+    {
+        var options = """[{"kind":"custom","name":"Custom","optionId":"opt-x"},{"kind":"reject_once","name":"Reject","optionId":"reject"}]""";
+
+        foreach (var preferOneTimePermission in new[] { false, true })
+        {
+            var transport = new PermissionTestTransport();
+            await using var client = new AcpJsonRpcClient(transport, preferOneTimePermission: preferOneTimePermission);
+            await client.ConnectAsync();
+
+            transport.Deliver(PermissionRequestWithOptions(24, options));
+
+            (await transport.WaitForLineAsync(0)).ShouldBe(
+                """{"jsonrpc":"2.0","id":24,"result":{"outcome":{"outcome":"selected","optionId":"opt-x"}}}""");
+        }
+    }
+
+    [Test]
+    public async Task Without_options_the_answer_falls_back_to_allow_with_or_without_the_preference()
+    {
+        foreach (var preferOneTimePermission in new[] { false, true })
+        {
+            var transport = new PermissionTestTransport();
+            await using var client = new AcpJsonRpcClient(transport, preferOneTimePermission: preferOneTimePermission);
+            await client.ConnectAsync();
+
+            transport.Deliver(PermissionRequestWithOptions(25, null));
+
+            (await transport.WaitForLineAsync(0)).ShouldBe(
+                """{"jsonrpc":"2.0","id":25,"result":{"outcome":{"outcome":"selected","optionId":"allow"}}}""");
+        }
+    }
+
+    [Test]
+    public async Task The_preference_applies_to_the_default_answer_of_an_agent_session_client_built_with_it()
+    {
+        var transport = new PermissionTestTransport();
+        await using var client = new AcpSessionClient(transport, preferOneTimePermission: true);
+        await client.ConnectAsync();
+
+        transport.Deliver(PermissionRequestWithOptions(26, CodebuddyPermissionOptions));
+
+        (await transport.WaitForLineAsync(0)).ShouldBe(
+            """{"jsonrpc":"2.0","id":26,"result":{"outcome":{"outcome":"selected","optionId":"allow"}}}""");
+    }
+
+    private static string PermissionRequestWithOptions(object id, string? optionsJson)
+    {
+        var parameters = optionsJson is null
+            ? """{"sessionId":"session-1","toolCall":{"toolCallId":"call-1"}}"""
+            : """{"sessionId":"session-1","toolCall":{"toolCallId":"call-1"},"options":""" + optionsJson.Trim() + "}";
+        return "{\"jsonrpc\":\"2.0\",\"id\":" + JsonSerializer.Serialize(id) + ",\"method\":\"session/request_permission\",\"params\":" + parameters + "}";
+    }
+
     private static string PermissionRequest(object id)
     {
         return "{\"jsonrpc\":\"2.0\",\"id\":" + JsonSerializer.Serialize(id) + ",\"method\":\"session/request_permission\",\"params\":" +

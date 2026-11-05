@@ -16,6 +16,7 @@ public sealed class AcpJsonRpcClient : IAsyncDisposable
     private readonly JsonSerializerOptions _serializerOptions = new(JsonSerializerDefaults.Web);
     private readonly CancellationTokenSource _disposeCts = new();
     private readonly AcpPermissionRequestHandler? _permissionRequestHandler;
+    private readonly bool _preferOneTimePermission;
     private readonly SemaphoreSlim _writeGate = new(1, 1);
     private readonly ConcurrentDictionary<Task, byte> _inboundRequests = new();
 
@@ -39,10 +40,18 @@ public sealed class AcpJsonRpcClient : IAsyncDisposable
     /// and its token is cancelled when the client is disposed. A <see langword="null" /> decision, or no handler, keeps the
     /// default answer.
     /// </param>
-    public AcpJsonRpcClient(IAcpTransport transport, AcpPermissionRequestHandler? permissionRequestHandler = null)
+    /// <param name="preferOneTimePermission">
+    /// When <see langword="true" />, the default answer picks a one-time allowance (<c>allow_once</c>) before a permanent one.
+    /// It only applies to this client; <see langword="false" /> keeps the default order of <c>allow_always</c> first.
+    /// </param>
+    public AcpJsonRpcClient(
+        IAcpTransport transport,
+        AcpPermissionRequestHandler? permissionRequestHandler = null,
+        bool preferOneTimePermission = false)
     {
         _transport = transport ?? throw new ArgumentNullException(nameof(transport));
         _permissionRequestHandler = permissionRequestHandler;
+        _preferOneTimePermission = preferOneTimePermission;
     }
 
     /// <summary>
@@ -345,8 +354,8 @@ public sealed class AcpJsonRpcClient : IAsyncDisposable
             {
                 "fs/read_text_file" => CreateReadTextFileResponse(parameters),
                 "fs/write_text_file" => await CreateWriteTextFileResponseAsync(parameters, cancellationToken).ConfigureAwait(false),
-                "session/request_permission" when _permissionRequestHandler is null => CreateRequestPermissionResponse(parameters),
-                "session/request_permission" => await DecideRequestPermissionAsync(_permissionRequestHandler!, parameters, cancellationToken).ConfigureAwait(false),
+                "session/request_permission" when _permissionRequestHandler is null => CreateRequestPermissionResponse(parameters, _preferOneTimePermission),
+                "session/request_permission" => await DecideRequestPermissionAsync(_permissionRequestHandler!, parameters, _preferOneTimePermission, cancellationToken).ConfigureAwait(false),
                 _ => throw new InvalidOperationException($"ACP inbound method '{method}' is not supported.")
             };
 
@@ -376,6 +385,7 @@ public sealed class AcpJsonRpcClient : IAsyncDisposable
     private static async Task<JsonElement> DecideRequestPermissionAsync(
         AcpPermissionRequestHandler handler,
         JsonElement parameters,
+        bool preferOneTimePermission,
         CancellationToken cancellationToken)
     {
         var request = AcpPermissionRequest.FromParameters(parameters);
@@ -390,7 +400,7 @@ public sealed class AcpJsonRpcClient : IAsyncDisposable
         var decision = await handlerTask.WaitAsync(cancellationToken).ConfigureAwait(false);
         if (decision is null)
         {
-            return CreateRequestPermissionResponse(parameters);
+            return CreateRequestPermissionResponse(parameters, preferOneTimePermission);
         }
 
         return decision.SelectedOptionId is { } optionId
@@ -491,9 +501,9 @@ public sealed class AcpJsonRpcClient : IAsyncDisposable
         return JsonSerializer.SerializeToElement(new { });
     }
 
-    private static JsonElement CreateRequestPermissionResponse(JsonElement parameters)
+    private static JsonElement CreateRequestPermissionResponse(JsonElement parameters, bool preferOneTimePermission)
     {
-        var selectedOptionId = ResolvePermissionOptionId(parameters);
+        var selectedOptionId = ResolvePermissionOptionId(parameters, preferOneTimePermission);
         return JsonSerializer.SerializeToElement(new
         {
             outcome = new
@@ -504,7 +514,12 @@ public sealed class AcpJsonRpcClient : IAsyncDisposable
         });
     }
 
-    private static string ResolvePermissionOptionId(JsonElement parameters)
+    /// <summary>
+    /// Picks the option id for the default permission answer. Matching is by <c>kind</c>, never by <c>optionId</c>, because
+    /// CodeBuddy names its one-time allowance <c>allow</c>. Default order: <c>allow_always</c>, <c>allow_once</c>, first option.
+    /// With <paramref name="preferOneTimePermission" />: <c>allow_once</c>, <c>allow_always</c>, first option.
+    /// </summary>
+    private static string ResolvePermissionOptionId(JsonElement parameters, bool preferOneTimePermission)
     {
         if (parameters.ValueKind != JsonValueKind.Object ||
             !parameters.TryGetProperty("options", out var optionsElement) ||
@@ -514,6 +529,7 @@ public sealed class AcpJsonRpcClient : IAsyncDisposable
         }
 
         string? allowOnceOptionId = null;
+        string? allowAlwaysOptionId = null;
         string? firstOptionId = null;
         foreach (var option in optionsElement.EnumerateArray())
         {
@@ -532,7 +548,12 @@ public sealed class AcpJsonRpcClient : IAsyncDisposable
             var kind = TryGetOptionalString(option, "kind");
             if (string.Equals(kind, "allow_always", StringComparison.OrdinalIgnoreCase))
             {
-                return optionId;
+                if (!preferOneTimePermission)
+                {
+                    return optionId;
+                }
+
+                allowAlwaysOptionId ??= optionId;
             }
 
             if (allowOnceOptionId is null &&
@@ -542,7 +563,9 @@ public sealed class AcpJsonRpcClient : IAsyncDisposable
             }
         }
 
-        return allowOnceOptionId ?? firstOptionId ?? "allow";
+        return preferOneTimePermission
+            ? allowOnceOptionId ?? allowAlwaysOptionId ?? firstOptionId ?? "allow"
+            : allowOnceOptionId ?? firstOptionId ?? "allow";
     }
 
     private static string? TryGetOptionalString(JsonElement element, string propertyName)
