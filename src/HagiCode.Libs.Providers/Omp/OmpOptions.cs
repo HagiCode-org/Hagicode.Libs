@@ -92,7 +92,9 @@ public sealed record OmpOptions
     /// mode.
     /// Setting it (and leaving <see cref="DisableAllTools" /> off) starts OMP with <c>--mode rpc-ui</c>, enables OMP's
     /// structured ask dialog before the prompt is sent, and makes the provider answer each <c>ask</c> request with what the
-    /// handler returns. An OMP build that rejects the ask dialog runs the request in JSON print mode instead.
+    /// handler returns. An OMP build that rejects the ask dialog runs the request in JSON print mode instead, unless the
+    /// request carries <see cref="Images" />: such a request is retried in <c>rpc-ui</c> mode without the ask dialog, so the
+    /// images are not lost.
     /// </summary>
     /// <remarks>
     /// The handler runs as a background task per question, so the stream keeps flowing while a user thinks, and it receives a
@@ -105,6 +107,13 @@ public sealed record OmpOptions
     /// <see cref="OmpUserInputRequest.TryFromCliMessage" />).
     /// </remarks>
     public Func<OmpUserInputRequest, CancellationToken, Task<OmpUserInputResponse?>>? UserInputHandler { get; init; }
+
+    /// <summary>
+    /// Gets or sets the prepared chat images sent with the prompt. The bytes are sent inline on the RPC <c>prompt</c> command
+    /// and never written to disk or to the command line. A run with images always uses <c>rpc-ui</c> mode, with or without a
+    /// <see cref="UserInputHandler" />. The default is empty, which keeps the request exactly as it was.
+    /// </summary>
+    public IReadOnlyList<OmpImageAttachment> Images { get; init; } = [];
 
     /// <summary>
     /// Gets or sets how long an interactive question may stay unanswered. When it passes, the question is declined and OMP
@@ -123,7 +132,8 @@ public sealed record OmpOptions
     /// <summary>
     /// Gets or sets the channel that steers the run: a follow-up user message sent to the same OMP process while it runs.
     /// It is <see langword="null" /> by default, and it takes effect only for a run in <c>rpc-ui</c> mode (see
-    /// <see cref="UserInputHandler" />); a JSON print run never attaches it, so every steer on it is not steerable.
+    /// <see cref="UserInputHandler" /> and <see cref="Images" />); a JSON print run never attaches it, so every steer on it is
+    /// not steerable. A steer carries text only.
     /// </summary>
     /// <remarks>
     /// Create a new <see cref="OmpRunSteering" /> for each execution. Its outcomes arrive through

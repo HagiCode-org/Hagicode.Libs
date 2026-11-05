@@ -76,8 +76,8 @@ public class OmpProvider : ICliProvider<OmpOptions>
 
         ValidateThinkingLevel(options.Thinking);
 
-        // A handler switches the run to rpc-ui mode; without one (or with every tool disabled) nothing below differs from the
-        // JSON print path.
+        // Images or a handler (with tools enabled) switch the run to rpc-ui mode; otherwise nothing below differs from the JSON
+        // print path.
         var usesRpc = UsesRpc(options);
         if (options.UserInputHandler is not null)
         {
@@ -135,9 +135,30 @@ public class OmpProvider : ICliProvider<OmpOptions>
                 yield break;
             }
 
-            // This OMP build cannot ask structured questions; nothing was streamed and no prompt was sent. Run the request the
-            // way it runs without a handler.
+            // This OMP build cannot ask structured questions; nothing was streamed and no prompt was sent.
             var version = await ReadVersionAsync(startContext!, cancellationToken).ConfigureAwait(false);
+            if (options.Images.Count > 0)
+            {
+                // JSON print mode cannot carry the images, so the same rpc-ui run goes on without the ask dialog and sends them.
+                _logger.LogWarning(
+                    "OMP {OmpVersion} rejected set_ask_dialog, so the {ToolName} tool cannot ask structured questions. " +
+                    "Running the request with its {ImageCount} image(s) in rpc-ui mode without questions. OMP said: {OmpOutput}",
+                    version ?? "(version unknown)",
+                    OmpUserInputRequest.QuestionToolName,
+                    options.Images.Count,
+                    outcome.AskDialogRejection);
+
+                var withoutQuestions = options with { UserInputHandler = null };
+                var retryContext = startContext! with { Arguments = BuildRpcCommandArguments(withoutQuestions) };
+                await foreach (var message in ExecuteRpcProcessAsync(retryContext, withoutQuestions, prompt, new OmpRpcOutcome(), cancellationToken).ConfigureAwait(false))
+                {
+                    yield return message;
+                }
+
+                yield break;
+            }
+
+            // Run the request the way it runs without a handler.
             _logger.LogWarning(
                 "OMP {OmpVersion} rejected set_ask_dialog, so the {ToolName} tool cannot ask structured questions. " +
                 "Running the request in JSON print mode without questions. OMP said: {OmpOutput}",
@@ -252,7 +273,8 @@ public class OmpProvider : ICliProvider<OmpOptions>
 
     /// <summary>
     /// Builds the command line of an RPC run: the same options as the JSON print command, <c>--mode rpc-ui</c> (never
-    /// <c>--no-ui</c>), the <c>ask</c> tool added to a tool allowlist, and no prompt (it is sent as an RPC command).
+    /// <c>--no-ui</c>), the <c>ask</c> tool added to a tool allowlist when a handler can answer it, and no prompt (it is sent
+    /// as an RPC command). The command line never names an image file: images travel on the <c>prompt</c> command.
     /// </summary>
     internal virtual IReadOnlyList<string> BuildRpcCommandArguments(OmpOptions options)
     {
@@ -262,14 +284,23 @@ public class OmpProvider : ICliProvider<OmpOptions>
             "rpc-ui"
         };
 
-        AddOptionArguments(arguments, options, addQuestionTool: true);
+        AddOptionArguments(arguments, options, addQuestionTool: CanAskQuestions(options));
         return arguments;
     }
 
     /// <summary>
-    /// Whether a request runs in RPC mode: it can be asked questions (a handler is set) and OMP has tools to ask them with.
+    /// Whether a request runs in RPC mode: it carries images, or it can be asked questions (a handler is set) and OMP has
+    /// tools to ask them with.
     /// </summary>
     internal static bool UsesRpc(OmpOptions options)
+    {
+        return options.Images.Count > 0 || CanAskQuestions(options);
+    }
+
+    /// <summary>
+    /// Whether the ask dialog is enabled for a request: a handler can answer the questions and OMP has tools to ask them with.
+    /// </summary>
+    private static bool CanAskQuestions(OmpOptions options)
     {
         return options.UserInputHandler is not null && !options.DisableAllTools;
     }
@@ -448,11 +479,12 @@ public class OmpProvider : ICliProvider<OmpOptions>
         var settings = new OmpRpcSessionSettings(
             options.SessionId,
             ResolveWorkingDirectory(options),
-            options.UserInputHandler!,
+            CanAskQuestions(options) ? options.UserInputHandler : null,
             options.QuestionTimeout,
             RpcExitTimeout,
             options.Steering,
-            options.SteerDeliveryTimeout);
+            options.SteerDeliveryTimeout,
+            options.Images);
         var session = new OmpRpcSession(process, _eventMapper.CreateStreamingState(options.SessionId), settings, outcome);
 
         await foreach (var message in session.RunAsync(prompt, cancellationToken).ConfigureAwait(false))

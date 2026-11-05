@@ -91,21 +91,26 @@ internal sealed class OmpRpcOutcome
 /// </summary>
 /// <param name="RequestedSessionId">The session id the caller asked for, for the started or resumed comparison.</param>
 /// <param name="WorkingDirectory">The working directory of the process, reported on the session message.</param>
-/// <param name="UserInputHandler">Answers the <c>ask</c> requests.</param>
+/// <param name="UserInputHandler">
+/// Answers the <c>ask</c> requests. <see langword="null" /> means nobody can answer: the ask dialog is not enabled, and any
+/// question OMP raises is answered as cancelled.
+/// </param>
 /// <param name="QuestionTimeout">How long a question may stay unanswered.</param>
 /// <param name="ExitTimeout">
 /// How long OMP gets to settle after an abort, and to exit after its input is closed, before the process is stopped.
 /// </param>
 /// <param name="Steering">The steering channel of the run, attached while the agent runs; <see langword="null" /> for no steering.</param>
 /// <param name="SteerDeliveryTimeout">How long a steer waits for OMP's reply. Defaults to <see cref="OmpOptions.DefaultSteerDeliveryTimeout" />.</param>
+/// <param name="Images">The prepared images sent with the prompt; empty for a text-only prompt.</param>
 internal sealed record OmpRpcSessionSettings(
     string? RequestedSessionId,
     string? WorkingDirectory,
-    Func<OmpUserInputRequest, CancellationToken, Task<OmpUserInputResponse?>> UserInputHandler,
+    Func<OmpUserInputRequest, CancellationToken, Task<OmpUserInputResponse?>>? UserInputHandler,
     TimeSpan QuestionTimeout,
     TimeSpan ExitTimeout,
     OmpRunSteering? Steering = null,
-    TimeSpan? SteerDeliveryTimeout = null);
+    TimeSpan? SteerDeliveryTimeout = null,
+    IReadOnlyList<OmpImageAttachment>? Images = null);
 
 /// <summary>
 /// Runs <see cref="OmpOptions.UserInputHandler" /> for the <c>ask</c> requests of one RPC execution, one background task per
@@ -119,7 +124,7 @@ internal sealed record OmpRpcSessionSettings(
 /// </remarks>
 internal sealed class OmpPendingQuestions : IDisposable
 {
-    private readonly Func<OmpUserInputRequest, CancellationToken, Task<OmpUserInputResponse?>> _handler;
+    private readonly Func<OmpUserInputRequest, CancellationToken, Task<OmpUserInputResponse?>>? _handler;
     private readonly TimeSpan _questionTimeout;
     private readonly OmpRpcWriter _writer;
     private readonly CancellationTokenSource _shutdown;
@@ -129,12 +134,12 @@ internal sealed class OmpPendingQuestions : IDisposable
     /// <summary>
     /// Initializes a new instance of the <see cref="OmpPendingQuestions" /> class.
     /// </summary>
-    /// <param name="handler">The handler that produces the answers.</param>
+    /// <param name="handler">The handler that produces the answers, or <see langword="null" /> when nobody can answer.</param>
     /// <param name="questionTimeout">How long a question may stay unanswered, or <see cref="Timeout.InfiniteTimeSpan" />.</param>
     /// <param name="writer">The gated writer of the execution.</param>
     /// <param name="callerToken">The cancellation token of the whole execution.</param>
     public OmpPendingQuestions(
-        Func<OmpUserInputRequest, CancellationToken, Task<OmpUserInputResponse?>> handler,
+        Func<OmpUserInputRequest, CancellationToken, Task<OmpUserInputResponse?>>? handler,
         TimeSpan questionTimeout,
         OmpRpcWriter writer,
         CancellationToken callerToken)
@@ -268,7 +273,9 @@ internal sealed class OmpPendingQuestions : IDisposable
         string? response;
         try
         {
-            var handlerTask = _handler(request, handlerSource.Token);
+            // Start is only called when a handler is set; without one the session answers the request itself.
+            var handler = _handler ?? throw new InvalidOperationException("A question was started without a handler.");
+            var handlerTask = handler(request, handlerSource.Token);
             _ = handlerTask.ContinueWith(
                 static task => { _ = task.Exception; },
                 CancellationToken.None,
@@ -607,8 +614,12 @@ internal sealed class OmpRpcSession
             ExceptionDispatchInfo? pendingException = null;
             try
             {
+                // Without a handler nobody can answer a question, so the ask dialog stays off and the handshake starts at get_state.
                 // A false result means OMP is already gone; the read loop below reports how it ended.
-                await _writer.TrySendAsync(OmpRpcProtocol.BuildSetAskDialog(), cancellationToken).ConfigureAwait(false);
+                var handshake = _settings.UserInputHandler is null
+                    ? OmpRpcProtocol.BuildGetState()
+                    : OmpRpcProtocol.BuildSetAskDialog();
+                await _writer.TrySendAsync(handshake, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -856,7 +867,7 @@ internal sealed class OmpRpcSession
 
         // The prompt follows the state reply, so the session message always precedes the run's own messages. A false result
         // means OMP is already gone; the read loop reports how it ended.
-        _promptSent = await _writer.TrySendAsync(OmpRpcProtocol.BuildPrompt(_prompt), cancellationToken).ConfigureAwait(false);
+        _promptSent = await _writer.TrySendAsync(OmpRpcProtocol.BuildPrompt(_prompt, _settings.Images), cancellationToken).ConfigureAwait(false);
         return LineResult.From(messages);
     }
 
@@ -917,7 +928,8 @@ internal sealed class OmpRpcSession
 
         if (method == OmpUserInputRequest.AskMethod)
         {
-            if (OmpUserInputRequest.TryParse(request, out var question))
+            // Without a handler nobody can answer: the request is declined below, as an unreadable one is, and not yielded.
+            if (_settings.UserInputHandler is not null && OmpUserInputRequest.TryParse(request, out var question))
             {
                 // The handler starts before the caller sees the question, exactly as for Claude and Pi; its answer is written
                 // from its own task, so the read loop never waits for a person.
@@ -939,7 +951,13 @@ internal sealed class OmpRpcSession
         }
 
         // A dialog of an extension (select, confirm, input, editor): there is nobody to ask, so it is dismissed. The extension
-        // sees what it sees when a user presses escape.
+        // sees what it sees when a user presses escape. Without a handler the host itself declined the question (the agent's
+        // ask tool falls back to these dialogs), so the run ends as a normal abort rather than a failure.
+        if (_settings.UserInputHandler is null)
+        {
+            _questions!.MarkHostCancelled();
+        }
+
         await _writer.TrySendAsync(OmpRpcProtocol.BuildDialogCancelled(dialogId), cancellationToken).ConfigureAwait(false);
         return LineResult.None;
     }

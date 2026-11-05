@@ -63,12 +63,31 @@ internal static class OmpRpcProtocol
         ["type"] = "get_state"
     });
 
-    public static string BuildPrompt(string message) => Serialize(new Dictionary<string, object?>
+    /// <summary>
+    /// Builds the <c>prompt</c> command. With no images the frame is exactly the text-only frame; with images it adds an
+    /// <c>images</c> array of <c>{ type: image, data: base64, mimeType }</c> entries in their given order.
+    /// </summary>
+    public static string BuildPrompt(string message, IReadOnlyList<OmpImageAttachment>? images = null)
     {
-        ["id"] = PromptRequestId,
-        ["type"] = "prompt",
-        ["message"] = message
-    });
+        var record = new Dictionary<string, object?>
+        {
+            ["id"] = PromptRequestId,
+            ["type"] = "prompt",
+            ["message"] = message
+        };
+
+        if (images is { Count: > 0 })
+        {
+            record["images"] = images.Select(static image => new Dictionary<string, object?>
+            {
+                ["type"] = "image",
+                ["data"] = Convert.ToBase64String(image.Bytes),
+                ["mimeType"] = image.MediaType
+            }).ToArray();
+        }
+
+        return Serialize(record);
+    }
 
     public static string BuildAbort() => Serialize(new Dictionary<string, object?>
     {
