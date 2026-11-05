@@ -12,7 +12,8 @@ public sealed class CodebuddySteerCaptureTests
         var directory = Path.Combine(AppContext.BaseDirectory, "Fixtures", "Codebuddy");
         Directory.Exists(directory).ShouldBeTrue();
 
-        var files = Directory.GetFiles(directory);
+        // Only the steer captures are counted; the image fixtures share the folder and are checked by CodebuddyChatImageTests.
+        var files = Directory.GetFiles(directory, "steer-*.jsonl");
         files.Length.ShouldBe(7);
 
         foreach (var file in files)
