@@ -350,6 +350,185 @@ public sealed class DshProviderTests
         result.ErrorMessage!.ShouldContain("dsh ACP handshake failed: initialize refused");
     }
 
+    [Test]
+    public async Task ExecuteAsync_sends_inline_image_block_after_text_when_connection_advertises_images()
+    {
+        var transport = new DshImageScriptedTransport(advertiseImage: true);
+        var provider = CreateImageProvider(transport);
+        var bytes = new byte[] { 0x89, 0x50, 0x4E, 0x47, 1, 2, 3 };
+        var base64 = Convert.ToBase64String(bytes);
+        var attachment = new DshImageAttachment("image-1", "image/png", bytes, "- shot.png | image/png | session=s | image=image-1 | path=/tmp/shot.png");
+
+        var messages = await CollectAsync(provider.ExecuteAsync(ImageOptions(attachment), "describe"));
+
+        var blocks = transport.PromptRequests.Single()["params"]!["prompt"]!.AsArray();
+        blocks.Count.ShouldBe(2);
+        blocks[0]!["type"]!.GetValue<string>().ShouldBe("text");
+        blocks[0]!["text"]!.GetValue<string>().ShouldBe("describe");
+        blocks[1]!["type"]!.GetValue<string>().ShouldBe("image");
+        blocks[1]!["data"]!.GetValue<string>().ShouldBe(base64);
+        blocks[1]!["mimeType"]!.GetValue<string>().ShouldBe("image/png");
+
+        messages.Select(static message => message.Type).ShouldBe(["session.started", "image.delivery", "assistant", "terminal.completed"]);
+        var delivery = messages.Single(static message => message.Type == "image.delivery").Content;
+        delivery.GetProperty("images")[0].GetProperty("delivery").GetString().ShouldBe("inline");
+        delivery.GetProperty("images")[0].GetProperty("byte_count").GetInt64().ShouldBe(bytes.Length);
+
+        // Image bytes and base64 must not reach any message the caller can log or store.
+        messages.ShouldAllBe(message => !message.Content.GetRawText().Contains(base64, StringComparison.Ordinal));
+    }
+
+    [Test]
+    public async Task ExecuteAsync_lists_images_by_path_without_image_block_when_connection_does_not_advertise_images()
+    {
+        var transport = new DshImageScriptedTransport(advertiseImage: false);
+        var provider = CreateImageProvider(transport);
+
+        var messages = await CollectAsync(provider.ExecuteAsync(ImageOptions(PngAttachment()), "describe"));
+
+        var prompt = transport.PromptRequests.Single()["params"]!["prompt"]!.AsArray();
+        prompt.Count.ShouldBe(1);
+        prompt[0]!["text"]!.GetValue<string>().ShouldContain("| path=/tmp/shot.png");
+        messages.Select(static message => message.Type).ShouldNotContain("terminal.failed");
+        messages.Last().Type.ShouldBe("terminal.completed");
+        var delivery = messages.Single(static message => message.Type == "image.delivery").Content;
+        delivery.GetProperty("images")[0].GetProperty("reason").GetString().ShouldBe("connection_not_advertised");
+    }
+
+    [Test]
+    public async Task ExecuteAsync_retries_once_as_text_when_dsh_refuses_inline_images()
+    {
+        var transport = new DshImageScriptedTransport(advertiseImage: true, rejectInlinePrompts: true);
+        var provider = CreateImageProvider(transport);
+
+        var messages = await CollectAsync(provider.ExecuteAsync(ImageOptions(PngAttachment()), "describe"));
+
+        transport.PromptRequests.Count.ShouldBe(2);
+        transport.PromptRequests[0]["params"]!["prompt"]!.AsArray().Count.ShouldBe(2);
+        var retry = transport.PromptRequests[1]["params"]!["prompt"]!.AsArray();
+        retry.Count.ShouldBe(1);
+        retry[0]!["text"]!.GetValue<string>().ShouldContain("| path=/tmp/shot.png");
+        messages.Select(static message => message.Type).ShouldNotContain("terminal.failed");
+        messages.Last().Type.ShouldBe("terminal.completed");
+        var lastDelivery = messages.Last(static message => message.Type == "image.delivery").Content;
+        lastDelivery.GetProperty("images")[0].GetProperty("reason").GetString().ShouldBe("inline_rejected");
+    }
+
+    [Test]
+    public async Task ExecuteAsync_does_not_retry_when_the_prompt_fails_for_another_reason()
+    {
+        var transport = new DshImageScriptedTransport(advertiseImage: true, promptErrorMessage: "upstream model unavailable");
+        var provider = CreateImageProvider(transport);
+
+        var messages = await CollectAsync(provider.ExecuteAsync(ImageOptions(PngAttachment()), "describe"));
+
+        transport.PromptRequests.Count.ShouldBe(1);
+        messages.Select(static message => message.Type).ShouldContain("terminal.failed");
+    }
+
+    [Test]
+    public async Task ExecuteAsync_without_images_sends_text_only_and_reports_no_delivery()
+    {
+        var transport = new DshImageScriptedTransport(advertiseImage: true);
+        var provider = CreateImageProvider(transport);
+
+        var messages = await CollectAsync(provider.ExecuteAsync(ImageOptions(), "describe"));
+
+        var prompt = transport.PromptRequests.Single()["params"]!["prompt"]!.AsArray();
+        prompt.Count.ShouldBe(1);
+        prompt[0]!["text"]!.GetValue<string>().ShouldBe("describe");
+        messages.Select(static message => message.Type).ShouldNotContain("image.delivery");
+    }
+
+    [Test]
+    public async Task ProbeImageInputAsync_reports_supported_without_starting_a_session_or_prompt()
+    {
+        var transport = new DshImageScriptedTransport(advertiseImage: true);
+        var provider = CreateImageProvider(transport);
+
+        var result = await provider.ProbeImageInputAsync(new DshOptions { ExecutablePath = "/custom/dsh" });
+
+        result.State.ShouldBe(DshImageInputState.Supported);
+        result.Reason.ShouldBeNull();
+        transport.SentFrames.Select(static frame => frame["method"]!.GetValue<string>()).ShouldBe(["initialize"]);
+    }
+
+    [Test]
+    public async Task ProbeImageInputAsync_reports_not_advertised_when_connection_does_not_broadcast_images()
+    {
+        var transport = new DshImageScriptedTransport(advertiseImage: false);
+        var provider = CreateImageProvider(transport);
+
+        var result = await provider.ProbeImageInputAsync(new DshOptions { ExecutablePath = "/custom/dsh" });
+
+        result.State.ShouldBe(DshImageInputState.NotAdvertised);
+        transport.PromptRequests.ShouldBeEmpty();
+    }
+
+    [Test]
+    public async Task ProbeImageInputAsync_reports_unknown_instead_of_throwing_when_dsh_is_missing()
+    {
+        var transport = new DshImageScriptedTransport(advertiseImage: true);
+        var provider = new ScriptedImageDshProvider(
+            new MissingExecutableResolver(),
+            new StubProbeProcessManager(
+                new ProcessResult(0, DeepSeekHarnessHelp, string.Empty),
+                new ProcessResult(0, "0.2.0-rc.2\n", string.Empty)),
+            new StubRuntimeEnvironmentResolver(),
+            transport);
+
+        var result = await provider.ProbeImageInputAsync(new DshOptions());
+
+        result.State.ShouldBe(DshImageInputState.Unknown);
+        result.Reason.ShouldNotBeNullOrWhiteSpace();
+        transport.SentFrames.ShouldBeEmpty();
+    }
+
+    private static ScriptedImageDshProvider CreateImageProvider(DshImageScriptedTransport transport)
+    {
+        return new ScriptedImageDshProvider(
+            new StubExecutableResolver(),
+            new StubProbeProcessManager(
+                new ProcessResult(0, DeepSeekHarnessHelp, string.Empty),
+                new ProcessResult(0, "0.2.0-rc.2\n", string.Empty)),
+            new StubRuntimeEnvironmentResolver(),
+            transport);
+    }
+
+    private static DshOptions ImageOptions(params DshImageAttachment[] attachments)
+    {
+        return new DshOptions
+        {
+            ExecutablePath = "/custom/dsh",
+            WorkingDirectory = "/tmp/project",
+            Provider = ConfiguredProvider,
+            Model = ConfiguredModel,
+            ImageAttachments = attachments
+        };
+    }
+
+    private static DshImageAttachment PngAttachment()
+    {
+        return new DshImageAttachment(
+            "image-1",
+            "image/png",
+            [0x89, 0x50, 0x4E, 0x47],
+            "- shot.png | image/png | session=s | image=image-1 | path=/tmp/shot.png");
+    }
+
+    private sealed class ScriptedImageDshProvider(
+        CliExecutableResolver executableResolver,
+        CliProcessManager processManager,
+        IRuntimeEnvironmentResolver runtimeEnvironmentResolver,
+        DshImageScriptedTransport transport)
+        : DshProvider(executableResolver, processManager, runtimeEnvironmentResolver)
+    {
+        protected override IAcpSessionClient CreateSessionClient(ProcessStartContext startContext, string? provider)
+        {
+            return new DshAcpSessionClient(new AcpSessionClient(transport), provider);
+        }
+    }
+
     private static TestDshProvider CreateProvider(
         CliExecutableResolver? executableResolver = null,
         CliProcessManager? processManager = null,

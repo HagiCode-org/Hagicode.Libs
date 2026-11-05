@@ -9,6 +9,7 @@ internal sealed class DshAcpSessionClient : IAcpSessionClient
     private const string ModelConfigId = "model";
     private readonly IAcpSessionClient _inner;
     private readonly string? _provider;
+    private bool _supportsImageInput;
 
     public DshAcpSessionClient(IAcpSessionClient inner, string? provider)
     {
@@ -21,9 +22,26 @@ internal sealed class DshAcpSessionClient : IAcpSessionClient
         return _inner.ConnectAsync(cancellationToken);
     }
 
-    public Task<JsonElement> InitializeAsync(CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Gets a value indicating whether the connection advertised <c>promptCapabilities.image</c> in <c>initialize</c>.
+    /// A missing or non-boolean value counts as <see langword="false"/>. The value is per connection and is false until
+    /// <see cref="InitializeAsync"/> has completed. It is not a statement about the model route.
+    /// </summary>
+    public bool SupportsImageInput => _supportsImageInput;
+
+    /// <summary>
+    /// Records that dsh rejected inline images on this connection, so later prompts on it are text-only.
+    /// </summary>
+    public void MarkImageInputUnsupported()
     {
-        return _inner.InitializeAsync(cancellationToken);
+        _supportsImageInput = false;
+    }
+
+    public async Task<JsonElement> InitializeAsync(CancellationToken cancellationToken = default)
+    {
+        var initializeResult = await _inner.InitializeAsync(cancellationToken).ConfigureAwait(false);
+        _supportsImageInput = ParsePromptImageCapability(initializeResult);
+        return initializeResult;
     }
 
     public Task<JsonElement> InvokeBootstrapMethodAsync(string method, object? parameters = null, CancellationToken cancellationToken = default)
@@ -96,6 +114,15 @@ internal sealed class DshAcpSessionClient : IAcpSessionClient
         return _inner.SendPromptAsync(sessionId, prompt, cancellationToken);
     }
 
+    public Task<JsonElement> SendPromptAsync(
+        string sessionId,
+        string prompt,
+        IReadOnlyList<AcpImageBlock> images,
+        CancellationToken cancellationToken = default)
+    {
+        return _inner.SendPromptAsync(sessionId, prompt, images, cancellationToken);
+    }
+
     public IAsyncEnumerable<AcpNotification> ReceiveNotificationsAsync(CancellationToken cancellationToken = default)
     {
         return _inner.ReceiveNotificationsAsync(cancellationToken);
@@ -121,6 +148,22 @@ internal sealed class DshAcpSessionClient : IAcpSessionClient
         }
 
         return JsonSerializer.Serialize(new[] { _provider, model });
+    }
+
+    private static bool ParsePromptImageCapability(JsonElement initializeResult)
+    {
+        if (initializeResult.ValueKind == JsonValueKind.Object &&
+            initializeResult.TryGetProperty("agentCapabilities", out var agentCapabilities) &&
+            agentCapabilities.ValueKind == JsonValueKind.Object &&
+            agentCapabilities.TryGetProperty("promptCapabilities", out var promptCapabilities) &&
+            promptCapabilities.ValueKind == JsonValueKind.Object &&
+            promptCapabilities.TryGetProperty("image", out var image) &&
+            image.ValueKind is JsonValueKind.True or JsonValueKind.False)
+        {
+            return image.ValueKind == JsonValueKind.True;
+        }
+
+        return false;
     }
 
     private static string ParseSessionId(JsonElement sessionResult)

@@ -28,6 +28,22 @@ internal static class DshAcpMessageMapper
         });
     }
 
+    public static CliMessage CreateImageDeliveryMessage(string sessionId, IReadOnlyList<DshImageDeliveryItem> images)
+    {
+        return Create("image.delivery", new Dictionary<string, object?>
+        {
+            ["session_id"] = sessionId,
+            ["images"] = images.Select(static image => new
+            {
+                image_id = image.ImageId,
+                media_type = image.MediaType,
+                byte_count = image.ByteCount,
+                delivery = image.Inlined ? "inline" : "manifest",
+                reason = image.Reason
+            }).ToArray()
+        });
+    }
+
     public static CliMessage CreateTerminalFailureMessage(string sessionId, string message)
     {
         return Create("terminal.failed", new Dictionary<string, object?>

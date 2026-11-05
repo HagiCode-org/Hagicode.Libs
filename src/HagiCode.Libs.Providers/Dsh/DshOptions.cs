@@ -53,4 +53,16 @@ public sealed record DshOptions
     /// Any <c>--profile</c> form is rejected because the ACP profile is always managed by the provider.
     /// </summary>
     public IReadOnlyList<string> ExtraArguments { get; init; } = [];
+
+    /// <summary>
+    /// Gets or sets the in-memory chat images for this prompt. Each image is sent as an inline ACP image block when the
+    /// connection advertises image input; otherwise it is listed by path in the prompt text. Bytes are never persisted or logged.
+    /// </summary>
+    public IReadOnlyList<DshImageAttachment> ImageAttachments { get; init; } = [];
+
+    /// <summary>
+    /// Gets or sets prompt manifest rows for chat images that the caller did not prepare (for example, images over the limit
+    /// or missing files). They are always listed by path and carry no bytes.
+    /// </summary>
+    public IReadOnlyList<string> ImageManifestRows { get; init; } = [];
 }

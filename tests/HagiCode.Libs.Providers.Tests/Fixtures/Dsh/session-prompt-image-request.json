@@ -1,0 +1,19 @@
+{
+  "jsonrpc": "2.0",
+  "id": 5,
+  "method": "session/prompt",
+  "params": {
+    "sessionId": "1a55a883-6262-48d3-8e12-0254f4fe8921",
+    "prompt": [
+      {
+        "type": "text",
+        "text": "Describe the image in one short sentence. No tools."
+      },
+      {
+        "type": "image",
+        "data": "iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAIAAABMXPacAAABcklEQVR4nO3RQQkEQRTFwO9f2brqFTGHR6AgClL37tLdL978IIB2+4MA2s0PAmi3Pwig3fwggHb7gwDazQ8CaLc/CKDd/CCAdvuDANrNDwJotz8IoN38IIB2+4MA2s0PAmi3Pwig3fwggHb7gwDazQ8CaLc/CKDd/CCAdvuDANrNDwJotz8IoN38IIB2+4MA2s0PAmi3Pwig3fwggHb7gwDazQ8CaLc/CKDd/CCAdvuDANrNDwJotz8IoN38IIB2+4MA2s0PAmi3Pwig3fwggHb7gwDarQd+7b1LBwAAgHTzgwD2EwGEAwAAQLr5QQD7iQDCAQAAIN38IID9RADhAAAAkG5+EMB+IoBwAAAASDc/CGA/EUA4AAAApJsfBLCfCCAcAAAA0s0PAthPBBAOAAAA6eYHAewnAggHAACAdPODAPYTAYQDAABAuvlBAPuJAMIBAAAg3fwggP1EAOEAAACQbn4QwH4igHAAAABINz/4sT/ktUR1S1VFywAAAABJRU5ErkJggg==",
+        "mimeType": "image/png"
+      }
+    ]
+  }
+}

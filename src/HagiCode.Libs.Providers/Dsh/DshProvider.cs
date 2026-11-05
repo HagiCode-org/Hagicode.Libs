@@ -258,7 +258,14 @@ public class DshProvider : ICliProvider<DshOptions>
 
         yield return DshAcpMessageMapper.CreateSessionLifecycleMessage(sessionHandle);
 
-        await foreach (var message in StreamPromptAsync(sessionClient, sessionHandle.SessionId, prompt, cancellationToken).ConfigureAwait(false))
+        var connectionSupportsImages = sessionClient is DshAcpSessionClient { SupportsImageInput: true };
+        var imagePlan = DshImagePromptPlanner.Plan(prompt, options.ImageAttachments, options.ImageManifestRows, connectionSupportsImages);
+        if (options.ImageAttachments.Count > 0)
+        {
+            yield return DshAcpMessageMapper.CreateImageDeliveryMessage(sessionHandle.SessionId, imagePlan.Deliveries);
+        }
+
+        await foreach (var message in StreamPromptAsync(sessionClient, sessionHandle.SessionId, imagePlan, cancellationToken).ConfigureAwait(false))
         {
             yield return message;
         }
@@ -267,10 +274,60 @@ public class DshProvider : ICliProvider<DshOptions>
     private static async IAsyncEnumerable<CliMessage> StreamPromptAsync(
         IAcpSessionClient sessionClient,
         string sessionId,
-        string prompt,
+        DshImagePromptPlan imagePlan,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var promptTask = sessionClient.SendPromptAsync(sessionId, prompt, cancellationToken);
+        var attempt = new PromptAttempt();
+        await foreach (var message in StreamPromptAttemptAsync(
+            sessionClient,
+            sessionId,
+            imagePlan.Text,
+            imagePlan.InlineImages,
+            attempt,
+            cancellationToken).ConfigureAwait(false))
+        {
+            yield return message;
+        }
+
+        if (!attempt.InlineImageRejected)
+        {
+            yield break;
+        }
+
+        // dsh rejected inline images on this connection: keep it text-only from now on and retry the prompt once.
+        if (sessionClient is DshAcpSessionClient dshSessionClient)
+        {
+            dshSessionClient.MarkImageInputUnsupported();
+        }
+
+        yield return DshAcpMessageMapper.CreateImageDeliveryMessage(sessionId, imagePlan.FallbackDeliveries);
+
+        await foreach (var message in StreamPromptAttemptAsync(
+            sessionClient,
+            sessionId,
+            imagePlan.FallbackText,
+            Array.Empty<AcpImageBlock>(),
+            new PromptAttempt(),
+            cancellationToken).ConfigureAwait(false))
+        {
+            yield return message;
+        }
+    }
+
+    private sealed class PromptAttempt
+    {
+        public bool InlineImageRejected { get; set; }
+    }
+
+    private static async IAsyncEnumerable<CliMessage> StreamPromptAttemptAsync(
+        IAcpSessionClient sessionClient,
+        string sessionId,
+        string prompt,
+        IReadOnlyList<AcpImageBlock> images,
+        PromptAttempt attempt,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var promptTask = sessionClient.SendPromptAsync(sessionId, prompt, images, cancellationToken);
         using var receiveCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _ = CancelReceiveLoopWhenPromptFinishesAsync(promptTask, receiveCts);
         await using var notifications = sessionClient.ReceiveNotificationsAsync(receiveCts.Token).GetAsyncEnumerator(receiveCts.Token);
@@ -340,6 +397,13 @@ public class DshProvider : ICliProvider<DshOptions>
 
         if (promptError is not null)
         {
+            if (images.Count > 0 && DshImagePromptPlanner.IsInlineImageRejection(promptError))
+            {
+                // dsh refused the inline images before running the prompt; the caller retries once as text.
+                attempt.InlineImageRejected = true;
+                yield break;
+            }
+
             yield return DshAcpMessageMapper.CreateTerminalFailureMessage(
                 sessionId,
                 DescribeFailure($"dsh prompt failed: {promptError}", sessionClient));
@@ -356,6 +420,14 @@ public class DshProvider : ICliProvider<DshOptions>
 
     private async Task<string?> HandshakeAsync(ProcessStartContext startContext, CancellationToken cancellationToken)
     {
+        var handshake = await HandshakeWithCapabilityAsync(startContext, cancellationToken).ConfigureAwait(false);
+        return handshake.Error;
+    }
+
+    private async Task<(string? Error, bool SupportsImageInput)> HandshakeWithCapabilityAsync(
+        ProcessStartContext startContext,
+        CancellationToken cancellationToken)
+    {
         await using var sessionClient = CreateSessionClient(startContext, provider: null);
         using var startupCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         startupCts.CancelAfter(DefaultStartupTimeout);
@@ -364,7 +436,7 @@ public class DshProvider : ICliProvider<DshOptions>
         {
             await sessionClient.ConnectAsync(startupCts.Token).ConfigureAwait(false);
             await sessionClient.InitializeAsync(startupCts.Token).ConfigureAwait(false);
-            return null;
+            return (null, sessionClient is DshAcpSessionClient { SupportsImageInput: true });
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -372,11 +444,67 @@ public class DshProvider : ICliProvider<DshOptions>
         }
         catch (OperationCanceledException)
         {
-            return DescribeFailure($"dsh ACP startup timed out after {DefaultStartupTimeout.TotalSeconds:0} seconds.", sessionClient);
+            return (DescribeFailure($"dsh ACP startup timed out after {DefaultStartupTimeout.TotalSeconds:0} seconds.", sessionClient), false);
         }
         catch (Exception ex)
         {
-            return DescribeFailure($"dsh ACP handshake failed: {ex.Message}", sessionClient);
+            return (DescribeFailure($"dsh ACP handshake failed: {ex.Message}", sessionClient), false);
+        }
+    }
+
+    /// <summary>
+    /// Reads whether dsh advertises inline image input on a fresh connection. It uses the same identity check and startup
+    /// timeout as the health check, creates no session and sends no prompt. Failures are returned as
+    /// <see cref="DshImageInputState.Unknown"/>, never thrown.
+    /// </summary>
+    /// <param name="options">The dsh options whose executable, working directory and environment the probe uses.</param>
+    /// <param name="cancellationToken">Cancels the probe.</param>
+    /// <returns>The connection-level image input state and, when unknown, a reason.</returns>
+    public async Task<DshImageInputProbeResult> ProbeImageInputAsync(DshOptions options, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        try
+        {
+            var runtimeEnvironment = await ResolveRuntimeEnvironmentAsync(cancellationToken).ConfigureAwait(false);
+            var executablePath = ResolveExecutablePath(options, runtimeEnvironment);
+            if (executablePath is null)
+            {
+                return new DshImageInputProbeResult(DshImageInputState.Unknown, "dsh executable was not found.");
+            }
+
+            var identityError = await VerifyIdentityAsync(executablePath, runtimeEnvironment, cancellationToken).ConfigureAwait(false);
+            if (identityError is not null)
+            {
+                return new DshImageInputProbeResult(DshImageInputState.Unknown, identityError);
+            }
+
+            var startContext = new ProcessStartContext
+            {
+                ExecutablePath = executablePath,
+                Arguments = BuildCommandArguments(options),
+                WorkingDirectory = ResolveWorkingDirectory(options.WorkingDirectory),
+                EnvironmentVariables = BuildEnvironmentVariables(options, runtimeEnvironment),
+                Ownership = new CliProcessOwnershipRegistration { ProviderName = Name }
+            };
+
+            var handshake = await HandshakeWithCapabilityAsync(startContext, cancellationToken).ConfigureAwait(false);
+            if (handshake.Error is not null)
+            {
+                return new DshImageInputProbeResult(DshImageInputState.Unknown, handshake.Error);
+            }
+
+            return new DshImageInputProbeResult(
+                handshake.SupportsImageInput ? DshImageInputState.Supported : DshImageInputState.NotAdvertised,
+                null);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return new DshImageInputProbeResult(DshImageInputState.Unknown, $"dsh image probe failed: {ex.Message}");
         }
     }
 
