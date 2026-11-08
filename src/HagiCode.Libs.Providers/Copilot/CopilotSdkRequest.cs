@@ -17,4 +17,6 @@ internal sealed record CopilotSdkRequest(
     Func<CopilotUserInputRequest, CancellationToken, Task<CopilotUserInputResponse?>>? UserInputHandler = null,
     TimeSpan QuestionTimeout = default,
     IReadOnlyList<CopilotImageAttachment>? Images = null,
-    CopilotSteerTurn? Steering = null);
+    CopilotSteerTurn? Steering = null,
+    CopilotFusionTier? FusionTier = null,
+    bool FusionTierIsExplicitlyUnset = false);

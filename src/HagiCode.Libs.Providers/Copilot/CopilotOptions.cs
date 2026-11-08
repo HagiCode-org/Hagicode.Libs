@@ -33,6 +33,16 @@ public sealed record CopilotOptions
     public string? Model { get; init; }
 
     /// <summary>
+    /// Gets or sets the optional Copilot Fusion tier, separate from reasoning effort.
+    /// </summary>
+    public CopilotFusionTier? FusionTier { get; init; }
+
+    /// <summary>
+    /// Gets or sets whether an unspecified tier was explicitly requested instead of inherited.
+    /// </summary>
+    public bool FusionTierIsExplicitlyUnset { get; init; }
+
+    /// <summary>
     /// Gets or sets the working directory used for SDK session creation.
     /// </summary>
     public string? WorkingDirectory { get; init; }
@@ -162,7 +172,7 @@ public sealed record CopilotOptions
     /// </summary>
     public override string ToString()
     {
-        return $"CopilotOptions {{ ExecutablePath = {ExecutablePath}, Model = {Model}, WorkingDirectory = {WorkingDirectory}, SessionId = {SessionId}, Timeout = {Timeout}, IdleTimeout = {IdleTimeout}, StartupTimeout = {StartupTimeout}, AuthSource = {AuthSource}, GitHubToken = {(string.IsNullOrEmpty(GitHubToken) ? "null" : "set")}, CliUrl = {CliUrl}, NoAskUser = {NoAskUser}, UserInputHandler = {(UserInputHandler is null ? "null" : "set")}, QuestionTimeout = {QuestionTimeout}, Images = {Images.Count}, Steering = {(Steering is null ? "null" : "set")}, SteerDeliveryTimeout = {SteerDeliveryTimeout} }}";
+        return $"CopilotOptions {{ ExecutablePath = {ExecutablePath}, Model = {Model}, FusionTier = {FusionTier}, FusionTierIsExplicitlyUnset = {FusionTierIsExplicitlyUnset}, WorkingDirectory = {WorkingDirectory}, SessionId = {SessionId}, Timeout = {Timeout}, IdleTimeout = {IdleTimeout}, StartupTimeout = {StartupTimeout}, AuthSource = {AuthSource}, GitHubToken = {(string.IsNullOrEmpty(GitHubToken) ? "null" : "set")}, CliUrl = {CliUrl}, NoAskUser = {NoAskUser}, UserInputHandler = {(UserInputHandler is null ? "null" : "set")}, QuestionTimeout = {QuestionTimeout}, Images = {Images.Count}, Steering = {(Steering is null ? "null" : "set")}, SteerDeliveryTimeout = {SteerDeliveryTimeout} }}";
     }
 }
 

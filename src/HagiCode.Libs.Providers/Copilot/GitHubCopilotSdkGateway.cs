@@ -39,6 +39,8 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
         CopilotSdkRequest request,
         CancellationToken cancellationToken = default)
     {
+        // Fusion intent is rejected before any client, environment lease or session operation.
+        CopilotFusionCompatibility.ThrowIfGatewayCannotApply(request);
         var clientOptions = BuildClientOptions(request);
         using var startupCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         startupCancellationTokenSource.CancelAfter(request.StartupTimeout);
@@ -651,7 +653,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
     }
 
     // Images travel only on the one send of a run, as inline blobs. The base64 string exists only for this call.
-    private static List<UserMessageAttachment>? BuildAttachments(IReadOnlyList<CopilotImageAttachment>? images)
+    private static List<Attachment>? BuildAttachments(IReadOnlyList<CopilotImageAttachment>? images)
     {
         if (images is null or { Count: 0 })
         {
@@ -659,7 +661,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
         }
 
         return images
-            .Select(static image => (UserMessageAttachment)new UserMessageAttachmentBlob
+            .Select(static image => (Attachment)new AttachmentBlob
             {
                 Data = Convert.ToBase64String(image.Data.Span),
                 MimeType = image.MediaType,

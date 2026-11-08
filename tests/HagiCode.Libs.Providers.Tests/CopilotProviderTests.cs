@@ -103,6 +103,406 @@ public sealed class CopilotProviderTests
     }
 
     [Test]
+    public void BuildSdkRequest_preserves_fusion_tier_intent()
+    {
+        var provider = CreateProvider();
+
+        var request = provider.BuildSdkRequest(
+            new CopilotOptions
+            {
+                Model = "fusion",
+                FusionTier = CopilotFusionTier.High
+            },
+            "hello",
+            "/custom/copilot",
+            new Dictionary<string, string?>());
+
+        request.Model.ShouldBe("fusion");
+        request.FusionTier.ShouldBe(CopilotFusionTier.High);
+    }
+
+    [Test]
+    [TestCase(0)]
+    [TestCase(42)]
+    public void BuildSdkRequest_rejects_undefined_fusion_tier_values(int value)
+    {
+        var provider = CreateProvider();
+
+        var exception = Should.Throw<InvalidOperationException>(() =>
+            provider.BuildSdkRequest(
+                new CopilotOptions { FusionTier = (CopilotFusionTier)value },
+                "hello",
+                "/custom/copilot",
+                new Dictionary<string, string?>()));
+
+        exception.Message.ShouldContain("FusionTier");
+    }
+
+    [Test]
+    public void Fusion_compatibility_distinguishes_supported_unsupported_and_unknown_outcomes()
+    {
+        static CopilotFusionCompatibilityResult Evaluate(
+            string? cliVersion,
+            bool? cliSupportsTier,
+            string? sdkVersion,
+            bool sdkHasTypedTierApi,
+            bool gatewayMapsTier,
+            CopilotFusionTier? tier,
+            CopilotFusionOperation operation = CopilotFusionOperation.Create,
+            bool officialDefaultVerified = true,
+            bool resetSupported = true)
+        {
+            return CopilotFusionCompatibility.Evaluate(
+                "/resolved/copilot",
+                cliVersion,
+                cliSupportsTier,
+                sdkVersion,
+                sdkHasTypedTierApi,
+                gatewayMapsTier,
+                "fusion",
+                tier,
+                operation,
+                officialDefaultVerified,
+                resetSupported);
+        }
+
+        Evaluate("copilot 2.0.0", true, "1.0.0-beta.11", true, true, CopilotFusionTier.Standard)
+            .Status.ShouldBe(CopilotFusionCompatibilityStatus.Supported);
+        Evaluate("copilot 1.0.10", false, "1.0.0-beta.11", true, true, CopilotFusionTier.High)
+            .Status.ShouldBe(CopilotFusionCompatibilityStatus.Unsupported);
+        Evaluate("copilot 2.0.0", true, "1.0.0-beta.10", false, false, CopilotFusionTier.Max)
+            .Status.ShouldBe(CopilotFusionCompatibilityStatus.Unsupported);
+        Evaluate(null, null, "1.0.0-beta.11", true, true, CopilotFusionTier.Max)
+            .Status.ShouldBe(CopilotFusionCompatibilityStatus.Unknown);
+        Evaluate("copilot 2.0.0", true, "1.0.0-beta.11", true, true, null, officialDefaultVerified: false)
+            .Status.ShouldBe(CopilotFusionCompatibilityStatus.Unknown);
+        Evaluate("copilot 2.0.0", true, "1.0.0-beta.11", true, true, CopilotFusionTier.High, CopilotFusionOperation.Reset, resetSupported: false)
+            .Status.ShouldBe(CopilotFusionCompatibilityStatus.Unsupported);
+    }
+
+    [Test]
+    public async Task ExecuteAsync_blocks_fusion_before_session_operations_using_the_resolved_executable()
+    {
+        var processManager = new StubCliProcessManager
+        {
+            ExecuteResults = new Queue<ProcessResult>(
+            [
+                new ProcessResult(0, "copilot 99.0.0", string.Empty),
+                new ProcessResult(0, "Usage: copilot [options] --fusion-tier <standard|high|max>", string.Empty)
+            ])
+        };
+        var gateway = new StubCopilotSdkGateway([]);
+        var provider = CreateProviderWithRuntimeEnvironment(
+            gateway,
+            new Dictionary<string, string?> { ["PATH"] = "/unrelated/bin" },
+            processManager);
+
+        var exception = await Should.ThrowAsync<InvalidOperationException>(async () =>
+        {
+            await ReadExecutionMessagesAsync(
+                provider,
+                new CopilotOptions { ExecutablePath = "/resolved/copilot", Model = "fusion", FusionTier = CopilotFusionTier.High },
+                "do not send this prompt");
+        });
+
+        var errorMessage = exception?.Message ?? throw new InvalidOperationException("Expected a Fusion compatibility failure.");
+        errorMessage.ShouldContain("[copilot_fusion_unsupported]");
+        errorMessage.ShouldContain("copilot 99.0.0");
+        errorMessage.ShouldContain("1.0.30-preview.1");
+        errorMessage.ShouldContain("typed Fusion tier field");
+        errorMessage.ShouldContain("effective tier='unknown'");
+        CopilotFusionCompatibility.HasTypedFusionTierApi.ShouldBeFalse();
+        processManager.ExecutedContexts.Select(static context => context.ExecutablePath).ShouldBe(
+            ["/resolved/copilot", "/resolved/copilot"]);
+        processManager.ExecutedContexts[0].EnvironmentVariables["PATH"]!.ShouldBe("/unrelated/bin");
+        processManager.ExecutedContexts[1].Arguments.ShouldBe(["--help"]);
+        gateway.CreatedRuntimeCount.ShouldBe(0);
+        gateway.SendPromptInvocationCount.ShouldBe(0);
+        gateway.SendPromptCallCount.ShouldBe(0);
+    }
+
+    [Test]
+    public async Task ExecuteAsync_blocks_unspecified_fusion_tier_when_official_default_is_unknown()
+    {
+        var processManager = new StubCliProcessManager
+        {
+            ExecuteResults = new Queue<ProcessResult>(
+            [
+                new ProcessResult(0, "copilot 1.0.105", string.Empty),
+                new ProcessResult(0, "Copilot CLI help without Fusion tier support.", string.Empty)
+            ])
+        };
+        var gateway = new StubCopilotSdkGateway([]);
+        var provider = CreateProviderWithRuntimeEnvironment(gateway, new Dictionary<string, string?>(), processManager);
+
+        var exception = await Should.ThrowAsync<InvalidOperationException>(async () =>
+        {
+            await ReadExecutionMessagesAsync(
+                provider,
+                new CopilotOptions { ExecutablePath = "/resolved/copilot", Model = "fusion" },
+                "do not send this prompt");
+        });
+
+        var errorMessage = exception?.Message ?? throw new InvalidOperationException("Expected a Fusion compatibility failure.");
+        errorMessage.ShouldContain("official default for an unspecified Fusion tier is unverified");
+        errorMessage.ShouldContain("requested tier='unspecified'");
+        errorMessage.ShouldContain("effective tier='unknown'");
+        gateway.CreatedRuntimeCount.ShouldBe(0);
+        gateway.SendPromptInvocationCount.ShouldBe(0);
+    }
+
+    [Test]
+    public async Task ExecuteAsync_blocks_explicit_fusion_tier_reset_before_session_operations()
+    {
+        var processManager = new StubCliProcessManager
+        {
+            ExecuteResults = new Queue<ProcessResult>(
+            [
+                new ProcessResult(0, "copilot 1.0.105", string.Empty),
+                new ProcessResult(0, "Copilot CLI help without Fusion tier support.", string.Empty)
+            ])
+        };
+        var gateway = new StubCopilotSdkGateway([]);
+        var provider = CreateProviderWithRuntimeEnvironment(gateway, new Dictionary<string, string?>(), processManager);
+
+        var exception = await Should.ThrowAsync<InvalidOperationException>(async () =>
+        {
+            await ReadExecutionMessagesAsync(
+                provider,
+                new CopilotOptions
+                {
+                    ExecutablePath = "/resolved/copilot",
+                    Model = "fusion",
+                    FusionTierIsExplicitlyUnset = true
+                },
+                "do not send this prompt");
+        });
+
+        var errorMessage = exception?.Message ?? throw new InvalidOperationException("Expected a Fusion compatibility failure.");
+        errorMessage.ShouldContain("native reset to the official Fusion default is unsupported or unverified");
+        errorMessage.ShouldContain("requested tier='unspecified'");
+        gateway.CreatedRuntimeCount.ShouldBe(0);
+        gateway.SendPromptInvocationCount.ShouldBe(0);
+        gateway.SendPromptCallCount.ShouldBe(0);
+    }
+
+    [Test]
+    public async Task ExecuteAsync_blocks_fusion_restore_before_gateway_session_operations()
+    {
+        var processManager = new StubCliProcessManager
+        {
+            ExecuteResults = new Queue<ProcessResult>(
+            [
+                new ProcessResult(0, "copilot 1.0.105", string.Empty),
+                new ProcessResult(0, "Copilot CLI help without Fusion tier support.", string.Empty)
+            ])
+        };
+        var gateway = new StubCopilotSdkGateway([]);
+        var provider = CreateProviderWithRuntimeEnvironment(gateway, new Dictionary<string, string?>(), processManager);
+
+        var exception = await Should.ThrowAsync<InvalidOperationException>(async () =>
+        {
+            await ReadExecutionMessagesAsync(
+                provider,
+                new CopilotOptions
+                {
+                    ExecutablePath = "/resolved/copilot",
+                    Model = "fusion",
+                    FusionTier = CopilotFusionTier.Max,
+                    SessionId = "existing-session"
+                },
+                "do not send this prompt");
+        });
+
+        (exception?.Message ?? throw new InvalidOperationException("Expected a Fusion compatibility failure."))
+            .ShouldContain("does not advertise the '--fusion-tier' option");
+        gateway.CreatedRuntimeCount.ShouldBe(0);
+        gateway.SendPromptInvocationCount.ShouldBe(0);
+        gateway.SendPromptCallCount.ShouldBe(0);
+    }
+
+    [Test]
+    public async Task ExecuteAsync_rejects_concrete_fusion_tier_with_single_model_before_any_probe_or_session()
+    {
+        var processManager = new KeyedCliProcessManager(_ => throw new InvalidOperationException("No probe is expected."));
+        var gateway = new StubCopilotSdkGateway([]);
+        var provider = CreateProviderWithRuntimeEnvironment(gateway, new Dictionary<string, string?>(), processManager);
+
+        var exception = await Should.ThrowAsync<InvalidOperationException>(async () =>
+            await ReadExecutionMessagesAsync(
+                provider,
+                new CopilotOptions { ExecutablePath = "/resolved/copilot", Model = "gpt-5", FusionTier = CopilotFusionTier.High },
+                "do not send this prompt"));
+
+        exception.Message.ShouldContain("requires Model 'fusion'");
+        processManager.ExecutedContexts.ShouldBeEmpty();
+        gateway.CreatedRuntimeCount.ShouldBe(0);
+        gateway.SendPromptInvocationCount.ShouldBe(0);
+    }
+
+    [Test]
+    public async Task ExecuteAsync_rejects_undefined_fusion_tier_before_any_probe_or_session()
+    {
+        var processManager = new KeyedCliProcessManager(_ => throw new InvalidOperationException("No probe is expected."));
+        var gateway = new StubCopilotSdkGateway([]);
+        var provider = CreateProviderWithRuntimeEnvironment(gateway, new Dictionary<string, string?>(), processManager);
+
+        var exception = await Should.ThrowAsync<InvalidOperationException>(async () =>
+            await ReadExecutionMessagesAsync(
+                provider,
+                new CopilotOptions { ExecutablePath = "/resolved/copilot", Model = "fusion", FusionTier = (CopilotFusionTier)42 },
+                "do not send this prompt"));
+
+        exception.Message.ShouldContain("FusionTier must be Standard, High, or Max");
+        processManager.ExecutedContexts.ShouldBeEmpty();
+        gateway.CreatedRuntimeCount.ShouldBe(0);
+    }
+
+    [Test]
+    public async Task ExecuteAsync_evaluates_only_the_resolved_executable_not_an_unrelated_path_copilot()
+    {
+        var processManager = new KeyedCliProcessManager(context =>
+            (context.ExecutablePath, string.Join(' ', context.Arguments)) switch
+            {
+                ("/resolved/copilot", "--help") => new ProcessResult(0, "Usage: copilot --model <model> --auto-tier <preference>", string.Empty),
+                ("/resolved/copilot", _) => new ProcessResult(0, "copilot 1.0.105", string.Empty),
+                ("/unrelated/bin/copilot", "--help") => new ProcessResult(0, "Usage: copilot --fusion-tier <standard|high|max>", string.Empty),
+                ("/unrelated/bin/copilot", _) => new ProcessResult(0, "copilot 2.0.0", string.Empty),
+                _ => new ProcessResult(1, string.Empty, "unexpected executable")
+            });
+        var gateway = new StubCopilotSdkGateway([]);
+        var provider = CreateProviderWithRuntimeEnvironment(
+            gateway,
+            new Dictionary<string, string?> { ["PATH"] = "/unrelated/bin" },
+            processManager);
+
+        var exception = await Should.ThrowAsync<InvalidOperationException>(async () =>
+            await ReadExecutionMessagesAsync(
+                provider,
+                new CopilotOptions { ExecutablePath = "/resolved/copilot", Model = "fusion", FusionTier = CopilotFusionTier.Standard },
+                "do not send this prompt"));
+
+        exception.Message.ShouldContain("copilot 1.0.105");
+        exception.Message.ShouldContain("does not advertise the '--fusion-tier' option");
+        exception.Message.ShouldNotContain("copilot 2.0.0");
+        processManager.ExecutedContexts.Select(static context => context.ExecutablePath).Distinct().ShouldBe(["/resolved/copilot"]);
+        gateway.CreatedRuntimeCount.ShouldBe(0);
+        gateway.SendPromptInvocationCount.ShouldBe(0);
+    }
+
+    [Test]
+    public async Task ExecuteAsync_newer_cli_advertising_fusion_tier_is_still_unsupported_without_sdk_typed_field()
+    {
+        var processManager = new KeyedCliProcessManager(context =>
+            string.Join(' ', context.Arguments) == "--help"
+                ? new ProcessResult(0, "Usage: copilot --fusion-tier <standard|high|max>", string.Empty)
+                : new ProcessResult(0, "copilot 2.0.0", string.Empty));
+        var gateway = new StubCopilotSdkGateway([]);
+        var provider = CreateProviderWithRuntimeEnvironment(gateway, new Dictionary<string, string?>(), processManager);
+
+        var exception = await Should.ThrowAsync<InvalidOperationException>(async () =>
+            await ReadExecutionMessagesAsync(
+                provider,
+                new CopilotOptions { ExecutablePath = "/resolved/copilot", Model = "fusion", FusionTier = CopilotFusionTier.Max },
+                "do not send this prompt"));
+
+        exception.Message.ShouldContain("[copilot_fusion_unsupported]");
+        exception.Message.ShouldContain("copilot 2.0.0");
+        exception.Message.ShouldContain("typed Fusion tier field");
+        exception.Message.ShouldNotContain("does not advertise");
+        gateway.CreatedRuntimeCount.ShouldBe(0);
+        gateway.SendPromptInvocationCount.ShouldBe(0);
+    }
+
+    [Test]
+    public async Task ExecuteAsync_older_cli_without_fusion_tier_option_is_reported_with_its_version()
+    {
+        var processManager = new KeyedCliProcessManager(context =>
+            string.Join(' ', context.Arguments) == "--help"
+                ? new ProcessResult(0, "Usage: copilot --auto-tier <preference>", string.Empty)
+                : new ProcessResult(0, "copilot 1.0.10", string.Empty));
+        var gateway = new StubCopilotSdkGateway([]);
+        var provider = CreateProviderWithRuntimeEnvironment(gateway, new Dictionary<string, string?>(), processManager);
+
+        var exception = await Should.ThrowAsync<InvalidOperationException>(async () =>
+            await ReadExecutionMessagesAsync(
+                provider,
+                new CopilotOptions { ExecutablePath = "/resolved/copilot", Model = "fusion", FusionTier = CopilotFusionTier.High },
+                "do not send this prompt"));
+
+        exception.Message.ShouldContain("CLI version: copilot 1.0.10");
+        exception.Message.ShouldContain("does not advertise the '--fusion-tier' option");
+        gateway.CreatedRuntimeCount.ShouldBe(0);
+        gateway.SendPromptInvocationCount.ShouldBe(0);
+    }
+
+    [Test]
+    public async Task ExecuteAsync_failed_cli_probes_leave_fusion_capability_unknown_and_block_execution()
+    {
+        var processManager = new KeyedCliProcessManager(_ => new ProcessResult(1, string.Empty, "probe failed"));
+        var gateway = new StubCopilotSdkGateway([]);
+        var provider = CreateProviderWithRuntimeEnvironment(gateway, new Dictionary<string, string?>(), processManager);
+
+        var exception = await Should.ThrowAsync<InvalidOperationException>(async () =>
+            await ReadExecutionMessagesAsync(
+                provider,
+                new CopilotOptions { ExecutablePath = "/resolved/copilot", Model = "fusion", FusionTier = CopilotFusionTier.Standard },
+                "do not send this prompt"));
+
+        exception.Message.ShouldContain("CLI version: unknown");
+        exception.Message.ShouldContain("could not be determined from its help output");
+        processManager.ExecutedContexts.Select(static context => context.ExecutablePath).Distinct().ShouldBe(["/resolved/copilot"]);
+        gateway.CreatedRuntimeCount.ShouldBe(0);
+        gateway.SendPromptInvocationCount.ShouldBe(0);
+    }
+
+    [Test]
+    public async Task Concurrent_fusion_executions_with_different_tiers_reject_independently()
+    {
+        var processManager = new KeyedCliProcessManager(context =>
+            string.Join(' ', context.Arguments) == "--help"
+                ? new ProcessResult(0, "Usage: copilot --auto-tier <preference>", string.Empty)
+                : new ProcessResult(0, "copilot 1.0.105", string.Empty));
+        var gateway = new StubCopilotSdkGateway([]);
+        var provider = CreateProviderWithRuntimeEnvironment(gateway, new Dictionary<string, string?>(), processManager);
+
+        var messages = await Task.WhenAll(new[] { CopilotFusionTier.Standard, CopilotFusionTier.High, CopilotFusionTier.Max }.Select(
+            async tier =>
+            {
+                var exception = await Should.ThrowAsync<InvalidOperationException>(async () =>
+                    await ReadExecutionMessagesAsync(
+                        provider,
+                        new CopilotOptions { ExecutablePath = "/resolved/copilot", Model = "fusion", FusionTier = tier },
+                        "do not send this prompt"));
+                return exception.Message;
+            }));
+
+        messages.Length.ShouldBe(3);
+        messages.Count(static message => message.Contains("requested tier='standard'")).ShouldBe(1);
+        messages.Count(static message => message.Contains("requested tier='high'")).ShouldBe(1);
+        messages.Count(static message => message.Contains("requested tier='max'")).ShouldBe(1);
+        gateway.CreatedRuntimeCount.ShouldBe(0);
+        gateway.SendPromptInvocationCount.ShouldBe(0);
+    }
+
+    [Test]
+    public async Task Concurrent_single_model_executions_each_send_exactly_one_prompt_without_fusion_configuration()
+    {
+        var gateway = new StubCopilotSdkGateway([]);
+        var provider = CreateProviderWithRuntimeEnvironment(gateway, new Dictionary<string, string?>());
+
+        await Task.WhenAll(
+            ReadExecutionMessagesAsync(provider, new CopilotOptions { ExecutablePath = "/resolved/copilot", Model = "gpt-5" }, "first prompt"),
+            ReadExecutionMessagesAsync(provider, new CopilotOptions { ExecutablePath = "/resolved/copilot", Model = "claude-sonnet" }, "second prompt"));
+
+        gateway.CreatedRuntimeCount.ShouldBe(2);
+        gateway.SendPromptInvocationCount.ShouldBe(2);
+        gateway.SendPromptCallCount.ShouldBe(2);
+        gateway.CreateRequests.Select(static request => request.Model).Order().ShouldBe(["claude-sonnet", "gpt-5"]);
+        gateway.CreateRequests.ShouldAllBe(static request => request.FusionTier == null && !request.FusionTierIsExplicitlyUnset);
+    }
+
+    [Test]
     public void BuildCliArgs_filters_unsupported_flags_and_records_diagnostics()
     {
         var result = CopilotCliCompatibility.BuildCliArgs(new CopilotOptions
@@ -1292,11 +1692,12 @@ public sealed class CopilotProviderTests
 
     private static TestCopilotProvider CreateProviderWithRuntimeEnvironment(
         ICopilotSdkGateway gateway,
-        IReadOnlyDictionary<string, string?> runtimeEnvironment)
+        IReadOnlyDictionary<string, string?> runtimeEnvironment,
+        CliProcessManager? processManager = null)
     {
         return new TestCopilotProvider(
             new StubExecutableResolver(),
-            new StubCliProcessManager(),
+            processManager ?? new StubCliProcessManager(),
             gateway,
             new StaticRuntimeEnvironmentResolver(runtimeEnvironment));
     }
@@ -1394,6 +1795,8 @@ public sealed class CopilotProviderTests
 
         public int SendPromptCallCount { get; private set; }
 
+        public int SendPromptInvocationCount { get; private set; }
+
         public List<CopilotSdkRequest> CreateRequests { get; } = [];
 
         public Task<IReadOnlyList<CopilotSdkModelInfo>> ListModelsAsync(
@@ -1414,6 +1817,7 @@ public sealed class CopilotProviderTests
             CopilotSdkRequest request,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
+            SendPromptInvocationCount++;
             await using var runtime = await CreateRuntimeAsync(request, cancellationToken);
             await foreach (var eventData in runtime.SendPromptAsync(request, cancellationToken))
             {
@@ -1554,14 +1958,44 @@ public sealed class CopilotProviderTests
         }
     }
 
+    // Answers each probe from its executable path and arguments, so tests can tell the resolved CLI from an unrelated one.
+    private sealed class KeyedCliProcessManager(Func<ProcessStartContext, ProcessResult> handler) : CliProcessManager
+    {
+        private readonly List<ProcessStartContext> _executedContexts = [];
+
+        public IReadOnlyList<ProcessStartContext> ExecutedContexts
+        {
+            get
+            {
+                lock (_executedContexts)
+                {
+                    return _executedContexts.ToArray();
+                }
+            }
+        }
+
+        public override Task<ProcessResult> ExecuteAsync(ProcessStartContext context, CancellationToken cancellationToken = default)
+        {
+            lock (_executedContexts)
+            {
+                _executedContexts.Add(context);
+            }
+
+            return Task.FromResult(handler(context));
+        }
+    }
+
     private sealed class StubCliProcessManager : CliProcessManager
     {
         public Queue<ProcessResult> ExecuteResults { get; init; } = new([
             new ProcessResult(0, "copilot 1.0.10", string.Empty)
         ]);
 
+        public List<ProcessStartContext> ExecutedContexts { get; } = [];
+
         public override Task<ProcessResult> ExecuteAsync(ProcessStartContext context, CancellationToken cancellationToken = default)
         {
+            ExecutedContexts.Add(context);
             if (ExecuteResults.Count == 0)
             {
                 return Task.FromResult(new ProcessResult(1, string.Empty, "missing result"));

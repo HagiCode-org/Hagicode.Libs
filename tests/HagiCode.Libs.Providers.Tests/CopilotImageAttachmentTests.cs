@@ -121,12 +121,12 @@ public sealed class CopilotImageAttachmentTests
         var attachments = message.Attachments.ShouldNotBeNull();
         attachments.Count.ShouldBe(2);
 
-        var first = attachments[0].ShouldBeOfType<UserMessageAttachmentBlob>();
+        var first = attachments[0].ShouldBeOfType<AttachmentBlob>();
         first.Data.ShouldBe(PngBase64);
         first.MimeType.ShouldBe("image/png");
         first.DisplayName.ShouldBe("first.png");
 
-        var second = attachments[1].ShouldBeOfType<UserMessageAttachmentBlob>();
+        var second = attachments[1].ShouldBeOfType<AttachmentBlob>();
         second.MimeType.ShouldBe("image/jpeg");
         second.DisplayName.ShouldBe("image");
         factory.CreateSessionCount.ShouldBe(1);
@@ -179,7 +179,7 @@ public sealed class CopilotImageAttachmentTests
                 Content = "see image",
                 Attachments =
                 [
-                    new UserMessageAttachmentBlob
+                    new AttachmentBlob
                     {
                         Data = PngBase64,
                         MimeType = "image/png",

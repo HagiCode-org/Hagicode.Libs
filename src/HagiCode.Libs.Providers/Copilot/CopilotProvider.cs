@@ -4,6 +4,7 @@ using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Environment;
 using HagiCode.Libs.Core.Process;
 using HagiCode.Libs.Core.Transport;
+using GitHub.Copilot;
 
 namespace HagiCode.Libs.Providers.Copilot;
 
@@ -72,6 +73,7 @@ public class CopilotProvider : ICliProvider<CopilotOptions>, ICopilotModelCapabi
         var steering = options.Steering;
         var steerTurn = steering is null ? null : new CopilotSteerTurn(steering, options.SteerDeliveryTimeout);
         var sdkRequest = BuildSdkRequest(options, prompt, executablePath, runtimeEnvironment, steerTurn);
+        await EnsureFusionExecutionCompatibleAsync(sdkRequest, cancellationToken).ConfigureAwait(false);
 
         // The handle is attached only while this iterator runs. The finally detaches it however the run ends, so a steer
         // sent later finds nothing to write to.
@@ -192,7 +194,10 @@ public class CopilotProvider : ICliProvider<CopilotOptions>, ICopilotModelCapabi
             UserInputHandler: options.UserInputHandler,
             QuestionTimeout: options.QuestionTimeout,
             Images: options.Images,
-            Steering: steering);
+            Steering: steering,
+            FusionTier: options.FusionTier,
+            FusionTierIsExplicitlyUnset: options.FusionTierIsExplicitlyUnset
+                && string.Equals(options.Model, "fusion", StringComparison.OrdinalIgnoreCase));
     }
 
     internal virtual IReadOnlyDictionary<string, string?> BuildEnvironmentVariables(
@@ -253,6 +258,23 @@ public class CopilotProvider : ICliProvider<CopilotOptions>, ICopilotModelCapabi
         if (options.IdleTimeout <= TimeSpan.Zero)
         {
             throw new InvalidOperationException("CopilotOptions.IdleTimeout must be greater than zero.");
+        }
+
+        if (options.FusionTier is { } fusionTier && !Enum.IsDefined(fusionTier))
+        {
+            throw new InvalidOperationException("CopilotOptions.FusionTier must be Standard, High, or Max.");
+        }
+
+        if (options.FusionTier is not null && options.FusionTierIsExplicitlyUnset)
+        {
+            throw new InvalidOperationException("CopilotOptions cannot set a Fusion tier and explicitly unset it together.");
+        }
+
+        if (options.FusionTier is not null && !CopilotFusionCompatibility.IsFusionModel(options.Model))
+        {
+            throw new InvalidOperationException(
+                $"CopilotOptions.FusionTier requires Model 'fusion' but Model is '{options.Model ?? "unspecified"}'. " +
+                "A concrete Fusion tier is not silently dropped for a single model.");
         }
 
         if (options.SteerDeliveryTimeout <= TimeSpan.Zero)
@@ -392,6 +414,96 @@ public class CopilotProvider : ICliProvider<CopilotOptions>, ICopilotModelCapabi
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Decides whether a Fusion request may reach the SDK. Probes only the executable the SDK will launch, and throws
+    /// before any session create, restore or prompt send unless the outcome is supported.
+    /// </summary>
+    private async Task EnsureFusionExecutionCompatibleAsync(CopilotSdkRequest sdkRequest, CancellationToken cancellationToken)
+    {
+        if (!CopilotFusionCompatibility.IsFusionModel(sdkRequest.Model)
+            && sdkRequest.FusionTier is null)
+        {
+            return;
+        }
+
+        // Concrete tiers with a non-Fusion model, undefined tiers and explicit-unset conflicts are rejected by ValidateOptions.
+        var cliVersion = await TryProbeCliVersionForFusionAsync(sdkRequest, cancellationToken).ConfigureAwait(false);
+        var cliSupportsTier = await TryProbeCliFusionTierForFusionAsync(sdkRequest, cancellationToken).ConfigureAwait(false);
+        var operation = sdkRequest.FusionTierIsExplicitlyUnset
+            ? CopilotFusionOperation.Reset
+            : string.IsNullOrWhiteSpace(sdkRequest.SessionId)
+                ? CopilotFusionOperation.Create
+                : CopilotFusionOperation.Restore;
+        var compatibility = CopilotFusionCompatibility.Evaluate(
+            sdkRequest.CliPath,
+            cliVersion,
+            cliSupportsTier,
+            CopilotFusionCompatibility.GetSdkVersion(),
+            CopilotFusionCompatibility.HasTypedFusionTierApi,
+            CopilotFusionCompatibility.GatewayMapsTypedFusionTier,
+            sdkRequest.Model,
+            sdkRequest.FusionTier,
+            operation,
+            officialDefaultVerified: false,
+            resetSupported: false);
+        if (compatibility.Status != CopilotFusionCompatibilityStatus.Supported)
+        {
+            throw new InvalidOperationException(compatibility.Message);
+        }
+    }
+
+    // A probe that cannot run leaves its fact unknown; it never becomes a support claim.
+    private async Task<string?> TryProbeCliVersionForFusionAsync(CopilotSdkRequest sdkRequest, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await TryGetVersionAsync(sdkRequest.CliPath, sdkRequest.EnvironmentVariables, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            return null;
+        }
+    }
+
+    private async Task<bool?> TryProbeCliFusionTierForFusionAsync(CopilotSdkRequest sdkRequest, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await TryGetCliFusionTierSupportAsync(sdkRequest.CliPath, sdkRequest.EnvironmentVariables, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            return null;
+        }
+    }
+
+    private async Task<bool?> TryGetCliFusionTierSupportAsync(
+        string executablePath,
+        IReadOnlyDictionary<string, string?> environmentVariables,
+        CancellationToken cancellationToken)
+    {
+        var result = await _processManager.ExecuteAsync(
+            new ProcessStartContext
+            {
+                ExecutablePath = executablePath,
+                Arguments = ["--help"],
+                EnvironmentVariables = environmentVariables,
+                Timeout = TimeSpan.FromSeconds(15),
+                ApplyResourceLimits = false
+            },
+            cancellationToken).ConfigureAwait(false);
+
+        if (result.ExitCode != 0)
+        {
+            return null;
+        }
+
+        return (result.StandardOutput + Environment.NewLine + result.StandardError)
+            .Contains("--fusion-tier", StringComparison.Ordinal);
     }
 
     private static CliMessage? MapEvent(CopilotSdkStreamEvent eventData)
