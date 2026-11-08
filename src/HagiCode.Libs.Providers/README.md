@@ -91,6 +91,16 @@ var poolDefaults = serviceProvider.GetRequiredService<CliProviderPoolConfigurati
 - `hermes` -> `hermes-cli`
 - `pi` -> `pi-cli`
 
+### Copilot Fusion compatibility
+
+The official [Copilot CLI model-selection guide](https://docs.github.com/en/copilot/how-tos/copilot-cli/use-copilot-cli/choose-a-model) documents `fusion` with `--fusion-tier standard|high|max`. The locally resolved combination is CLI `1.0.107` and `GitHub.Copilot.SDK` `1.0.30-preview.1` (2026-11-08). The CLI parses `--fusion-tier standard|high|max`, but a live probe logged that model `fusion` was not available on the account and fell back to another model, so an accepted flag is not evidence that Fusion ran. The SDK session types expose `ContextTier` (a context-window tier) and no typed Fusion tier field. The installed combination therefore cannot execute Fusion through this provider.
+
+To recheck the environment, run `copilot --version`, `copilot --help`, `copilot --model fusion --fusion-tier standard --help`, and `dotnet list src/HagiCode.Libs.Providers/HagiCode.Libs.Providers.csproj package --include-transitive` from the `Hagicode.Libs` repository root. The last command resolves the SDK used by this provider; the CLI path passed to the SDK is the provider's resolved executable, not an unrelated PATH probe.
+
+The official CLI guide does not state the default when Fusion tier is omitted or document SDK-native reset and model/tier transitions. No Fusion execution, default, or transition behavior is claimed for this combination. Do not map Fusion to Auto, drop tier intent, or use a raw CLI prompt fallback; callers must report unsupported compatibility before creating/restoring a session or sending a prompt.
+
+`CopilotOptions.FusionTier` is an optional `CopilotFusionTier` (`Standard`, `High`, or `Max`) and is distinct from reasoning effort. Its JSON wire values are the lowercase strings `standard`, `high`, and `max`; omitted values remain unspecified rather than being inferred as `standard`. The request keeps the selected model and tier together, but the current SDK gateway cannot apply either an explicit tier or an unspecified tier to create/restore configuration, so its compatibility preflight rejects Fusion before session creation, restoration, or prompt send, and the SDK gateway repeats that rejection before it creates a client or session. `FusionTier = null` does not mean an explicit reset, and reset-to-default is unsupported until an official default and native reset operation are verified.
+
 ## Provider usage
 
 ```csharp
@@ -530,7 +540,7 @@ await foreach (var message in copilot.ExecuteAsync(options, "Ask me which color,
 - **Stop:** cancelling the caller cancels a pending question and ends the run through the normal cancellation path; nothing is recorded as declined.
 - **Options:** `CopilotOptions.ToString()` does not print `GitHubToken`.
 
-**Verification status (SDK `GitHub.Copilot.SDK` 1.0.0-beta.10, Copilot CLI 1.0.92):**
+**Verification status (recorded on SDK `GitHub.Copilot.SDK` 1.0.0-beta.10 and Copilot CLI 1.0.92; the SDK pin is now 1.0.30-preview.1 and these gates were not re-run after the upgrade):**
 
 - The live probe did not run: no Copilot credentials were exported to the environment (`COPILOT_GITHUB_TOKEN`, `GH_TOKEN` and `GITHUB_TOKEN` are unset), and the user's stored login was not copied into a scratch home. Gates G1, G2, G4 and G5 are **unverified**. Export one of the variables and run the opt-in tests below to settle them.
 - G1 (callback and `user_input.requested` order, and whether the question text matches): unverified. The matching queue and the fallback id cover either order.
