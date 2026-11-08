@@ -40,6 +40,8 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
         CancellationToken cancellationToken = default)
     {
         // Fusion intent is rejected before any client, environment lease or session operation.
+        // This gate covers both create and restore: each path below (ResumeWithRetryAsync and the fresh CreateSessionAsync) runs after it.
+        // TODO(copilot-fusion-model-tiers): deferred SDK integration. Apply the Fusion tier through verified SDK-native session configuration once a typed field or RPC exists. See openspec/changes/copilot-fusion-model-tiers/specs/copilot-sdk-cli-compatibility/spec.md, section "Deferred SDK integration point".
         CopilotFusionCompatibility.ThrowIfGatewayCannotApply(request);
         var clientOptions = BuildClientOptions(request);
         using var startupCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -173,8 +175,21 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
         return rawMessage ?? "GitHub Copilot stream failed.";
     }
 
+    // A Fusion compatibility refusal is terminal on create, restore and retry alike: no fresh session or retry can make the
+    // combination supported. It is checked before the generic InvalidOperationException rule, which would otherwise allow it.
+    private static bool IsFusionCompatibilityFailure(Exception exception)
+    {
+        return exception is CopilotFusionCompatibilityException
+               || EnumerateExceptionMessages(exception).Any(static message => message.Contains("[copilot_fusion_", StringComparison.Ordinal));
+    }
+
     private static bool ShouldFallbackToFreshSession(Exception exception, CopilotSdkRequest request)
     {
+        if (IsFusionCompatibilityFailure(exception))
+        {
+            return false;
+        }
+
         if (exception is InvalidOperationException)
         {
             return true;
@@ -242,9 +257,9 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
                     BuildResumeSessionConfig(request, pendingQuestions),
                     cancellationToken).ConfigureAwait(false);
             }
-            catch (Exception ex) when (!EnumerateExceptionMessages(ex).Any(IsAuthenticationFailure))
+            catch (Exception ex) when (!EnumerateExceptionMessages(ex).Any(IsAuthenticationFailure) && !IsFusionCompatibilityFailure(ex))
             {
-                // Authentication failures are deterministic and not worth retrying; transient or
+                // Authentication and Fusion compatibility failures are deterministic and not worth retrying; transient or
                 // unknown resume failures get another attempt before we fall back to a fresh session.
                 lastException = ex;
             }

@@ -11,7 +11,7 @@ namespace HagiCode.Libs.Providers.Copilot;
 /// <summary>
 /// Implements GitHub Copilot integration through the SDK-managed Copilot session path.
 /// </summary>
-public class CopilotProvider : ICliProvider<CopilotOptions>, ICopilotModelCapabilityReader
+public class CopilotProvider : ICliProvider<CopilotOptions>, ICopilotModelCapabilityReader, ICopilotFusionCompatibilityPreflight
 {
     private static readonly string[] DefaultExecutableCandidates = ["copilot"];
 
@@ -450,7 +450,35 @@ public class CopilotProvider : ICliProvider<CopilotOptions>, ICopilotModelCapabi
             resetSupported: false);
         if (compatibility.Status != CopilotFusionCompatibilityStatus.Supported)
         {
-            throw new InvalidOperationException(compatibility.Message);
+            throw new CopilotFusionCompatibilityException(compatibility.Message);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<CopilotFusionPreflightResult> CheckFusionCompatibilityAsync(
+        CopilotOptions options,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        var runtimeEnvironment = await ResolveRuntimeEnvironmentAsync(cancellationToken).ConfigureAwait(false);
+        var executablePath = ResolveExecutablePath(options, runtimeEnvironment);
+        if (executablePath is null)
+        {
+            return new CopilotFusionPreflightResult(
+                CopilotFusionPreflightStatus.NotChecked,
+                "No Copilot executable was found, so the Fusion compatibility check could not run.");
+        }
+
+        // Same decision as ExecuteAsync: the request is built for the resolved executable and runs the same gate, with no session or send.
+        var sdkRequest = BuildSdkRequest(options, CapabilityReadPlaceholderPrompt, executablePath, runtimeEnvironment);
+        try
+        {
+            await EnsureFusionExecutionCompatibleAsync(sdkRequest, cancellationToken).ConfigureAwait(false);
+            return new CopilotFusionPreflightResult(CopilotFusionPreflightStatus.Supported, null);
+        }
+        catch (CopilotFusionCompatibilityException exception)
+        {
+            return new CopilotFusionPreflightResult(CopilotFusionPreflightStatus.Blocked, exception.Message);
         }
     }
 

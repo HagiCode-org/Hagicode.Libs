@@ -222,6 +222,55 @@ public sealed class CopilotProviderTests
     }
 
     [Test]
+    public async Task CheckFusionCompatibility_blocks_a_fusion_tier_with_the_execution_decision_and_starts_no_session()
+    {
+        var processManager = new StubCliProcessManager
+        {
+            ExecuteResults = new Queue<ProcessResult>(
+            [
+                new ProcessResult(0, "copilot 99.0.0", string.Empty),
+                new ProcessResult(0, "Usage: copilot [options] --fusion-tier <standard|high|max>", string.Empty)
+            ])
+        };
+        var gateway = new StubCopilotSdkGateway([]);
+        var provider = CreateProviderWithRuntimeEnvironment(
+            gateway,
+            new Dictionary<string, string?> { ["PATH"] = "/unrelated/bin" },
+            processManager);
+
+        var result = await provider.CheckFusionCompatibilityAsync(
+            new CopilotOptions { ExecutablePath = "/resolved/copilot", Model = "fusion", FusionTier = CopilotFusionTier.High });
+
+        result.Status.ShouldBe(CopilotFusionPreflightStatus.Blocked);
+        result.Message.ShouldNotBeNull();
+        result.Message.ShouldContain("[copilot_fusion_unsupported]");
+        result.Message.ShouldContain("requested tier='high'");
+        result.Message.ShouldContain("copilot 99.0.0");
+        result.Message.ShouldContain("No session was created or restored, and no prompt was sent.");
+        processManager.ExecutedContexts.Select(static context => context.ExecutablePath).ShouldBe(
+            ["/resolved/copilot", "/resolved/copilot"]);
+        gateway.CreatedRuntimeCount.ShouldBe(0);
+        gateway.SendPromptInvocationCount.ShouldBe(0);
+        gateway.SendPromptCallCount.ShouldBe(0);
+    }
+
+    [Test]
+    public async Task CheckFusionCompatibility_leaves_a_single_model_request_unprobed_and_supported()
+    {
+        var processManager = new StubCliProcessManager();
+        var gateway = new StubCopilotSdkGateway([]);
+        var provider = CreateProviderWithRuntimeEnvironment(gateway, new Dictionary<string, string?>(), processManager);
+
+        var result = await provider.CheckFusionCompatibilityAsync(
+            new CopilotOptions { ExecutablePath = "/resolved/copilot", Model = "gpt-5-mini" });
+
+        result.Status.ShouldBe(CopilotFusionPreflightStatus.Supported);
+        result.Message.ShouldBeNull();
+        processManager.ExecutedContexts.ShouldBeEmpty();
+        gateway.CreatedRuntimeCount.ShouldBe(0);
+    }
+
+    [Test]
     public async Task ExecuteAsync_blocks_unspecified_fusion_tier_when_official_default_is_unknown()
     {
         var processManager = new StubCliProcessManager

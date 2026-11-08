@@ -21,6 +21,13 @@ internal sealed record CopilotFusionCompatibilityResult(
     CopilotFusionCompatibilityStatus Status,
     string Message);
 
+/// <summary>
+/// A Fusion request the compatibility gate refused before any session or prompt operation. It is terminal: a fresh session or a
+/// retry cannot make an unsupported or unknown combination supported, so the gateway never falls back on it. It is still an
+/// <see cref="InvalidOperationException"/>, so existing callers are unaffected.
+/// </summary>
+internal sealed class CopilotFusionCompatibilityException(string message) : InvalidOperationException(message);
+
 internal static class CopilotFusionCompatibility
 {
     // Keep requests blocked until both native create and restore config builders map the typed field.
@@ -56,7 +63,7 @@ internal static class CopilotFusionCompatibility
             var reason = hasInvalidTier
                 ? "the Fusion tier is not one of standard, high, or max"
                 : "a concrete Fusion tier was supplied with a non-Fusion model";
-            throw new InvalidOperationException(
+            throw new CopilotFusionCompatibilityException(
                 $"[copilot_fusion_invalid] Fusion request model='{request.Model ?? "unspecified"}' is invalid: {reason}. " +
                 $"Executable: {request.CliPath}; SDK version: {GetSdkVersion() ?? "unknown"}. " +
                 "No session was created or restored, and no prompt was sent.");
@@ -73,7 +80,7 @@ internal static class CopilotFusionCompatibility
         var reasonText = request.FusionTierIsExplicitlyUnset
             ? "an explicit Fusion tier reset to the official default has no verified native reset on this SDK"
             : "the SDK gateway has no verified mapping from a Fusion tier into native create or restore session configuration";
-        throw new InvalidOperationException(
+        throw new CopilotFusionCompatibilityException(
             $"[copilot_fusion_unsupported] Fusion request model='{request.Model ?? "unspecified"}', requested tier='{requestedTier}' " +
             $"is unsupported by the SDK gateway. Executable: {request.CliPath}; SDK version: {GetSdkVersion() ?? "unknown"}. " +
             $"Reason: {reasonText}. No session was created or restored, and no prompt was sent.");
