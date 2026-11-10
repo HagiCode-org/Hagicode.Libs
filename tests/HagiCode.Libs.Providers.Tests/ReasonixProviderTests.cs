@@ -1006,7 +1006,7 @@ public sealed class ReasonixProviderTests
             InitializeCalls++;
             return Task.FromResult(initializeResult ?? JsonSerializer.SerializeToElement(new
             {
-                agentInfo = new { name = "reasonix", version = "1.2.0" }
+                agentInfo = new { name = "reasonix", version = "2.59.0" }
             }));
         }
 

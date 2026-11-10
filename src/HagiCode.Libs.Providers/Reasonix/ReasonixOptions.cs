@@ -6,7 +6,7 @@ using HagiCode.Libs.Providers;
 /// Describes a Reasonix ACP CLI invocation.
 /// </summary>
 /// <remarks>
-/// Targets the Reasonix 2.x ACP contract (the npm <c>latest</c> line, verified with <c>v2.41.0</c>). The 1.x line is
+/// Targets the Reasonix 2.x ACP contract (the npm <c>latest</c> line, now 2.59.0; the committed transcripts were recorded from <c>v2.41.0</c>). The 1.x line is
 /// supported on a best-effort basis without dedicated tests. Fields marked legacy are kept so stored settings still
 /// load, but Reasonix 2.x does not apply them.
 /// </remarks>

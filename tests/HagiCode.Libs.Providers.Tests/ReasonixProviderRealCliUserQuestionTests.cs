@@ -14,8 +14,8 @@ namespace HagiCode.Libs.Providers.Tests;
 /// only when <c>HAGICODE_REAL_CLI_TESTS</c> is <c>1</c> or <c>true</c>, like the other Reasonix real-CLI tests; otherwise
 /// they return before any process is started. <c>HAGICODE_REAL_CLI_REASONIX_MODEL</c> picks the model ref (for example
 /// <c>omniroute/cc/claude-haiku-4-5-20251001</c>); without it Reasonix uses the default model of its configuration. The
-/// working directory is a scratch directory; Reasonix reads its providers from the user's Reasonix home. Verified against
-/// Reasonix v2.41.0. A failure message names the Reasonix behavior that changed.
+/// working directory is a scratch directory; Reasonix reads its providers from the user's Reasonix home. Expectations come from
+/// the v2.41.0 transcripts; a run against the 2.59.0 desktop pin is the check that they still hold. A failure message names the Reasonix behavior that changed.
 /// </summary>
 [Category("Integration")]
 public sealed class ReasonixProviderRealCliUserQuestionTests
