@@ -182,8 +182,8 @@ The fixed first three do not depend on how `PATHEXT` lists them. A native `.exe`
 | ClaudeCode | `@anthropic-ai/claude-code` | `@anthropic-ai/claude-code-win32-x64`: `claude.exe` at the package root | 2.1.168 (pin), 2.1.307 | `RequireNative` |
 | Copilot | `@github/copilot` (Node loader) | `@github/copilot-win32-x64`: `copilot.exe` | 1.0.60 (pin), 1.0.102 | `RequireNative` |
 | Codex | `@openai/codex` (Node script) | `@openai/codex-win32-x64`: `vendor\x86_64-pc-windows-msvc\codex\codex.exe` | 0.115.0 (pin), 0.163.0 | `RequireNative` |
-| OpenCode | `opencode-ai` | `opencode-windows-x64`: `bin\opencode.exe` (and `-baseline`, `-windows-arm64`) | 1.3.3 (pin), 1.19.3 | `PreferNative` with a packaged layout |
-| Reasonix | `reasonix` (Node script) | `@reasonix/cli-win32-x64`: `bin\reasonix.exe` | 2.47.1 (no registry pin) | `PreferNative` with a packaged layout |
+| OpenCode | `@opencode/cli` | `@opencode/cli-windows-x64`: `bin\opencode.exe` (and `-baseline`, `-windows-arm64`) | 2.2.7 (pin) | `PreferNative` with a packaged layout |
+| Reasonix | `reasonix` (Node script) | `@reasonix/cli-win32-x64`: `bin\reasonix.exe` | 2.59.0 (no registry pin) | `PreferNative` with a packaged layout |
 | Pi, Omp, Gemini, QoderCLI, Codebuddy | Node scripts | none found | 1.4.0, 18.12.6, 0.65.0, 1.1.76, 2.172.1 | `PreferNative`, script only |
 | Kimi, Hermes, DeepAgents, Kiro, Junie, Dsh | not npm packages in this registry | not examined | none | `PreferNative`, not examined |
 
@@ -233,7 +233,7 @@ The rejection error is a `CliCommandScriptArgumentException`. It names the argum
 
 ### Worked example (`PreferNative`, OpenCode)
 
-With `opencode.cmd` in the npm prefix and `bin\opencode.exe` in `opencode-windows-x64` beside it, the lookup returns the `.exe`, which starts with no shell. With only `opencode.cmd`, the lookup returns the `.cmd`, which starts through the rule above. The argument `{"mode":"fast"}` becomes `"{\"mode\":\"fast\"}"`, is accepted, and reaches the script as one argument. The argument `x" & echo injected & "y` is rejected with a `CliCommandScriptArgumentException` for argument 0, and nothing runs.
+With `opencode.cmd` in the npm prefix and `bin\opencode.exe` in `@opencode/cli-windows-x64` beside it, the lookup returns the `.exe`, which starts with no shell. With only `opencode.cmd`, the lookup returns the `.cmd`, which starts through the rule above. The argument `{"mode":"fast"}` becomes `"{\"mode\":\"fast\"}"`, is accepted, and reaches the script as one argument. The argument `x" & echo injected & "y` is rejected with a `CliCommandScriptArgumentException` for argument 0, and nothing runs.
 
 ### Known constraints from the argument scan
 

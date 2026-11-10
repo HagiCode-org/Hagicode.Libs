@@ -124,19 +124,38 @@ await foreach (var message in opencode.ExecuteAsync(
 - `hermes` -> `hermes-cli`
 - `opencode` -> `open-code`, `opencode-cli`
 
+## CLI install metadata
+
+### CLI install registry
+
+All CLI metadata is centralized in `HagiCode.Libs.Core.Discovery.CliInstallRegistry`. A repository test (`CliInstallRegistryTests`) fails when a package or pinned version in this table differs from the registry.
+
+| Provider | npm Package | Pinned Version | CI-Covered |
+|----------|-------------|----------------|------------|
+| Claude Code | `@anthropic-ai/claude-code` | 2.1.168 | Yes |
+| Copilot | `@github/copilot` | 1.0.60 | Yes |
+| Codex | `@openai/codex` | 0.115.0 | Yes |
+| OpenCode | `@opencode/cli` | 2.2.7 | Yes |
+| CodeBuddy | (private) | — | No |
+| Gemini | (local / explicit validation) | — | No |
+| Hermes | (private) | — | No |
+| Kimi | (local / explicit validation) | — | No |
+| Pi | `@earendil-works/pi-coding-agent` (local / explicit validation, Node >=22.19.0) | — | No |
+| QoderCLI | (private) | — | No |
+
 ## OpenCode install metadata
 
 `CliInstallRegistry` now tracks OpenCode as a publicly installable CLI descriptor:
 
-- npm package: `opencode-ai@1.3.3` (predates the OpenCode 2.0 runtime; see "OpenCode 2.0 runtime compatibility")
+- npm package: `@opencode/cli@2.2.7` (OpenCode 2.x; see "OpenCode 2.0 runtime compatibility")
 - executable candidates: `opencode`
 - public installability: `true`
 
-The descriptor is aligned with the official OpenCode install guidance (`npm i -g opencode-ai@latest`) plus the pinned npm version snapshot resolved for this repository on `2026-03-28`.
+The descriptor follows the OpenCode 2 install guidance (`npm install -g @opencode/cli`). The 1.x line stayed on the `opencode-ai` package name and is not supported.
 
 ## OpenCode 2.0 runtime compatibility
 
-`HagiCode.Libs.Providers` supports **OpenCode 2.0** (verified with `v2.0.32`). OpenCode 1.x is no longer supported: its routes answer with the Web UI HTML shell and HTTP 200, which the provider reports as an unsupported API version instead of a JSON error.
+`HagiCode.Libs.Providers` supports **OpenCode 2.0** (fixtures were recorded against `v2.0.32`; the registry pins `2.2.7`, which the fixtures have not yet been re-recorded for). OpenCode 1.x is no longer supported: its routes answer with the Web UI HTML shell and HTTP 200, which the provider reports as an unsupported API version instead of a JSON error.
 
 - **Owned runtime.** The provider launches `opencode serve`. OpenCode 2.0 prints `server listening on <url>` and `server password <value>` at startup; the provider accepts both lines, captures the password, and sends it as HTTP Basic credentials (username `opencode`) on every `/api/*` request. No setting is needed.
 - **Attach mode.** When `OpenCodeOptions.BaseUrl` points at an externally managed runtime that requires a password, set `OpenCodeOptions.ServerPassword`. Without it, the health probe reports `authentication failed` in the `health_probe` stage.
@@ -145,7 +164,7 @@ The descriptor is aligned with the official OpenCode install guidance (`npm i -g
 - **Inline files.** `OpenCodeSessionPromptRequest.FromTextWithFiles(text, files)` adds a `files` array to the prompt body, each entry `{ "mime", "uri", "name" }` with `uri` a `data:<mime>;base64,…` URL (`OpenCodePromptFile`). A request without files omits `files`. OpenCode 2.0 rejects a bare string entry, a `url` key and a non-data URI with HTTP 400. `ToString()` prints lengths, counts and names only, never the data URL.
 - **Model input capabilities.** `OpenCodeHttpClient.ListModelsAsync()` calls `GET /api/model` and returns `OpenCodeModelInfo` entries (`ProviderId`, `Id`, `InputCapabilities` from `capabilities.input`). `AcceptsImage` is true when `image` is listed. A model without `capabilities` has no input capabilities. A failing listing throws only to its caller.
 
-> Note: the `CliInstallRegistry` descriptor still pins `opencode-ai@1.3.3` (see "OpenCode install metadata" above). That version is not compatible with this runtime and needs to move to an OpenCode 2.0 release before the install path can be used with it.
+> Note: the `CliInstallRegistry` descriptor pins `@opencode/cli@2.2.7` (see "OpenCode install metadata" above), the release line this runtime targets.
 
 ## Claude Code thinking display
 
@@ -184,7 +203,7 @@ Verified with Claude Code 2.1.292 and 2.1.295: `--thinking-display summarized` r
 
 ## Reasonix provider
 
-`ReasonixProvider` drives `reasonix acp` over the shared ACP session layer (`AcpSessionClient`). Verified against Reasonix v2.41.0.
+`ReasonixProvider` drives `reasonix acp` over the shared ACP session layer (`AcpSessionClient`). Targets the Reasonix 2.x line (npm latest, 2.59.0 as pinned by the desktop); the committed transcripts were recorded from Reasonix v2.41.0.
 
 - **Interactive questions (`ReasonixOptions.UserInputHandler`):** Reasonix's built-in `ask` tool is always available, and each of its questions arrives as its own ACP `session/request_permission` request: tool call id `ask-<hex>-<turn>-qN`, options `qN:1`, `qN:2`, … plus `qN:cancel` (`reject_once`), with the question text, the options (`Label` / `Description`, read case-insensitively) and the `multi` flag in `toolCall.rawInput` and the header in `toolCall.content`. The next question of the same `ask` call is sent only after the previous one is answered. The handler is `null` by default and then nothing changes: a question request is answered with its first option like any other permission request, no question message is produced, and a warning that names the question is logged through the optional `ILogger<ReasonixProvider>`. When a handler is set, the provider gives `AcpSessionClient` a permission hook (`AcpPermissionRequestHandler`, shared ACP core; the default answer applies when it returns `null`) that routes question requests, and only those, to the handler as a `ReasonixUserInputRequest` (`RequestId` = the `ask-…-qN` tool call id, one `Question` with `Id`, text, `Header`, `MultiSelect` as Reasonix reported it, and the options without `qN:cancel`); tool approvals (`gate-*`) are answered exactly as before.
   The handler returns a `ReasonixUserInputResponse` with the chosen label per question text. ACP carries one option id per answer, so the questions are **single-choice with no free text**: exactly one offered label (matched exactly and as a whole, so a label may contain a comma; with duplicate labels the first option wins) is sent as `selected qN:<i>`. A `null` response, an empty answer, text that is not an offered label, more than one value, a throwing handler and `ReasonixOptions.QuestionTimeout` (default 30 minutes, `Timeout.InfiniteTimeSpan` for no limit; any other non-positive value throws `ArgumentOutOfRangeException` before a process starts when a handler is set) passing decline the question with `selected qN:cancel`, or the `cancelled` outcome when the request offers no cancel option. Reasonix 2.41.0 does not continue after either: it fails the `ask` call with `ask: context canceled` and ends the turn with stop reason `error`. The provider records its own decline and reports such a turn (stop reason `error` or `cancelled`) as `terminal.completed` with `question_declined: true` and the original `stop_reason`; a turn that ends with `error` and no declined question is still `terminal.failed`, and a turn that continues after a decline ends with its own result. Reasonix accepted an answer after 120 seconds. Cancelling the call cancels the handler token, answers a pending question `cancelled` while the transport is still open, records no decline and ends the Reasonix process; the call ends with `OperationCanceledException`.
