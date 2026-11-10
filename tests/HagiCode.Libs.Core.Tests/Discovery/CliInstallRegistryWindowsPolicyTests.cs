@@ -52,9 +52,9 @@ public sealed class CliInstallRegistryWindowsPolicyTests
         var reasonix = CliInstallRegistry.FindByProviderName("Reasonix")!;
 
         opencode.WindowsExecutablePolicy.ShouldBe(CliWindowsExecutablePolicy.PreferNative);
-        opencode.PackagedBinaryLayout!.MainPackage.ShouldBe("opencode-ai");
+        opencode.PackagedBinaryLayout!.MainPackage.ShouldBe("@opencode/cli");
         opencode.PackagedBinaryLayout.Targets.Select(static target => target.PlatformPackage)
-            .ShouldBe(["opencode-windows-x64", "opencode-windows-x64-baseline", "opencode-windows-arm64"]);
+            .ShouldBe(["@opencode/cli-windows-x64", "@opencode/cli-windows-x64-baseline", "@opencode/cli-windows-arm64"]);
 
         reasonix.WindowsExecutablePolicy.ShouldBe(CliWindowsExecutablePolicy.PreferNative);
         reasonix.PackagedBinaryLayout!.Targets.Select(static target => target.PlatformPackage)

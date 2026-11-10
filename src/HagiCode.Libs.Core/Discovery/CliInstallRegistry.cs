@@ -114,23 +114,25 @@ public static class CliInstallRegistry
 
         new CliInstallDescriptor(
             ProviderName: "OpenCode",
-            NpmPackage: "opencode-ai",
-            PinnedVersion: "1.3.3",
+            NpmPackage: "@opencode/cli",
+            PinnedVersion: "2.2.7",
             ExecutableCandidates: ["opencode"],
             IsPubliclyInstallable: true)
         {
-            // opencode-ai ships bin\opencode.exe at 1.19.3 and bin\opencode (no extension) at the pin 1.3.3. The platform package holds the real binary.
+            // OpenCode 2 is published as @opencode/cli (the 1.x line stayed on opencode-ai). The main package's bin\opencode.exe is a
+            // placeholder that the postinstall script replaces with a link to the platform package, which holds the real binary.
             WindowsExecutableEvidence =
-                "PreferNative with a packaged layout. opencode-windows-x64 holds bin\\opencode.exe at the pin (1.3.3) and at 1.19.3; "
-                + "-windows-x64-baseline and -windows-arm64 come from the optional dependencies and were not read. "
+                "PreferNative with a packaged layout. @opencode/cli-windows-x64 holds bin\\opencode.exe at the pin (2.2.7). The layout comes from "
+                + "packages/cli/script/pack.ts at v2.2.7 and the optional dependencies; the tarballs were not inspected. "
+                + "-windows-x64-baseline and -windows-arm64 are listed in the same optional dependencies. "
                 + "The supported Windows install routes were not checked, so promotion to RequireNative waits for that.",
             PackagedBinaryLayout = new CliPackagedBinaryLayout(
-                MainPackage: "opencode-ai",
+                MainPackage: "@opencode/cli",
                 Targets:
                 [
-                    new CliPackagedBinaryTarget(Architecture.X64, "opencode-windows-x64", "bin\\opencode.exe"),
-                    new CliPackagedBinaryTarget(Architecture.X64, "opencode-windows-x64-baseline", "bin\\opencode.exe"),
-                    new CliPackagedBinaryTarget(Architecture.Arm64, "opencode-windows-arm64", "bin\\opencode.exe"),
+                    new CliPackagedBinaryTarget(Architecture.X64, "@opencode/cli-windows-x64", "bin\\opencode.exe"),
+                    new CliPackagedBinaryTarget(Architecture.X64, "@opencode/cli-windows-x64-baseline", "bin\\opencode.exe"),
+                    new CliPackagedBinaryTarget(Architecture.Arm64, "@opencode/cli-windows-arm64", "bin\\opencode.exe"),
                 ],
                 MainPackageFile: "bin\\opencode.exe"),
             InstallStrategies = [NpmStrategy()],
@@ -244,9 +246,9 @@ public static class CliInstallRegistry
             ExecutableCandidates: ["reasonix"],
             IsPubliclyInstallable: false)
         {
-            // reasonix (2.47.1) is a Node script; @reasonix/cli-win32-x64 holds bin\reasonix.exe. No registry pin was available to check.
+            // reasonix (2.59.0, the npm latest tag) is a Node script; @reasonix/cli-win32-x64 holds bin\reasonix.exe. The desktop pins 2.59.0; no registry pin is set here.
             WindowsExecutableEvidence =
-                "PreferNative with a packaged layout. @reasonix/cli-win32-x64 holds bin\\reasonix.exe at 2.47.1 (the only version checked; there is no registry pin); "
+                "PreferNative with a packaged layout. @reasonix/cli-win32-x64 holds bin\\reasonix.exe at 2.59.0 (the npm package exists at this version; the .exe was not inspected); "
                 + "the main package is a Node script. The -win32-arm64 name comes from the optional dependencies. "
                 + "The first npm publish of the platform package is 1.0.0-rc1 (2026-06-03); the oldest release that ships the .exe was not established.",
             PackagedBinaryLayout = new CliPackagedBinaryLayout(

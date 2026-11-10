@@ -55,7 +55,7 @@ public sealed class ProviderWindowsNativePolicyTests
     {
         using var sandbox = new ProviderSandbox();
         sandbox.CreateFile("npm", "opencode.cmd");
-        sandbox.CreateFile("npm", "node_modules", "opencode-windows-x64", "bin", "opencode.exe");
+        sandbox.CreateFile("npm", "node_modules", "@opencode", "cli-windows-x64", "bin", "opencode.exe");
 
         var available = sandbox.WithPath(sandbox.Dir("npm"), () =>
             new OpenCodeProvider(WindowsResolver()).IsAvailable);

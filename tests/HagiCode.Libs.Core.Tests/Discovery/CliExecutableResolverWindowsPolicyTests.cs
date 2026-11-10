@@ -291,7 +291,7 @@ public sealed class CliExecutableResolverWindowsPolicyTests
     {
         using var sandbox = new PolicySandbox();
         sandbox.CreateFile("npm", "opencode.cmd");
-        var exe = sandbox.CreateFile("npm", "node_modules", "opencode-windows-x64", "bin", "opencode.exe");
+        var exe = sandbox.CreateFile("npm", "node_modules", "@opencode", "cli-windows-x64", "bin", "opencode.exe");
         var resolver = CreateWindowsResolver(Architecture.X64);
 
         var lookup = resolver.ResolveProviderExecutable("OpenCode", ["opencode"], sandbox.Env(path: sandbox.Dir("npm")));

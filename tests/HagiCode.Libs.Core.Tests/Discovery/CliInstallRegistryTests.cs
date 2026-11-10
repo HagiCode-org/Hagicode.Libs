@@ -121,8 +121,8 @@ public sealed partial class CliInstallRegistryTests
     {
         var descriptor = CliInstallRegistry.Descriptors.Single(d => d.ProviderName == "OpenCode");
 
-        descriptor.NpmPackage.ShouldBe("opencode-ai");
-        descriptor.PinnedVersion.ShouldBe("1.3.3");
+        descriptor.NpmPackage.ShouldBe("@opencode/cli");
+        descriptor.PinnedVersion.ShouldBe("2.2.7");
         descriptor.ExecutableCandidates.ShouldBe(["opencode"]);
         descriptor.IsPubliclyInstallable.ShouldBeTrue();
     }
