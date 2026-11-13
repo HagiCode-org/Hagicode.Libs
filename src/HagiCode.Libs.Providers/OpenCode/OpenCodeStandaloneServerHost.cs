@@ -17,6 +17,21 @@ public sealed class OpenCodeStandaloneServerHost : IOpenCodeStandaloneServerClie
     private readonly CliExecutableResolver _executableResolver;
     private readonly IRuntimeEnvironmentResolver? _runtimeEnvironmentResolver;
     private readonly OpenCodeProcessLauncher _processLauncher;
+
+    /// <summary>
+    /// The default idle time after which a server dedicated to one session is stopped.
+    /// Measured on this machine: one idle <c>opencode serve</c> starts in about 0.3 s and holds about 200 MB resident.
+    /// </summary>
+    public static readonly TimeSpan DefaultSessionIdleTimeout = TimeSpan.FromMinutes(10);
+
+    private const string SessionIdVariableName = "HAGI_SESSION_ID";
+
+    // Guards the cache entries of per-session servers against the idle sweep: an acquire touches its server under this lock,
+    // and the sweep removes a server only under it, so a server that has just been handed out is never removed.
+    private readonly object _idleGate = new();
+    private readonly ConcurrentDictionary<string, byte> _sessionRuntimeKeys = new(StringComparer.Ordinal);
+    private TimeSpan _sessionIdleTimeout = DefaultSessionIdleTimeout;
+    private Timer? _idleTimer;
     private int _disposed;
 
     public OpenCodeStandaloneServerHost(
@@ -60,6 +75,23 @@ public sealed class OpenCodeStandaloneServerHost : IOpenCodeStandaloneServerClie
             {
                 var runtime = await lazyRuntime.Value.WaitAsync(cancellationToken).ConfigureAwait(false);
                 await ProbeHealthyAsync(runtime, options, runtimeKey, cancellationToken).ConfigureAwait(false);
+                lock (_idleGate)
+                {
+                    // The idle sweep may have removed this entry while the acquire was awaiting; in that case start again.
+                    if (!_runtimeCache.TryGetValue(runtimeKey, out var current) || !ReferenceEquals(current, lazyRuntime))
+                    {
+                        continue;
+                    }
+
+                    runtime.Touch();
+                    if (SessionIdOf(options.RunEnvironmentVariables) is not null)
+                    {
+                        _sessionIdleTimeout = options.SessionIdleTimeout ?? DefaultSessionIdleTimeout;
+                        _sessionRuntimeKeys.TryAdd(runtimeKey, 0);
+                        EnsureIdleTimer();
+                    }
+                }
+
                 return runtime;
             }
             catch
@@ -187,6 +219,13 @@ public sealed class OpenCodeStandaloneServerHost : IOpenCodeStandaloneServerClie
             return;
         }
 
+        lock (_idleGate)
+        {
+            _idleTimer?.Dispose();
+            _idleTimer = null;
+            _sessionRuntimeKeys.Clear();
+        }
+
         foreach (var entry in _runtimeCache.Values)
         {
             if (!entry.IsValueCreated)
@@ -237,8 +276,119 @@ public sealed class OpenCodeStandaloneServerHost : IOpenCodeStandaloneServerClie
             builder.Append("override:").Append(pair.Key).Append('=').Append(Normalize(pair.Value)).Append('|');
         }
 
+        // A run with a session ID gets a server of its own: the session ID is the only run value in the key, because a session has one project.
+        // A sessionless run with run-scoped values keys every such value, since nothing else says which project they belong to.
+        var sessionId = SessionIdOf(options.RunEnvironmentVariables);
+        if (sessionId is not null)
+        {
+            builder.Append("session=").Append(Normalize(sessionId)).Append('|');
+        }
+        else
+        {
+            foreach (var pair in options.RunEnvironmentVariables
+                         .Where(static pair => !string.IsNullOrWhiteSpace(pair.Key) && !string.IsNullOrWhiteSpace(pair.Value))
+                         .OrderBy(static pair => pair.Key, StringComparer.Ordinal))
+            {
+                builder.Append("run:").Append(pair.Key).Append('=').Append(Normalize(pair.Value)).Append('|');
+            }
+        }
+
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(builder.ToString()));
         return Convert.ToHexString(bytes);
+    }
+
+    /// <summary>
+    /// The HagiCode session ID carried by a run's values, or null when the run has none (or a blank one).
+    /// </summary>
+    internal static string? SessionIdOf(IReadOnlyDictionary<string, string?> runEnvironment)
+    {
+        foreach (var (key, value) in runEnvironment)
+        {
+            if (string.Equals(key, SessionIdVariableName, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(value))
+            {
+                return value.Trim();
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Stops the servers dedicated to one session that have been idle for at least the idle timeout and have no run in flight.
+    /// Returns how many were stopped. Called by the idle timer; tests call it directly with a chosen time.
+    /// </summary>
+    internal int SweepIdleSessionRuntimes(DateTimeOffset now)
+    {
+        var stopping = new List<OpenCodeStandaloneServerConnection>();
+        lock (_idleGate)
+        {
+            foreach (var key in _sessionRuntimeKeys.Keys.ToArray())
+            {
+                if (!_runtimeCache.TryGetValue(key, out var lazyRuntime))
+                {
+                    _sessionRuntimeKeys.TryRemove(key, out _);
+                    continue;
+                }
+
+                // A server still starting, or one that failed (its acquire removes it), is not idle.
+                if (!lazyRuntime.IsValueCreated || !lazyRuntime.Value.IsCompletedSuccessfully)
+                {
+                    continue;
+                }
+
+                var runtime = lazyRuntime.Value.Result;
+                if (runtime.IsBusy || now - runtime.LastUsedAt < _sessionIdleTimeout)
+                {
+                    continue;
+                }
+
+                _runtimeCache.TryRemove(key, out _);
+                _sessionRuntimeKeys.TryRemove(key, out _);
+                stopping.Add(runtime);
+            }
+        }
+
+        foreach (var runtime in stopping)
+        {
+            _ = DisposeRuntimeQuietlyAsync(runtime);
+        }
+
+        return stopping.Count;
+    }
+
+    private void EnsureIdleTimer()
+    {
+        if (_idleTimer is not null)
+        {
+            return;
+        }
+
+        // Check a few times per timeout, but at most once a minute and at least every 100 ms.
+        var period = TimeSpan.FromTicks(Math.Clamp(_sessionIdleTimeout.Ticks / 4, TimeSpan.FromMilliseconds(100).Ticks, TimeSpan.FromMinutes(1).Ticks));
+        _idleTimer = new Timer(static state => SweepFromTimer(state), this, period, period);
+    }
+
+    private static void SweepFromTimer(object? state)
+    {
+        try
+        {
+            ((OpenCodeStandaloneServerHost)state!).SweepIdleSessionRuntimes(DateTimeOffset.UtcNow);
+        }
+        catch
+        {
+            // A failed sweep leaves idle servers running until the next one; it must not crash the process.
+        }
+    }
+
+    private static async Task DisposeRuntimeQuietlyAsync(OpenCodeStandaloneServerConnection runtime)
+    {
+        try
+        {
+            await runtime.DisposeAsync().ConfigureAwait(false);
+        }
+        catch
+        {
+        }
     }
 
     private async Task<OpenCodeStandaloneServerConnection> CreateRuntimeAsync(

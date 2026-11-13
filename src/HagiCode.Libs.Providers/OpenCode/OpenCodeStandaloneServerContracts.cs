@@ -41,6 +41,17 @@ public sealed record OpenCodeStandaloneServerOptions
 
     public IReadOnlyDictionary<string, string?> EnvironmentVariables { get; init; } = new Dictionary<string, string?>();
 
+    /// <summary>
+    /// Gets the environment values injected for this run only; see <see cref="OpenCodeOptions.RunEnvironmentVariables"/>.
+    /// </summary>
+    public IReadOnlyDictionary<string, string?> RunEnvironmentVariables { get; init; } = new Dictionary<string, string?>();
+
+    /// <summary>
+    /// Gets how long a server dedicated to one session may stay idle before it is stopped. Only per-session servers expire;
+    /// the shared server of sessionless runs is kept until it is invalidated or the host is disposed. Null uses 10 minutes.
+    /// </summary>
+    public TimeSpan? SessionIdleTimeout { get; init; }
+
     public IReadOnlyList<string> ExtraArguments { get; init; } = [];
 
     /// <summary>
@@ -151,6 +162,45 @@ public sealed class OpenCodeStandaloneServerConnection : IAsyncDisposable
     public bool OwnsRuntime { get; }
 
     public Uri BaseUri => Client.BaseUri;
+
+    private int _activeRuns;
+    private long _lastUsedTicks = DateTimeOffset.UtcNow.UtcTicks;
+
+    /// <summary>
+    /// Gets whether a run is using this server. An idle per-session server is stopped only when this is false.
+    /// </summary>
+    internal bool IsBusy => Volatile.Read(ref _activeRuns) > 0;
+
+    /// <summary>
+    /// Gets when the server was last acquired or a run on it ended.
+    /// </summary>
+    internal DateTimeOffset LastUsedAt => new(Interlocked.Read(ref _lastUsedTicks), TimeSpan.Zero);
+
+    /// <summary>
+    /// Records that the server was just handed out.
+    /// </summary>
+    internal void Touch()
+    {
+        Interlocked.Exchange(ref _lastUsedTicks, DateTimeOffset.UtcNow.UtcTicks);
+    }
+
+    /// <summary>
+    /// Marks a run as using this server until <see cref="EndRun"/> is called.
+    /// </summary>
+    internal void BeginRun()
+    {
+        Interlocked.Increment(ref _activeRuns);
+        Touch();
+    }
+
+    /// <summary>
+    /// Marks the end of a run; the idle time is counted from here.
+    /// </summary>
+    internal void EndRun()
+    {
+        Interlocked.Decrement(ref _activeRuns);
+        Touch();
+    }
 
     public OpenCodeStandaloneServerLifecycleResult LifecycleResult { get; internal set; }
 

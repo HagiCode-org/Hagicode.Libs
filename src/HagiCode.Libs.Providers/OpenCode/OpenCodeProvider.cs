@@ -56,6 +56,28 @@ public class OpenCodeProvider : ICliProvider<OpenCodeOptions>
         ValidateSteerDeliveryTimeout(options);
 
         var runtime = await _standaloneServerClient.AcquireAsync(ToStandaloneOptions(options), cancellationToken).ConfigureAwait(false);
+
+        // The server is busy for the whole run, so the idle sweep cannot stop it while the run streams.
+        runtime.BeginRun();
+        try
+        {
+            await foreach (var message in ExecuteAcquiredAsync(runtime, options, prompt, cancellationToken).ConfigureAwait(false))
+            {
+                yield return message;
+            }
+        }
+        finally
+        {
+            runtime.EndRun();
+        }
+    }
+
+    private async IAsyncEnumerable<CliMessage> ExecuteAcquiredAsync(
+        OpenCodeStandaloneServerConnection runtime,
+        OpenCodeOptions options,
+        string prompt,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
         var sessionResolution = await ResolveSessionAsync(runtime, options, cancellationToken).ConfigureAwait(false);
         var debugContext = BuildDebugContext(sessionResolution);
         var lifecycleMessage = OpenCodeMessageMapper.CreateSessionLifecycleMessage(
@@ -322,6 +344,8 @@ public class OpenCodeProvider : ICliProvider<OpenCodeOptions>
             StartupTimeout = options.StartupTimeout,
             RequestTimeout = options.RequestTimeout,
             EnvironmentVariables = OpenCodeSkillPaths.Apply(options),
+            RunEnvironmentVariables = options.RunEnvironmentVariables,
+            SessionIdleTimeout = options.SessionIdleTimeout,
             ExtraArguments = options.ExtraArguments,
         };
     }

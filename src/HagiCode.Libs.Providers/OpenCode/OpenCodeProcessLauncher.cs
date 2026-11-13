@@ -3,6 +3,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Text.RegularExpressions;
 using HagiCode.Libs.Core.Discovery;
+using HagiCode.Libs.Core.Environment;
 using HagiCode.Libs.Core.Process;
 
 namespace HagiCode.Libs.Providers.OpenCode;
@@ -176,7 +177,9 @@ public sealed class OpenCodeProcessLauncher
 
         WindowsCommandScriptLaunch.ConfigureExecutable(startInfo, executablePath, arguments, _isWindows());
 
-        foreach (var (key, value) in runtimeEnvironment)
+        // Precedence, lowest first: the run's injected values, the resolved runtime environment, then the configured values.
+        var runEnvironment = RunEnvironment.Merge(options.RunEnvironmentVariables, runtimeEnvironment, null);
+        foreach (var (key, value) in runEnvironment)
         {
             if (value is null)
             {

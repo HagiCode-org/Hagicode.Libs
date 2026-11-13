@@ -64,6 +64,20 @@ public sealed record OpenCodeOptions
     public IReadOnlyDictionary<string, string?> EnvironmentVariables { get; init; } = new Dictionary<string, string?>();
 
     /// <summary>
+    /// Gets or sets environment values injected for this run only, such as the HagiCode session and project variables.
+    /// They sit below the resolved environment and <see cref="EnvironmentVariables"/> in precedence, so a user-set value always wins.
+    /// A null or blank value is dropped. A run that carries a session ID is served by a server dedicated to that session
+    /// (see <c>OpenCodeStandaloneServerHost</c>); the other values are not part of that server's key.
+    /// </summary>
+    public IReadOnlyDictionary<string, string?> RunEnvironmentVariables { get; init; } = new Dictionary<string, string?>();
+
+    /// <summary>
+    /// Gets how long a server dedicated to one session may stay idle before it is stopped. Null uses 10 minutes.
+    /// See <see cref="OpenCodeStandaloneServerOptions.SessionIdleTimeout"/>.
+    /// </summary>
+    public TimeSpan? SessionIdleTimeout { get; init; }
+
+    /// <summary>
     /// Gets or sets skill directories added to <c>skills.paths</c> of the inline configuration
     /// (<c>OPENCODE_CONFIG_CONTENT</c>) of a launched runtime. A value already in
     /// <see cref="EnvironmentVariables" />, or else in this process's environment, is extended, never replaced.
