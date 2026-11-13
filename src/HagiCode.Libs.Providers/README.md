@@ -658,6 +658,40 @@ Practical boundaries:
 - Non-Hermes providers now execute as one-shot transports or processes. `SessionId` remains a provider-native continuity hint only where that backend supports it.
 - Idle eviction is lazy and deterministic; if a lease faults, the coordinator disposes that entry immediately rather than returning it to the warm set.
 
+## Run-scoped environment (OpenCode)
+
+`OpenCodeOptions.RunEnvironmentVariables` carries environment values for one run only, such as a HagiCode session ID and project facts. They are merged into the launched `opencode serve` environment in this order, lowest first:
+
+1. `RunEnvironmentVariables` (injected by the caller for this run; a null or blank value is dropped);
+2. the resolved runtime environment (the process environment and the server variables);
+3. `EnvironmentVariables` (the user's configuration).
+
+A user-set value therefore always wins over an injected one. The merge helper is `HagiCode.Libs.Core.Environment.RunEnvironment.Merge`.
+
+Server keying follows from the values:
+
+- A run with a `HAGI_SESSION_ID` gets a server dedicated to that session. Two runs of one session share it, and two sessions get two servers. Only the session ID is part of the server key; the other run values do not change which server a session uses.
+- A sessionless run with no run values shares the original server, as before. A sessionless run that carries run values keys all of them, because nothing else says which project they belong to.
+- A server dedicated to a session is stopped after `SessionIdleTimeout` (default 10 minutes) with no run in flight. A busy server is never stopped. A stopped server is started again on the session's next run.
+- An attached runtime (`BaseUrl`) receives no environment from us, so run values do not reach it.
+
+```csharp
+var options = new OpenCodeOptions
+{
+    ExecutablePath = "/usr/local/bin/opencode",
+    WorkingDirectory = "/work/demo",
+    RunEnvironmentVariables = new Dictionary<string, string?>
+    {
+        ["HAGI_SESSION_ID"] = "session-a",
+        ["HAGI_PROJECT_NAME"] = "Demo",
+    },
+    EnvironmentVariables = new Dictionary<string, string?> { ["HAGI_PROJECT_NAME"] = "Configured" },
+};
+// The launched server sees HAGI_SESSION_ID=session-a and HAGI_PROJECT_NAME=Configured.
+```
+
+The precedence and the blank-value rule are covered by `CreateStartInfo_InjectedRunValue_IsLowerThanResolvedAndConfiguredValues` and `RunEnvironmentTests`.
+
 ## Adoption boundaries
 
 - Interactive provider transports still use `CliProcessManager` directly because they need open stdio sessions.
