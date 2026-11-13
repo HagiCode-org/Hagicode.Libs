@@ -16,6 +16,7 @@ public sealed partial class ProcessStartInfoLaunchSiteGuardTests
     private static readonly IReadOnlyDictionary<string, (int Sites, string Reason)> Exemptions = new Dictionary<string, (int, string)>(StringComparer.Ordinal)
     {
         ["Codex/Vendored/Internal/CodexCliMetadataReader.cs"] = (2, "Reads `codex --version` and `npm view` metadata; neither is an agent run."),
+        ["Codebuddy/CodebuddyProvider.cs"] = (1, "Reads `codebuddy --version` to decide whether steering is available; not an agent run."),
     };
 
     [Test]
