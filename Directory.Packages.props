@@ -6,7 +6,7 @@
 
   <ItemGroup>
     <PackageVersion Include="coverlet.collector" Version="6.0.4" />
-    <PackageVersion Include="GitHub.Copilot.SDK" Version="1.0.30-preview.1" />
+    <PackageVersion Include="GitHub.Copilot.SDK" Version="1.0.34" />
     <PackageVersion Include="Handlebars.Net" Version="2.1.6" />
     <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.14" />
     <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.14" />
