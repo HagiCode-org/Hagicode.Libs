@@ -22,16 +22,16 @@ internal sealed record CopilotFusionCompatibilityResult(
     string Message);
 
 /// <summary>
-/// A Fusion request the compatibility gate refused before any session or prompt operation. It is terminal: a fresh session or a
-/// retry cannot make an unsupported or unknown combination supported, so the gateway never falls back on it. It is still an
+/// A Fusion compatibility refusal, either before session creation or while verifying the native session before send.
+/// It is terminal: a retry or fresh session cannot make an unsupported configuration supported. It is still an
 /// <see cref="InvalidOperationException"/>, so existing callers are unaffected.
 /// </summary>
-internal sealed class CopilotFusionCompatibilityException(string message) : InvalidOperationException(message);
+internal sealed class CopilotFusionCompatibilityException(string message, Exception? innerException = null)
+    : InvalidOperationException(message, innerException);
 
 internal static class CopilotFusionCompatibility
 {
-    // Keep requests blocked until both native create and restore config builders map the typed field.
-    internal const bool GatewayMapsTypedFusionTier = false;
+    internal const bool GatewayMapsTypedFusionTier = true;
 
     internal static string? GetSdkVersion()
     {
@@ -41,16 +41,16 @@ internal static class CopilotFusionCompatibility
     }
 
     internal static bool HasTypedFusionTierApi =>
-        typeof(SessionConfig).GetProperty("FusionTier") is not null
-        && typeof(ResumeSessionConfig).GetProperty("FusionTier") is not null;
+        typeof(CapiSessionOptions).GetProperty("FusionTier") is not null
+        && typeof(SessionConfig).GetProperty("Capi")?.PropertyType == typeof(CapiSessionOptions)
+        && typeof(ResumeSessionConfig).GetProperty("Capi")?.PropertyType == typeof(CapiSessionOptions);
 
     internal static bool IsFusionModel(string? model)
         => string.Equals(model, "fusion", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Last line of defence in the SDK gateway: no Fusion intent may reach session create/restore on this SDK,
-    /// because the gateway has no verified native mapping for the tier, its unspecified default, or its reset.
-    /// Runs before any client, environment lease or session operation.
+    /// Validates Fusion intent before any client, environment lease or session operation.
+    /// Omitted tiers use the runtime's native create/resume semantics; an explicit reset remains unsupported.
     /// </summary>
     internal static void ThrowIfGatewayCannotApply(CopilotSdkRequest request)
     {
@@ -69,7 +69,7 @@ internal static class CopilotFusionCompatibility
                 "No session was created or restored, and no prompt was sent.");
         }
 
-        if (!IsFusionModel(request.Model) && !request.FusionTierIsExplicitlyUnset)
+        if (!request.FusionTierIsExplicitlyUnset && (!IsFusionModel(request.Model) || HasTypedFusionTierApi))
         {
             return;
         }
@@ -84,6 +84,32 @@ internal static class CopilotFusionCompatibility
             $"[copilot_fusion_unsupported] Fusion request model='{request.Model ?? "unspecified"}', requested tier='{requestedTier}' " +
             $"is unsupported by the SDK gateway. Executable: {request.CliPath}; SDK version: {GetSdkVersion() ?? "unknown"}. " +
             $"Reason: {reasonText}. No session was created or restored, and no prompt was sent.");
+    }
+
+    internal static void EnsureRuntimeApplied(
+        string? requestedModel,
+        CopilotFusionTier? requestedTier,
+        string? actualModel,
+        string? actualTier)
+    {
+        if (!IsFusionModel(requestedModel))
+        {
+            return;
+        }
+
+        // The native runtime reports Fusion under its canonical routing model id, "auto".
+        if ((IsFusionModel(actualModel) || string.Equals(actualModel, "auto", StringComparison.OrdinalIgnoreCase))
+            && !string.IsNullOrWhiteSpace(actualTier)
+            && (requestedTier is null || string.Equals(
+                CopilotFusionTierJsonConverter.ToWireValue(requestedTier.Value), actualTier, StringComparison.Ordinal)))
+        {
+            return;
+        }
+
+        throw new CopilotFusionCompatibilityException(
+            $"[copilot_fusion_unsupported] The runtime did not apply the requested Fusion configuration: " +
+            $"requested tier='{requestedTier?.ToString().ToLowerInvariant() ?? "unspecified"}', " +
+            $"actual model='{actualModel}', actual tier='{actualTier ?? "unknown"}'. No prompt was sent.");
     }
 
     internal static CopilotFusionCompatibilityResult Evaluate(
@@ -119,11 +145,11 @@ internal static class CopilotFusionCompatibility
 
         if (cliSupportsTier is null)
         {
-            unknownReasons.Add("the resolved CLI's tier capability could not be determined from its help output");
+            unknownReasons.Add("the resolved CLI's tier capability could not be determined from its help or parser output");
         }
         else if (!cliSupportsTier.Value)
         {
-            unsupportedReasons.Add("the resolved CLI does not advertise the '--fusion-tier' option");
+            unsupportedReasons.Add("the resolved CLI does not support the '--fusion-tier' option");
         }
 
         if (sdkVersion is null)

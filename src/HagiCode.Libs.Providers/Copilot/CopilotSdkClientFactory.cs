@@ -40,12 +40,58 @@ internal sealed class GitHubCopilotSdkClientFactory : ICopilotSdkClientFactory
     {
         public async Task<ICopilotSdkSession> CreateSessionAsync(SessionConfig config, CancellationToken cancellationToken)
         {
-            return new CopilotSdkSessionAdapter(await client.CreateSessionAsync(config, cancellationToken).ConfigureAwait(false));
+            var session = await client.CreateSessionAsync(config, cancellationToken).ConfigureAwait(false);
+            return await ValidateFusionSessionAsync(session, config, cancellationToken).ConfigureAwait(false);
         }
 
         public async Task<ICopilotSdkSession> ResumeSessionAsync(string sessionId, ResumeSessionConfig config, CancellationToken cancellationToken)
         {
-            return new CopilotSdkSessionAdapter(await client.ResumeSessionAsync(sessionId, config, cancellationToken).ConfigureAwait(false));
+            var session = await client.ResumeSessionAsync(sessionId, config, cancellationToken).ConfigureAwait(false);
+            return await ValidateFusionSessionAsync(session, config, cancellationToken).ConfigureAwait(false);
+        }
+
+        private static async Task<ICopilotSdkSession> ValidateFusionSessionAsync(
+            CopilotSession session, SessionConfigBase config, CancellationToken cancellationToken)
+        {
+            try
+            {
+                if (CopilotFusionCompatibility.IsFusionModel(config.Model))
+                {
+                    // Cold resume may not have tier metadata until the session model catalog has been read.
+                    var catalog = await session.Rpc.Model.ListAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+                    var current = await session.Rpc.Model.GetCurrentAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+#pragma warning disable GHCP001 // Fusion is exposed as an experimental typed SDK API.
+                    var requestedTier = config.Capi?.FusionTier is { } tier
+                        ? CopilotFusionTierJsonConverter.TryParseWireValue(tier.Value, out var parsed)
+                            ? parsed
+                            : throw new InvalidOperationException($"Unexpected SDK Fusion tier '{tier.Value}'.")
+                        : (CopilotFusionTier?)null;
+                    var actualTier = current.FusionTier;
+                    if (actualTier is null && catalog.Auto is { } routing)
+                    {
+                        // An omitted preference uses the account's declared default, not a hard-coded Fusion tier.
+                        var preference = current.AutoTier?.Value ?? routing.DefaultTier;
+                        actualTier = routing.Tiers.FirstOrDefault(candidate => candidate.Id == preference)?.FusionTier;
+                    }
+#pragma warning restore GHCP001
+                    CopilotFusionCompatibility.EnsureRuntimeApplied(config.Model, requestedTier, current.ModelId, actualTier);
+                }
+
+                return new CopilotSdkSessionAdapter(session);
+            }
+            catch (Exception exception)
+            {
+                await session.DisposeAsync().ConfigureAwait(false);
+                if (CopilotFusionCompatibility.IsFusionModel(config.Model)
+                    && exception is not OperationCanceledException and not CopilotFusionCompatibilityException)
+                {
+                    throw new CopilotFusionCompatibilityException(
+                        $"[copilot_fusion_unsupported] Could not verify the runtime's Fusion configuration. " +
+                        $"No prompt was sent. {exception.Message}", exception);
+                }
+
+                throw;
+            }
         }
 
         public async Task<IReadOnlyList<CopilotSdkModelInfo>> ListModelsAsync(CancellationToken cancellationToken)

@@ -446,7 +446,7 @@ public class CopilotProvider : ICliProvider<CopilotOptions>, ICopilotModelCapabi
             sdkRequest.Model,
             sdkRequest.FusionTier,
             operation,
-            officialDefaultVerified: false,
+            officialDefaultVerified: true,
             resetSupported: false);
         if (compatibility.Status != CopilotFusionCompatibilityStatus.Supported)
         {
@@ -530,8 +530,35 @@ public class CopilotProvider : ICliProvider<CopilotOptions>, ICopilotModelCapabi
             return null;
         }
 
-        return (result.StandardOutput + Environment.NewLine + result.StandardError)
-            .Contains("--fusion-tier", StringComparison.Ordinal);
+        if ((result.StandardOutput + Environment.NewLine + result.StandardError).Contains("--fusion-tier", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        // Some releases hide Fusion from help but validate its flag before starting any session.
+        var validation = await _processManager.ExecuteAsync(
+            new ProcessStartContext
+            {
+                ExecutablePath = executablePath,
+                Arguments = ["--fusion-tier", "__hagicode_invalid_tier__"],
+                EnvironmentVariables = environmentVariables,
+                Timeout = TimeSpan.FromSeconds(15),
+                ApplyResourceLimits = false
+            },
+            cancellationToken).ConfigureAwait(false);
+        var output = validation.StandardOutput + Environment.NewLine + validation.StandardError;
+        if (validation.ExitCode != 0
+            && output.Contains("invalid value '__hagicode_invalid_tier__' for '--fusion-tier", StringComparison.Ordinal)
+            && output.Contains("standard, high, max", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return validation.ExitCode != 0 && output.Contains("--fusion-tier", StringComparison.Ordinal)
+            && (output.Contains("unknown option", StringComparison.OrdinalIgnoreCase)
+                || output.Contains("unexpected argument", StringComparison.OrdinalIgnoreCase))
+            ? false
+            : null;
     }
 
     private static CliMessage? MapEvent(CopilotSdkStreamEvent eventData)

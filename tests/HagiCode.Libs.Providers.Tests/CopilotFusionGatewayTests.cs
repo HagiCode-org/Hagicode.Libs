@@ -1,4 +1,6 @@
 using GitHub.Copilot;
+using HagiCode.Libs.Core.Discovery;
+using HagiCode.Libs.Core.Process;
 using HagiCode.Libs.Providers.Copilot;
 using Shouldly;
 
@@ -8,57 +10,94 @@ namespace HagiCode.Libs.Providers.Tests;
 [NonParallelizable]
 public sealed class CopilotFusionGatewayTests
 {
+    [TestCase(null)]
     [TestCase(CopilotFusionTier.Standard)]
     [TestCase(CopilotFusionTier.High)]
     [TestCase(CopilotFusionTier.Max)]
-    public async Task CreateRuntime_rejects_each_fusion_tier_before_any_client_or_session_operation(CopilotFusionTier tier)
+    [Category("External")]
+    public async Task Real_cli_applies_fusion_without_sending_a_prompt(CopilotFusionTier? tier)
     {
-        var factory = new CountingClientFactory();
-        var gateway = new GitHubCopilotSdkGateway(factory, new CopilotSdkEnvironmentLeaseCoordinator());
-
-        var exception = await Should.ThrowAsync<InvalidOperationException>(async () =>
-            await gateway.CreateRuntimeAsync(CreateRequest("fusion", tier: tier)));
-
-        exception.Message.ShouldContain("[copilot_fusion_unsupported]");
-        exception.Message.ShouldContain($"requested tier='{tier.ToString().ToLowerInvariant()}'");
-        exception.Message.ShouldContain("/resolved/copilot");
-        exception.Message.ShouldContain(CopilotFusionCompatibility.GetSdkVersion()!);
-        exception.Message.ShouldContain("No session was created or restored, and no prompt was sent.");
-        factory.ClientCreateCount.ShouldBe(0);
-        factory.CreateSessionCount.ShouldBe(0);
-        factory.ResumeSessionCount.ShouldBe(0);
-    }
-
-    [Test]
-    public async Task SendPrompt_rejects_fusion_tier_before_any_client_or_prompt_send()
-    {
-        var factory = new CountingClientFactory();
-        var gateway = new GitHubCopilotSdkGateway(factory, new CopilotSdkEnvironmentLeaseCoordinator());
-
-        var exception = await Should.ThrowAsync<InvalidOperationException>(async () =>
+        ExternalGate.Require("HAGICODE_REAL_CLI_COPILOT_SESSION_TESTS");
+        var executable = new CliExecutableResolver().ResolveFirstAvailablePath(["copilot"])
+            ?? throw new InvalidOperationException("Copilot CLI was not found.");
+        await using var provider = new CopilotProvider(new CliExecutableResolver(), new CliProcessManager());
+        var preflight = await provider.CheckFusionCompatibilityAsync(new CopilotOptions
         {
-            await foreach (var _ in gateway.SendPromptAsync(CreateRequest("fusion", tier: CopilotFusionTier.Max, sessionId: "restore-me")))
-            {
-            }
+            ExecutablePath = executable,
+            Model = "fusion",
+            FusionTier = tier
         });
+        preflight.Status.ShouldBe(CopilotFusionPreflightStatus.Supported);
 
-        exception.Message.ShouldContain("requested tier='max'");
-        factory.ClientCreateCount.ShouldBe(0);
-        factory.ResumeSessionCount.ShouldBe(0);
+        var request = CreateRequest("fusion", tier) with
+        {
+            CliPath = executable,
+            WorkingDirectory = Path.GetTempPath(),
+            CliArgs = ["--no-custom-instructions", "--disable-builtin-mcps"],
+            StartupTimeout = TimeSpan.FromSeconds(60)
+        };
+        var gateway = new GitHubCopilotSdkGateway();
+        await using var runtime = await gateway.CreateRuntimeAsync(request);
+        runtime.SessionId.ShouldNotBeNullOrWhiteSpace();
     }
 
-    [Test]
-    public async Task CreateRuntime_rejects_unspecified_fusion_tier_as_unverified_default()
+    [TestCase(CopilotFusionTier.Standard)]
+    [TestCase(CopilotFusionTier.High)]
+    [TestCase(CopilotFusionTier.Max)]
+    [TestCase(null)]
+    public async Task CreateRuntime_maps_each_fusion_tier_into_native_create_configuration(CopilotFusionTier? tier)
     {
         var factory = new CountingClientFactory();
         var gateway = new GitHubCopilotSdkGateway(factory, new CopilotSdkEnvironmentLeaseCoordinator());
 
-        var exception = await Should.ThrowAsync<InvalidOperationException>(async () =>
-            await gateway.CreateRuntimeAsync(CreateRequest("fusion")));
+        await using var runtime = await gateway.CreateRuntimeAsync(CreateRequest("fusion", tier: tier));
 
-        exception.Message.ShouldContain("requested tier='unspecified'");
-        factory.ClientCreateCount.ShouldBe(0);
+        factory.CreateSessionCount.ShouldBe(1);
+        factory.ResumeSessionCount.ShouldBe(0);
+        factory.LastSessionConfig.ShouldNotBeNull().Model.ShouldBe("fusion");
+#pragma warning disable GHCP001
+        factory.LastSessionConfig!.Capi?.FusionTier?.Value.ShouldBe(tier?.ToString().ToLowerInvariant());
+#pragma warning restore GHCP001
+    }
+
+    [TestCase(null)]
+    [TestCase(CopilotFusionTier.Standard)]
+    [TestCase(CopilotFusionTier.High)]
+    [TestCase(CopilotFusionTier.Max)]
+    public async Task CreateRuntime_maps_each_fusion_tier_into_native_resume_configuration(CopilotFusionTier? tier)
+    {
+        var factory = new CountingClientFactory();
+        var gateway = new GitHubCopilotSdkGateway(factory, new CopilotSdkEnvironmentLeaseCoordinator());
+
+        await using var runtime = await gateway.CreateRuntimeAsync(CreateRequest("fusion", tier: tier, sessionId: "restore-me"));
+
         factory.CreateSessionCount.ShouldBe(0);
+        factory.ResumeSessionCount.ShouldBe(1);
+        factory.LastResumeConfig.ShouldNotBeNull().Model.ShouldBe("fusion");
+#pragma warning disable GHCP001
+        factory.LastResumeConfig!.Capi?.FusionTier?.Value.ShouldBe(tier?.ToString().ToLowerInvariant());
+#pragma warning restore GHCP001
+    }
+
+    [TestCase("auto", "standard", CopilotFusionTier.Standard)]
+    [TestCase("auto", "high", CopilotFusionTier.High)]
+    [TestCase("auto", "max", CopilotFusionTier.Max)]
+    [TestCase("auto", "standard", null)]
+    public void Runtime_verification_accepts_the_native_fusion_alias(string model, string tier, CopilotFusionTier? requestedTier)
+    {
+        Should.NotThrow(() => CopilotFusionCompatibility.EnsureRuntimeApplied("fusion", requestedTier, model, tier));
+    }
+
+    [TestCase("gpt-6-luna", null, null)]
+    [TestCase("auto", null, null)]
+    [TestCase("auto", "standard", CopilotFusionTier.Max)]
+    public void Runtime_verification_rejects_model_fallback_unknown_tier_and_wrong_tier(
+        string model, string? tier, CopilotFusionTier? requestedTier)
+    {
+        var exception = Should.Throw<InvalidOperationException>(() =>
+            CopilotFusionCompatibility.EnsureRuntimeApplied("fusion", requestedTier, model, tier));
+        exception.Message.ShouldContain("[copilot_fusion_unsupported]");
+        exception.Message.ShouldContain("No prompt was sent.");
     }
 
     [Test]
@@ -108,12 +147,25 @@ public sealed class CopilotFusionGatewayTests
         var factory = new CountingClientFactory();
         var gateway = new GitHubCopilotSdkGateway(factory, new CopilotSdkEnvironmentLeaseCoordinator());
 
-        await using var runtime = await gateway.CreateRuntimeAsync(CreateRequest("gpt-5"));
+        var inheritedPath = Environment.GetEnvironmentVariable("PATH");
+        await using var runtime = await gateway.CreateRuntimeAsync(CreateRequest("gpt-5") with
+        {
+            EnvironmentVariables = new Dictionary<string, string?>
+            {
+                ["HAGICODE_COPILOT_NATIVE_TEST_ENV"] = "configured",
+                ["HAGICODE_COPILOT_NATIVE_UNSET_ENV"] = null
+            }
+        });
 
         factory.CreateSessionCount.ShouldBe(1);
         factory.LastSessionConfig.ShouldNotBeNull();
         factory.LastSessionConfig!.Model.ShouldBe("gpt-5");
         factory.LastSessionConfig.ReasoningEffort.ShouldBeNull();
+        factory.LastSessionConfig.Capi.ShouldBeNull();
+        var environment = factory.LastClientOptions.ShouldNotBeNull().Environment.ShouldNotBeNull();
+        environment["PATH"].ShouldBe(inheritedPath);
+        environment["HAGICODE_COPILOT_NATIVE_TEST_ENV"].ShouldBe("configured");
+        environment.ContainsKey("HAGICODE_COPILOT_NATIVE_UNSET_ENV").ShouldBeFalse();
     }
 
     private static CopilotSdkRequest CreateRequest(
@@ -150,9 +202,14 @@ public sealed class CopilotFusionGatewayTests
 
         public SessionConfig? LastSessionConfig { get; private set; }
 
+        public ResumeSessionConfig? LastResumeConfig { get; private set; }
+
+        public CopilotClientOptions? LastClientOptions { get; private set; }
+
         public ICopilotSdkClient Create(CopilotClientOptions options)
         {
             ClientCreateCount++;
+            LastClientOptions = options;
             return new CountingClient(this);
         }
 
@@ -168,6 +225,7 @@ public sealed class CopilotFusionGatewayTests
             public Task<ICopilotSdkSession> ResumeSessionAsync(string sessionId, ResumeSessionConfig config, CancellationToken cancellationToken)
             {
                 owner.ResumeSessionCount++;
+                owner.LastResumeConfig = config;
                 return Task.FromResult<ICopilotSdkSession>(new CountingSession(sessionId));
             }
 

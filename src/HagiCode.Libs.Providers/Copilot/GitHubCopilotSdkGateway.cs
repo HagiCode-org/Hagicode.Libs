@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -39,11 +40,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
         CopilotSdkRequest request,
         CancellationToken cancellationToken = default)
     {
-        // Fusion intent is rejected before any client, environment lease or session operation.
-        // This gate covers both create and restore: each path below (ResumeWithRetryAsync and the fresh CreateSessionAsync) runs after it.
-        // TODO(copilot-fusion-model-tiers): deferred SDK integration. Apply the Fusion tier through verified SDK-native session configuration once a typed field or RPC exists. See openspec/changes/copilot-fusion-model-tiers/specs/copilot-sdk-cli-compatibility/spec.md, section "Deferred SDK integration point".
         CopilotFusionCompatibility.ThrowIfGatewayCannotApply(request);
-        var clientOptions = BuildClientOptions(request);
         using var startupCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         startupCancellationTokenSource.CancelAfter(request.StartupTimeout);
 
@@ -52,7 +49,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
         CopilotPendingQuestions? pendingQuestions = null;
         try
         {
-            client = _clientFactory.Create(clientOptions);
+            client = _clientFactory.Create(BuildClientOptions(request));
             pendingQuestions = request.UserInputHandler is null
                 ? null
                 : new CopilotPendingQuestions(request.UserInputHandler, request.QuestionTimeout, cancellationToken);
@@ -214,7 +211,6 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var clientOptions = BuildClientOptions(request);
         using var startupCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         startupCancellationTokenSource.CancelAfter(request.StartupTimeout);
 
@@ -222,7 +218,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
         ICopilotSdkClient? client = null;
         try
         {
-            client = _clientFactory.Create(clientOptions);
+            client = _clientFactory.Create(BuildClientOptions(request));
             return await client.ListModelsAsync(startupCancellationTokenSource.Token).ConfigureAwait(false);
         }
         finally
@@ -438,9 +434,10 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
         {
             Connection = connection,
             WorkingDirectory = request.WorkingDirectory,
-            Environment = request.EnvironmentVariables
-                .Where(static entry => entry.Value is not null)
-                .ToDictionary(static entry => entry.Key, static entry => entry.Value!, StringComparer.Ordinal),
+            // The SDK treats Environment as a complete child environment, not a set of overrides.
+            Environment = Environment.GetEnvironmentVariables()
+                .Cast<DictionaryEntry>()
+                .ToDictionary(static entry => (string)entry.Key, static entry => (string)entry.Value!, StringComparer.Ordinal),
             UseLoggedInUser = string.IsNullOrWhiteSpace(request.CliUrl) ? request.UseLoggedInUser : null
         };
     }
@@ -451,6 +448,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
         {
             SessionId = request.SessionId,
             Model = request.Model,
+            Capi = BuildCapiOptions(request),
             GitHubToken = request.GitHubToken,
             WorkingDirectory = request.WorkingDirectory,
             Streaming = true,
@@ -465,6 +463,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
         return new ResumeSessionConfig
         {
             Model = request.Model,
+            Capi = BuildCapiOptions(request),
             GitHubToken = request.GitHubToken,
             WorkingDirectory = request.WorkingDirectory,
             Streaming = true,
@@ -472,6 +471,21 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
             Hooks = CreateAllowAllHooks(),
             OnUserInputRequest = pendingQuestions is null ? null : pendingQuestions.HandleAsync
         };
+    }
+
+    private static CapiSessionOptions? BuildCapiOptions(CopilotSdkRequest request)
+    {
+        if (request.FusionTier is not { } tier)
+        {
+            return null;
+        }
+
+#pragma warning disable GHCP001 // Fusion is exposed as an experimental typed SDK API.
+        return new CapiSessionOptions
+        {
+            FusionTier = new GitHub.Copilot.Rpc.FusionTier(CopilotFusionTierJsonConverter.ToWireValue(tier))
+        };
+#pragma warning restore GHCP001
     }
 
     private static SessionHooks CreateAllowAllHooks()
