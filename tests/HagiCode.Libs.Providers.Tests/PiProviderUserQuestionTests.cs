@@ -89,7 +89,7 @@ public sealed class PiProviderUserQuestionTests
             {
                 ExecutablePath = "/custom/pi",
                 WorkingDirectory = "/tmp/pi-project",
-                Provider = "omniroute",
+                Provider = "anthropic",
                 Model = "glm/glm-4.7",
                 SystemPrompt = "You are a trip planner.",
                 AppendSystemPrompts = ["Keep answers terse."],
@@ -107,8 +107,10 @@ public sealed class PiProviderUserQuestionTests
         [
             "--mode",
             "rpc",
+            "--provider",
+            "anthropic",
             "--model",
-            "omniroute/glm/glm-4.7",
+            "glm/glm-4.7",
             "--system-prompt",
             "You are a trip planner.",
             "--append-system-prompt",

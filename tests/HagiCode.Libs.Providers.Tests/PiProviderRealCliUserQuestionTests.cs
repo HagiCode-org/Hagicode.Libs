@@ -14,7 +14,7 @@ namespace HagiCode.Libs.Providers.Tests;
 /// Contract tests of the interactive question path against a real <c>pi</c> executable and a real model. They spend a few
 /// model calls each, so they run only when <c>HAGICODE_LIBS_REAL_CLI_PI_USER_QUESTION</c> is <c>1</c> or <c>true</c>.
 /// <c>HAGICODE_LIBS_REAL_CLI_PI_USER_QUESTION_MODEL</c> picks the model selector (use a cheap one, for example
-/// <c>omniroute/cc/claude-haiku-4-5-20251001</c>); without it pi uses its configured default model.
+/// <c>anthropic/claude-haiku-4-5-20251001</c>); without it pi uses its configured default model.
 /// <c>HAGICODE_LIBS_REAL_CLI_PI_USER_QUESTION_EXECUTABLE</c> picks a specific executable, otherwise <c>pi</c> is resolved from
 /// <c>PATH</c>. The pi version is written to the test output. Credentials come from the environment and the pi home of the
 /// current user, which every run reaches through an isolated <c>PI_CODING_AGENT_DIR</c> that only links its model and

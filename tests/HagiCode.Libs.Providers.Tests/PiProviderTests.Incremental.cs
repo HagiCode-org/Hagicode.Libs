@@ -171,9 +171,9 @@ public sealed partial class PiProviderTests
         messages[^1].Content.GetProperty("stop_reason").GetString().ShouldBe("error");
     }
 
-    [TestCase("omniroute", null)]
-    [TestCase("omniroute", "")]
-    [TestCase("omniroute", "   ")]
+    [TestCase("openai", null)]
+    [TestCase("openai", "")]
+    [TestCase("openai", "   ")]
     [TestCase("anthropic", null)]
     [TestCase("anthropic", "  ")]
     public async Task ExecuteAsync_fails_before_launch_when_provider_has_no_model(string provider, string? model)

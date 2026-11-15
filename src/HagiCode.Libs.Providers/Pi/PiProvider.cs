@@ -283,7 +283,7 @@ public class PiProvider : ICliProvider<PiOptions>
     private static void AddOptionArguments(List<string> arguments, PiOptions options, string? questionExtensionPath)
     {
         // Pi 1.0.0 and later refuse "--provider" without "--model" (exit code 1). Fail before launching instead,
-        // for every provider: omniroute without a model would otherwise be launched as "--model omniroute/".
+        // for every provider, so a provider is never launched without the model it applies to.
         var configuredProvider = ArgumentValueNormalizer.NormalizeOptionalValue(options.Provider);
         if (configuredProvider is not null && ArgumentValueNormalizer.NormalizeOptionalValue(options.Model) is null)
         {
@@ -292,20 +292,8 @@ public class PiProvider : ICliProvider<PiOptions>
                 "A model is required when a provider is set; configure a model or clear the provider.");
         }
 
-        var normalizedModel = OmpProvider.NormalizeModelName(options.Model);
-        var isOmniRouteSelector = normalizedModel.StartsWith("omniroute/", StringComparison.OrdinalIgnoreCase);
-        var providerIsOmniRoute = string.Equals(options.Provider, "omniroute", StringComparison.OrdinalIgnoreCase);
-
-        if (isOmniRouteSelector || providerIsOmniRoute)
-        {
-            var selector = isOmniRouteSelector ? normalizedModel : $"omniroute/{normalizedModel}";
-            AddOption(arguments, "--model", selector);
-        }
-        else
-        {
-            AddOption(arguments, "--provider", options.Provider);
-            AddOption(arguments, "--model", normalizedModel);
-        }
+        AddOption(arguments, "--provider", options.Provider);
+        AddOption(arguments, "--model", options.Model);
         AddOption(arguments, "--system-prompt", options.SystemPrompt);
 
         foreach (var appendSystemPrompt in options.AppendSystemPrompts)

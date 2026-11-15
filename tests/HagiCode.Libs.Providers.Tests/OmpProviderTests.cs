@@ -30,7 +30,7 @@ public sealed class OmpProviderTests
             {
                 ExecutablePath = "/custom/omp",
                 WorkingDirectory = "/tmp/omp-project",
-                Provider = "omniroute",
+                Provider = "anthropic",
                 Model = "glm/glm-4.7",
                 SystemPrompt = "You are a trip planner.",
                 AppendSystemPrompts = ["Keep answers terse."],
@@ -53,8 +53,10 @@ public sealed class OmpProviderTests
             "--mode",
             "json",
             "--print",
+            "--provider",
+            "anthropic",
             "--model",
-            "omniroute/glm/glm-4.7",
+            "glm/glm-4.7",
             "--system-prompt",
             "You are a trip planner.",
             "--append-system-prompt",
@@ -93,7 +95,7 @@ public sealed class OmpProviderTests
             provider,
             new OmpOptions
             {
-                Provider = "omniroute",
+                Provider = "anthropic",
                 Model = "glm/glm-4.7"
             },
             "Plan a trip.");
@@ -219,7 +221,7 @@ public sealed class OmpProviderTests
         messages.Select(static message => message.Type).ShouldBe(["session.started", "assistant", "terminal.completed"]);
         messages[0].Content.GetProperty("session_id").GetString().ShouldBe("session-1");
         messages[1].Content.GetProperty("text").GetString().ShouldBe("Trip outline");
-        messages[1].Content.GetProperty("provider").GetString().ShouldBe("omniroute");
+        messages[1].Content.GetProperty("provider").GetString().ShouldBe("anthropic");
         messages[1].Content.GetProperty("timestamp").GetInt64().ShouldBe(1780750996887L);
         messages[1].Content.GetProperty("usage").GetProperty("input").GetInt32().ShouldBe(12);
         messages[1].Content.GetProperty("usage").GetProperty("output").GetInt32().ShouldBe(3);
@@ -643,7 +645,7 @@ public sealed class OmpProviderTests
     }
 
     [Test]
-    public async Task ExecuteAsync_uses_three_segment_selector_for_omniroute_models()
+    public async Task ExecuteAsync_passes_native_provider_and_model_without_rewriting()
     {
         var processManager = new StubCliProcessManager
         {
@@ -655,20 +657,21 @@ public sealed class OmpProviderTests
             provider,
             new OmpOptions
             {
-                Provider = "omniroute",
-                Model = "omniroute/deepseek/deepseek-v4-flash",
+                Provider = "anthropic",
+                Model = "claude-haiku-4-5-20251001",
                 NoSession = true
             },
             "hello");
 
         processManager.LastContext.ShouldNotBeNull();
-        processManager.LastContext.Arguments.ShouldNotContain("--provider");
+        processManager.LastContext.Arguments.ShouldContain("--provider");
+        processManager.LastContext.Arguments.ShouldContain("anthropic");
         processManager.LastContext.Arguments.ShouldContain("--model");
-        processManager.LastContext.Arguments.ShouldContain("omniroute/deepseek/deepseek-v4-flash");
+        processManager.LastContext.Arguments.ShouldContain("claude-haiku-4-5-20251001");
     }
 
     [Test]
-    public async Task ExecuteAsync_converts_two_segment_to_omniroute_selector_when_provider_is_omniroute()
+    public async Task ExecuteAsync_passes_model_without_provider_verbatim()
     {
         var processManager = new StubCliProcessManager
         {
@@ -680,20 +683,18 @@ public sealed class OmpProviderTests
             provider,
             new OmpOptions
             {
-                Provider = "omniroute",
-                Model = "deepseek/deepseek-v4-flash",
+                Model = "ds/deepseek-v4-flash",
                 NoSession = true
             },
             "hello");
 
         processManager.LastContext.ShouldNotBeNull();
         processManager.LastContext.Arguments.ShouldNotContain("--provider");
-        processManager.LastContext.Arguments.ShouldContain("--model");
-        processManager.LastContext.Arguments.ShouldContain("omniroute/deepseek/deepseek-v4-flash");
+        processManager.LastContext.Arguments.ShouldContain("ds/deepseek-v4-flash");
     }
 
     [Test]
-    public async Task ExecuteAsync_model_without_omniroute_prefix_unchanged_with_non_omniroute_provider()
+    public async Task ExecuteAsync_model_unchanged_with_other_provider()
     {
         var processManager = new StubCliProcessManager
         {
@@ -716,21 +717,6 @@ public sealed class OmpProviderTests
         processManager.LastContext.Arguments.ShouldContain("openai");
         processManager.LastContext.Arguments.ShouldContain("--model");
         processManager.LastContext.Arguments.ShouldContain("glm/glm-4.7");
-    }
-
-    [TestCase("omniroute/deepseek/deepseek-v4-flash", "omniroute/deepseek/deepseek-v4-flash")]
-    [TestCase("OmniRoute/deepseek/deepseek-v4-flash", "OmniRoute/deepseek/deepseek-v4-flash")]
-    [TestCase("OMNIROUTE/meng/gpt-5.5", "OMNIROUTE/meng/gpt-5.5")]
-    [TestCase("deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-flash")]
-    [TestCase("glm/glm-4.7", "glm/glm-4.7")]
-    [TestCase(null, "")]
-    [TestCase("", "")]
-    [TestCase("  ", "  ")]
-    [TestCase("omniroute/", "omniroute/")]
-    [TestCase("omniroute/omniroute/x/y", "omniroute/omniroute/x/y")]
-    public void NormalizeModelName_produces_expected_result(string? input, string expected)
-    {
-        OmpProvider.NormalizeModelName(input).ShouldBe(expected);
     }
 
     [Test]
@@ -756,7 +742,7 @@ public sealed class OmpProviderTests
             new OmpOptions
             {
                 WorkingDirectory = workspace.WorkingDirectory,
-                Provider = "omniroute",
+                Provider = "anthropic",
                 Model = "glm/glm-4.7",
                 DisableAllTools = true,
                 NoSession = true
@@ -843,7 +829,7 @@ public sealed class OmpProviderTests
                 new { type = "text", text = assistantText }
             },
             api = "openai-completions",
-            provider = "omniroute",
+            provider = "anthropic",
             model = "glm/glm-4.7",
             usage = new
             {
@@ -887,7 +873,7 @@ public sealed class OmpProviderTests
             role = "assistant",
             content = Array.Empty<object>(),
             api = "openai-completions",
-            provider = "omniroute",
+            provider = "anthropic",
             model = "glm/glm-4.7",
             usage = new
             {
@@ -926,7 +912,7 @@ public sealed class OmpProviderTests
                 new { type = "thinking", thinking = "The user wants me to reply with exactly three words: \"hello from omp\"\n" },
                 new { type = "text", text = "hello from omp" }
             },
-            provider = "omniroute",
+            provider = "anthropic",
             model = "meng/gpt-5.5",
             stopReason = "stop",
             responseId = "response-real-1",
@@ -971,7 +957,7 @@ public sealed class OmpProviderTests
         {
             role = "assistant",
             content = new object[] { toolCall },
-            provider = "omniroute",
+            provider = "anthropic",
             model = "meng/gpt-5.5",
             stopReason = "toolUse",
             responseId = "response-tool-real-1",
@@ -998,7 +984,7 @@ public sealed class OmpProviderTests
             {
                 new { type = "text", text = "DONE" }
             },
-            provider = "omniroute",
+            provider = "anthropic",
             model = "meng/gpt-5.5",
             stopReason = "stop",
             responseId = "response-tool-real-2",
@@ -1061,7 +1047,7 @@ public sealed class OmpProviderTests
             {
                 new { type = "thinking", thinking = "Plan" }
             },
-            provider = "omniroute",
+            provider = "anthropic",
             model = "glm/glm-4.7",
             stopReason = "stop",
             responseId = "response-stream-1",
@@ -1076,7 +1062,7 @@ public sealed class OmpProviderTests
                 new { type = "thinking", thinking = "Plan" },
                 new { type = "text", text = "hello" }
             },
-            provider = "omniroute",
+            provider = "anthropic",
             model = "glm/glm-4.7",
             stopReason = "stop",
             responseId = "response-stream-1",
@@ -1123,7 +1109,7 @@ public sealed class OmpProviderTests
             {
                 new { type = "text", text }
             },
-            provider = "omniroute",
+            provider = "anthropic",
             model = "glm/glm-4.7",
             stopReason = "stop",
             responseId = "response-whitespace-1",
@@ -1176,7 +1162,7 @@ public sealed class OmpProviderTests
             {
                 new { type = "text", text = "1" }
             },
-            provider = "omniroute",
+            provider = "anthropic",
             model = "glm/glm-4.7",
             stopReason = "stop",
             responseId = "response-cumulative-1",
@@ -1190,7 +1176,7 @@ public sealed class OmpProviderTests
             {
                 new { type = "text", text = "12" }
             },
-            provider = "omniroute",
+            provider = "anthropic",
             model = "glm/glm-4.7",
             stopReason = "stop",
             responseId = "response-cumulative-1",
@@ -1204,7 +1190,7 @@ public sealed class OmpProviderTests
             {
                 new { type = "text", text = "123" }
             },
-            provider = "omniroute",
+            provider = "anthropic",
             model = "glm/glm-4.7",
             stopReason = "stop",
             responseId = "response-cumulative-1",
@@ -1277,7 +1263,7 @@ public sealed class OmpProviderTests
                     streamIndex = 0
                 }
             },
-            provider = "omniroute",
+            provider = "anthropic",
             model = "glm/glm-4.7",
             stopReason = "toolUse",
             responseId = "response-tool-1",
@@ -1291,7 +1277,7 @@ public sealed class OmpProviderTests
             {
                 new { type = "text", text = "Listed the directory." }
             },
-            provider = "omniroute",
+            provider = "anthropic",
             model = "glm/glm-4.7",
             stopReason = "stop",
             responseId = "response-tool-2",
@@ -1357,7 +1343,7 @@ public sealed class OmpProviderTests
                     streamIndex = 0
                 }
             },
-            provider = "omniroute",
+            provider = "anthropic",
             model = "glm/glm-4.7",
             stopReason = "toolUse",
             responseId = "response-replay-1",
@@ -1371,7 +1357,7 @@ public sealed class OmpProviderTests
             {
                 new { type = "text", text = "AlphaBeta" }
             },
-            provider = "omniroute",
+            provider = "anthropic",
             model = "glm/glm-4.7",
             stopReason = "stop",
             responseId = "response-replay-2",

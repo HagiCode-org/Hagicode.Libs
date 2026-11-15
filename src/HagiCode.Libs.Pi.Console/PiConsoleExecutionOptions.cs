@@ -3,7 +3,7 @@ using HagiCode.Libs.Providers.Pi;
 namespace HagiCode.Libs.Pi.Console;
 
 public sealed record PiConsoleExecutionOptions(
-    string Provider,
+    string? Provider,
     string Model,
     string? RepositoryPath,
     string? WorkspacePath,
@@ -12,14 +12,13 @@ public sealed record PiConsoleExecutionOptions(
     string? Thinking,
     IReadOnlyList<string> ExtraArguments)
 {
-    public const string DefaultProvider = "omniroute";
     public const string DefaultModel = "glm/glm-4.7";
 
     public static PiConsoleExecutionOptions Parse(IReadOnlyList<string> args)
     {
         ArgumentNullException.ThrowIfNull(args);
 
-        var provider = DefaultProvider;
+        string? provider = null;
         var model = DefaultModel;
         string? repositoryPath = null;
         string? workspacePath = null;

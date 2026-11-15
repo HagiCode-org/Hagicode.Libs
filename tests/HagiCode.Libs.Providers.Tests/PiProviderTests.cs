@@ -32,7 +32,7 @@ public sealed partial class PiProviderTests
             {
                 ExecutablePath = "/custom/pi",
                 WorkingDirectory = "/tmp/pi-project",
-                Provider = "omniroute",
+                Provider = "anthropic",
                 Model = "glm/glm-4.7",
                 SystemPrompt = "You are a trip planner.",
                 AppendSystemPrompts = ["Keep answers terse."],
@@ -57,8 +57,10 @@ public sealed partial class PiProviderTests
             "--mode",
             "json",
             "--print",
+            "--provider",
+            "anthropic",
             "--model",
-            "omniroute/glm/glm-4.7",
+            "glm/glm-4.7",
             "--system-prompt",
             "You are a trip planner.",
             "--append-system-prompt",
@@ -100,7 +102,7 @@ public sealed partial class PiProviderTests
             provider,
             new PiOptions
             {
-                Provider = "omniroute",
+                Provider = "anthropic",
                 Model = "glm/glm-4.7",
                 NoSession = true
             },
@@ -179,7 +181,7 @@ public sealed partial class PiProviderTests
     }
 
     [Test]
-    public async Task ExecuteAsync_uses_three_segment_selector_for_omniroute_models()
+    public async Task ExecuteAsync_passes_native_provider_and_model_without_rewriting()
     {
         var processManager = new StubCliProcessManager
         {
@@ -191,20 +193,21 @@ public sealed partial class PiProviderTests
             provider,
             new PiOptions
             {
-                Provider = "omniroute",
-                Model = "omniroute/ds/deepseek-v4-flash",
+                Provider = "anthropic",
+                Model = "claude-haiku-4-5-20251001",
                 NoSession = true
             },
             "hello");
 
         processManager.LastContext.ShouldNotBeNull();
-        processManager.LastContext.Arguments.ShouldNotContain("--provider");
+        processManager.LastContext.Arguments.ShouldContain("--provider");
+        processManager.LastContext.Arguments.ShouldContain("anthropic");
         processManager.LastContext.Arguments.ShouldContain("--model");
-        processManager.LastContext.Arguments.ShouldContain("omniroute/ds/deepseek-v4-flash");
+        processManager.LastContext.Arguments.ShouldContain("claude-haiku-4-5-20251001");
     }
 
     [Test]
-    public async Task ExecuteAsync_converts_two_segment_to_omniroute_selector_when_provider_is_omniroute()
+    public async Task ExecuteAsync_passes_model_without_provider_verbatim()
     {
         var processManager = new StubCliProcessManager
         {
@@ -216,7 +219,6 @@ public sealed partial class PiProviderTests
             provider,
             new PiOptions
             {
-                Provider = "omniroute",
                 Model = "ds/deepseek-v4-flash",
                 NoSession = true
             },
@@ -224,16 +226,7 @@ public sealed partial class PiProviderTests
 
         processManager.LastContext.ShouldNotBeNull();
         processManager.LastContext.Arguments.ShouldNotContain("--provider");
-        processManager.LastContext.Arguments.ShouldContain("--model");
-        processManager.LastContext.Arguments.ShouldContain("omniroute/ds/deepseek-v4-flash");
-    }
-
-    [TestCase("omniroute/ds/deepseek-v4-flash", "omniroute/ds/deepseek-v4-flash")]
-    [TestCase("OmniRoute/glm/glm-4.7", "OmniRoute/glm/glm-4.7")]
-    [TestCase("ds/deepseek-v4-flash", "ds/deepseek-v4-flash")]
-    public void NormalizeModelName_produces_expected_result(string? input, string expected)
-    {
-        OmpProvider.NormalizeModelName(input).ShouldBe(expected);
+        processManager.LastContext.Arguments.ShouldContain("ds/deepseek-v4-flash");
     }
 
     [Test]
@@ -323,7 +316,7 @@ public sealed partial class PiProviderTests
         messages.Select(static message => message.Type).ShouldBe(["session.started", "assistant", "terminal.completed"]);
         messages[0].Content.GetProperty("session_id").GetString().ShouldBe("session-1");
         messages[1].Content.GetProperty("text").GetString().ShouldBe("Trip outline");
-        messages[1].Content.GetProperty("provider").GetString().ShouldBe("omniroute");
+        messages[1].Content.GetProperty("provider").GetString().ShouldBe("anthropic");
         messages[1].Content.GetProperty("timestamp").GetInt64().ShouldBe(1780750996887L);
         messages[1].Content.GetProperty("usage").GetProperty("input").GetInt32().ShouldBe(12);
         messages[1].Content.GetProperty("usage").GetProperty("output").GetInt32().ShouldBe(3);
@@ -708,7 +701,7 @@ public sealed partial class PiProviderTests
             new PiOptions
             {
                 WorkingDirectory = workspace.WorkingDirectory,
-                Provider = "omniroute",
+                Provider = "anthropic",
                 Model = "glm/glm-4.7",
                 DisableAllTools = true,
                 NoSession = true
@@ -814,7 +807,7 @@ public sealed partial class PiProviderTests
                 new { type = "text", text = assistantText }
             },
             api = "openai-completions",
-            provider = "omniroute",
+            provider = "anthropic",
             model = "glm/glm-4.7",
             usage = new
             {
@@ -858,7 +851,7 @@ public sealed partial class PiProviderTests
             role = "assistant",
             content = Array.Empty<object>(),
             api = "openai-completions",
-            provider = "omniroute",
+            provider = "anthropic",
             model = "glm/glm-4.7",
             usage = new
             {
@@ -895,7 +888,7 @@ public sealed partial class PiProviderTests
             {
                 new { type = "thinking", thinking = "Plan" }
             },
-            provider = "omniroute",
+            provider = "anthropic",
             model = "glm/glm-4.7",
             stopReason = "stop",
             responseId = "response-stream-1",
@@ -910,7 +903,7 @@ public sealed partial class PiProviderTests
                 new { type = "thinking", thinking = "Plan" },
                 new { type = "text", text = "hello" }
             },
-            provider = "omniroute",
+            provider = "anthropic",
             model = "glm/glm-4.7",
             stopReason = "stop",
             responseId = "response-stream-1",
@@ -957,7 +950,7 @@ public sealed partial class PiProviderTests
             {
                 new { type = "text", text }
             },
-            provider = "omniroute",
+            provider = "anthropic",
             model = "glm/glm-4.7",
             stopReason = "stop",
             responseId = "response-whitespace-1",
@@ -1010,7 +1003,7 @@ public sealed partial class PiProviderTests
             {
                 new { type = "text", text = "1" }
             },
-            provider = "omniroute",
+            provider = "anthropic",
             model = "glm/glm-4.7",
             stopReason = "stop",
             responseId = "response-cumulative-1",
@@ -1024,7 +1017,7 @@ public sealed partial class PiProviderTests
             {
                 new { type = "text", text = "12" }
             },
-            provider = "omniroute",
+            provider = "anthropic",
             model = "glm/glm-4.7",
             stopReason = "stop",
             responseId = "response-cumulative-1",
@@ -1038,7 +1031,7 @@ public sealed partial class PiProviderTests
             {
                 new { type = "text", text = "123" }
             },
-            provider = "omniroute",
+            provider = "anthropic",
             model = "glm/glm-4.7",
             stopReason = "stop",
             responseId = "response-cumulative-1",
@@ -1111,7 +1104,7 @@ public sealed partial class PiProviderTests
                     streamIndex = 0
                 }
             },
-            provider = "omniroute",
+            provider = "anthropic",
             model = "glm/glm-4.7",
             stopReason = "toolUse",
             responseId = "response-tool-1",
@@ -1125,7 +1118,7 @@ public sealed partial class PiProviderTests
             {
                 new { type = "text", text = "Listed the directory." }
             },
-            provider = "omniroute",
+            provider = "anthropic",
             model = "glm/glm-4.7",
             stopReason = "stop",
             responseId = "response-tool-2",
@@ -1191,7 +1184,7 @@ public sealed partial class PiProviderTests
                     streamIndex = 0
                 }
             },
-            provider = "omniroute",
+            provider = "anthropic",
             model = "glm/glm-4.7",
             stopReason = "toolUse",
             responseId = "response-replay-1",
@@ -1205,7 +1198,7 @@ public sealed partial class PiProviderTests
             {
                 new { type = "text", text = "AlphaBeta" }
             },
-            provider = "omniroute",
+            provider = "anthropic",
             model = "glm/glm-4.7",
             stopReason = "stop",
             responseId = "response-replay-2",

@@ -99,7 +99,7 @@ public sealed class PiChatImageRpcTests
         var options = new PiOptions
         {
             Model = "cc/claude-sonnet-5",
-            Provider = "omniroute",
+            Provider = "anthropic",
             AllowedTools = ["read"],
             Images = [new PiImageAttachment("image/png", [1, 2, 3])]
         };
@@ -122,7 +122,7 @@ public sealed class PiChatImageRpcTests
         var options = new PiOptions
         {
             Model = "cc/claude-sonnet-5",
-            Provider = "omniroute",
+            Provider = "anthropic",
             Thinking = "medium",
             SessionId = "session-42",
             SessionDirectory = "/scratch/sessions",
@@ -167,7 +167,7 @@ public sealed class PiChatImageRpcTests
         var options = new PiOptions
         {
             Model = "cc/claude-sonnet-5",
-            Provider = "omniroute",
+            Provider = "anthropic",
             NoSession = true,
             Images = [new PiImageAttachment("image/png", bytes)]
         };

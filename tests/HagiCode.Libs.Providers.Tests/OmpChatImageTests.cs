@@ -113,7 +113,7 @@ public sealed class OmpChatImageTests
         var provider = new ScriptedProvider(new ReplayRpcProcess([]));
         var options = new OmpOptions
         {
-            Model = "omniroute/claude/claude-haiku-5-5",
+            Model = "claude/claude-haiku-5-5",
             Images = [new OmpImageAttachment("image/png", ImageBytes)]
         };
 
@@ -167,7 +167,7 @@ public sealed class OmpChatImageTests
         var provider = new ScriptedProvider(new ReplayRpcProcess([]));
         var options = new OmpOptions
         {
-            Provider = "omniroute",
+            Provider = "anthropic",
             Model = "claude/claude-haiku-5-5",
             Thinking = "medium",
             SessionId = "resume-me",
@@ -323,7 +323,7 @@ public sealed class OmpChatImageTests
 
     private static OmpOptions Options(bool withImages, bool withHandler, bool disableAllTools = false) => new()
     {
-        Model = "omniroute/cc/claude-sonnet-5",
+        Model = "cc/claude-sonnet-5",
         DisableAllTools = disableAllTools,
         UserInputHandler = withHandler ? NoAnswer : null,
         QuestionTimeout = TestTimeout,

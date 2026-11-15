@@ -163,7 +163,7 @@ public sealed class PiConsoleIntegrationTests
         public override void AssertRuntimeOptions(string repositoryPath, string renderedOutput)
         {
             _provider.ReceivedOptions.Count.ShouldBe(5);
-            _provider.ReceivedOptions[0].Provider.ShouldBe(PiConsoleExecutionOptions.DefaultProvider);
+            _provider.ReceivedOptions[0].Provider.ShouldBeNull();
             _provider.ReceivedOptions[0].ExecutablePath.ShouldBe("/tmp/pi");
             _provider.ReceivedOptions[0].Thinking.ShouldBe("minimal");
             _provider.ReceivedOptions[0].ExtraArguments.ShouldBe(["--profile=smoke"]);

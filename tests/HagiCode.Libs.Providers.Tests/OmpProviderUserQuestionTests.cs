@@ -95,7 +95,7 @@ public sealed class OmpProviderUserQuestionTests
         {
             ExecutablePath = "/custom/omp",
             WorkingDirectory = "/tmp/omp-project",
-            Provider = "omniroute",
+            Provider = "anthropic",
             Model = "glm/glm-4.7",
             SystemPrompt = "You are a trip planner.",
             AppendSystemPrompts = ["Keep answers terse."],
@@ -110,8 +110,10 @@ public sealed class OmpProviderUserQuestionTests
         [
             "--mode",
             "rpc-ui",
+            "--provider",
+            "anthropic",
             "--model",
-            "omniroute/glm/glm-4.7",
+            "glm/glm-4.7",
             "--system-prompt",
             "You are a trip planner.",
             "--append-system-prompt",
@@ -196,7 +198,7 @@ public sealed class OmpProviderUserQuestionTests
             new OmpOptions
             {
                 WorkingDirectory = "/tmp",
-                Model = "omniroute/claude/claude-haiku-5-5",
+                Model = "claude/claude-haiku-5-5",
                 NoSession = true,
                 AllowedTools = ["read"],
                 UserInputHandler = AnswerAll("Blue", "Dark theme, Offline mode")
@@ -205,7 +207,7 @@ public sealed class OmpProviderUserQuestionTests
 
         provider.RpcContext.ShouldNotBeNull();
         provider.RpcContext.Arguments.ShouldBe(
-            ["--mode", "rpc-ui", "--model", "omniroute/claude/claude-haiku-5-5", "--no-session", "--tools", "read,ask"]);
+            ["--mode", "rpc-ui", "--model", "claude/claude-haiku-5-5", "--no-session", "--tools", "read,ask"]);
         provider.PrintContext.ShouldBeNull();
 
         var written = process.Written.Select(ScriptedOmpProcess.Parse).ToList();
