@@ -20,7 +20,6 @@
     <Project Path="src/HagiCode.Libs.OpenCode.Console/HagiCode.Libs.OpenCode.Console.csproj" />
     <Project Path="src/HagiCode.Libs.Pi.Console/HagiCode.Libs.Pi.Console.csproj" />
     <Project Path="src/HagiCode.Libs.QoderCli.Console/HagiCode.Libs.QoderCli.Console.csproj" />
-    <Project Path="src/HagiCode.Libs.Reasonix.Console/HagiCode.Libs.Reasonix.Console.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/HagiCode.Libs.Core/HagiCode.Libs.Core.csproj" />
