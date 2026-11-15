@@ -30,7 +30,6 @@ public sealed class AcpProviderContractTests
     {
         ["DeepAgentsProvider"] = "Own ACP harness (DeepAgents toolcall diagnostics); not one of the seven contract providers of this change.",
         ["DshProvider"] = "Has no shared ACP lifecycle test in its file; its ACP session client is covered by its own tests.",
-        ["ReasonixProvider"] = "Own scripted ACP transport (ReasonixScriptedAcpTransport); not one of the seven contract providers of this change.",
     };
 
     public static IEnumerable<TestCaseData> ProviderRows() =>

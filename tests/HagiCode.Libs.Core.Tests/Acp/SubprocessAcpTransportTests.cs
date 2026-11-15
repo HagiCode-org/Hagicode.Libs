@@ -15,7 +15,7 @@ public sealed class SubprocessAcpTransportTests
             () => new IOException("Operation canceled"));
         await using var transport = new SubprocessAcpTransport(manager, new ProcessStartContext
         {
-            ExecutablePath = "reasonix"
+            ExecutablePath = "acp-fixture"
         });
 
         await transport.ConnectAsync();
@@ -30,7 +30,7 @@ public sealed class SubprocessAcpTransportTests
             () => new IOException("stderr pipe failed unexpectedly"));
         await using var transport = new SubprocessAcpTransport(manager, new ProcessStartContext
         {
-            ExecutablePath = "reasonix"
+            ExecutablePath = "acp-fixture"
         });
 
         await transport.ConnectAsync();

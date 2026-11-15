@@ -32,15 +32,4 @@ public sealed class ToolCallFixtureTests
         }
     }
 
-    [Test]
-    public void Reasonix_write_file_resolves_to_write_and_dsh_bash_resolves_to_shell()
-    {
-        var reasonix = ToolCallFixtureFile.LoadProvider("reasonix").Single();
-        ToolCallFixtureReplay.Replay("reasonix", reasonix)
-            .ShouldContain(observation => observation.ToolCallId == "toolu_01E9UTbLGHddn5vpsziLZM37" && observation.Kind == ToolKinds.Write);
-
-        var dsh = ToolCallFixtureFile.LoadProvider("dsh").Single();
-        ToolCallFixtureReplay.Replay("dsh", dsh)
-            .ShouldContain(observation => observation.ToolCallId == "tool-call-1" && observation.Kind == ToolKinds.Shell);
-    }
 }

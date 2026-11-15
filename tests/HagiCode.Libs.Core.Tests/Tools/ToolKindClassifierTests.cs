@@ -78,7 +78,6 @@ public sealed class ToolKindClassifierTests
     }
 
     [TestCase("Dsh bash with ACP kind other", "other", "bash", "{\"command\":\"echo hi\",\"description\":\"d\",\"workdir\":\"/w\"}", "shell")]
-    [TestCase("Reasonix write_file with ACP kind edit", "edit", "write_file", "{\"path\":\"permission-probe.txt\",\"content\":\"ok\\n\"}", "write")]
     public void Resolve_handles_the_recorded_acp_shapes(string scenario, string providerKind, string rawName, string inputJson, string expectedKind)
     {
         ToolKindClassifier.Resolve(providerKind, rawName, inputJson).Kind.ShouldBe(expectedKind, scenario);

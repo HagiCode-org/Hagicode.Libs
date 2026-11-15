@@ -13,7 +13,6 @@ using HagiCode.Libs.Providers.Kiro;
 using HagiCode.Libs.Providers.Omp;
 using HagiCode.Libs.Providers.Pi;
 using HagiCode.Libs.Providers.QoderCli;
-using HagiCode.Libs.Providers.Reasonix;
 using Shouldly;
 
 namespace HagiCode.Libs.Providers.Tests;
@@ -107,7 +106,7 @@ internal static class ToolCallFixtureCatalog
     public static readonly IReadOnlyCollection<string> ToolCallEmittingProviders = new HashSet<string>(StringComparer.Ordinal)
     {
         "claude-code", "codex", "codebuddy", "deepagents", "dsh", "gemini", "hermes", "junie", "kimi", "kiro-cli",
-        "omp", "pi", "qodercli", "reasonix",
+        "omp", "pi", "qodercli",
     };
 }
 
@@ -145,7 +144,6 @@ internal static class ToolCallFixtureReplay
             "junie" => JunieAcpMessageMapper.NormalizeNotification,
             "kiro-cli" => KiroAcpMessageMapper.NormalizeNotification,
             "qodercli" => QoderCliAcpMessageMapper.NormalizeNotification,
-            "reasonix" => notification => ReasonixAcpMessageMapper.NormalizeNotification(notification),
             "codebuddy" => CodebuddyAcpMessageMapper.NormalizeNotification,
             "deepagents" => DeepAgentsAcpMessageMapper.NormalizeNotification,
             "hermes" => HermesAcpMessageMapper.NormalizeNotification,

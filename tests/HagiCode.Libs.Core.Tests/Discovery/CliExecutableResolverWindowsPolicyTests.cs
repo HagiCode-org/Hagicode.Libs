@@ -312,19 +312,6 @@ public sealed class CliExecutableResolverWindowsPolicyTests
     }
 
     [Test]
-    public void ResolveProviderExecutable_reasonix_uses_its_packaged_binary()
-    {
-        using var sandbox = new PolicySandbox();
-        sandbox.CreateFile("npm", "reasonix.cmd");
-        var exe = sandbox.CreateFile("npm", "node_modules", "@reasonix", "cli-win32-x64", "bin", "reasonix.exe");
-        var resolver = CreateWindowsResolver(Architecture.X64);
-
-        var lookup = resolver.ResolveProviderExecutable("Reasonix", ["reasonix"], sandbox.Env(path: sandbox.Dir("npm")));
-
-        lookup.ResolvedPath.ShouldBe(exe);
-    }
-
-    [Test]
     public void ResolveProviderExecutable_script_only_agent_resolves_its_cmd_shim()
     {
         using var sandbox = new PolicySandbox();

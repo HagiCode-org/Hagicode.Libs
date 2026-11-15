@@ -19,7 +19,6 @@ using HagiCode.Libs.Providers.Omp;
 using HagiCode.Libs.Providers.Pi;
 using HagiCode.Libs.Providers.Pooling;
 using HagiCode.Libs.Providers.QoderCli;
-using HagiCode.Libs.Providers.Reasonix;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -81,7 +80,6 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<PiProvider>();
         services.AddSingleton<OmpProvider>();
         services.AddSingleton<QoderCliProvider>();
-        services.AddSingleton<ReasonixProvider>();
         services.AddSingleton<DshProvider>();
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<ClaudeCodeProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<CodebuddyProvider>());
@@ -97,7 +95,6 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<PiProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<OmpProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<QoderCliProvider>());
-        services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<ReasonixProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<DshProvider>());
         services.AddSingleton<ICliProvider<ClaudeCodeOptions>>(serviceProvider => serviceProvider.GetRequiredService<ClaudeCodeProvider>());
         services.AddSingleton<ICliProvider<CodebuddyOptions>>(serviceProvider => serviceProvider.GetRequiredService<CodebuddyProvider>());
@@ -113,7 +110,6 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICliProvider<PiOptions>>(serviceProvider => serviceProvider.GetRequiredService<PiProvider>());
         services.AddSingleton<ICliProvider<OmpOptions>>(serviceProvider => serviceProvider.GetRequiredService<OmpProvider>());
         services.AddSingleton<ICliProvider<QoderCliOptions>>(serviceProvider => serviceProvider.GetRequiredService<QoderCliProvider>());
-        services.AddSingleton<ICliProvider<ReasonixOptions>>(serviceProvider => serviceProvider.GetRequiredService<ReasonixProvider>());
         services.AddSingleton<ICliProvider<DshOptions>>(serviceProvider => serviceProvider.GetRequiredService<DshProvider>());
         services.AddSingleton(static serviceProvider =>
         {

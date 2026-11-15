@@ -7,6 +7,13 @@ namespace HagiCode.Libs.Core.Tests.Discovery;
 public sealed partial class CliInstallRegistryTests
 {
     [Test]
+    public void Descriptors_exclude_the_retired_reasonix_cli()
+    {
+        CliInstallRegistry.Descriptors.Any(d => d.ProviderName == "Reasonix").ShouldBeFalse();
+        CliInstallRegistry.FindByProviderName("Reasonix").ShouldBeNull();
+    }
+
+    [Test]
     public void Descriptors_include_copilot_with_public_install_metadata()
     {
         var descriptor = CliInstallRegistry.Descriptors.Single(d => d.ProviderName == "Copilot");
@@ -80,17 +87,6 @@ public sealed partial class CliInstallRegistryTests
         descriptor.NpmPackage.ShouldBeEmpty();
         descriptor.PinnedVersion.ShouldBeEmpty();
         descriptor.ExecutableCandidates.ShouldBe(["kiro-cli"]);
-        descriptor.IsPubliclyInstallable.ShouldBeFalse();
-    }
-
-    [Test]
-    public void Descriptors_include_reasonix_with_explicit_local_only_metadata()
-    {
-        var descriptor = CliInstallRegistry.Descriptors.Single(d => d.ProviderName == "Reasonix");
-
-        descriptor.NpmPackage.ShouldBeEmpty();
-        descriptor.PinnedVersion.ShouldBeEmpty();
-        descriptor.ExecutableCandidates.ShouldBe(["reasonix"]);
         descriptor.IsPubliclyInstallable.ShouldBeFalse();
     }
 

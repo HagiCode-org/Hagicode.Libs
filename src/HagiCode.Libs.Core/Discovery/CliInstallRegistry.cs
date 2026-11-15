@@ -239,27 +239,6 @@ public static class CliInstallRegistry
             WindowsExecutableEvidence = "PreferNative, script only. @qoder-ai/qodercli is a Node bundle (bundle/qodercli.js, checked at 1.1.76); no native binary was found.",
         },
 
-        new CliInstallDescriptor(
-            ProviderName: "Reasonix",
-            NpmPackage: string.Empty,
-            PinnedVersion: string.Empty,
-            ExecutableCandidates: ["reasonix"],
-            IsPubliclyInstallable: false)
-        {
-            // reasonix (2.59.0, the npm latest tag) is a Node script; @reasonix/cli-win32-x64 holds bin\reasonix.exe. The desktop pins 2.59.0; no registry pin is set here.
-            WindowsExecutableEvidence =
-                "PreferNative with a packaged layout. @reasonix/cli-win32-x64 holds bin\\reasonix.exe at 2.59.0 (the npm package exists at this version; the .exe was not inspected); "
-                + "the main package is a Node script. The -win32-arm64 name comes from the optional dependencies. "
-                + "The first npm publish of the platform package is 1.0.0-rc1 (2026-06-03); the oldest release that ships the .exe was not established.",
-            PackagedBinaryLayout = new CliPackagedBinaryLayout(
-                MainPackage: "reasonix",
-                Targets:
-                [
-                    new CliPackagedBinaryTarget(Architecture.X64, "@reasonix/cli-win32-x64", "bin\\reasonix.exe"),
-                    new CliPackagedBinaryTarget(Architecture.Arm64, "@reasonix/cli-win32-arm64", "bin\\reasonix.exe"),
-                ]),
-            InstallStrategies = [NpmStrategy()],
-        },
     ];
 
     /// <summary>

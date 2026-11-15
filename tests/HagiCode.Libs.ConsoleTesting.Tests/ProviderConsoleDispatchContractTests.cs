@@ -22,7 +22,6 @@ public sealed class ProviderConsoleDispatchContractTests
             ["codebuddy"] = CodebuddyConsoleIntegrationTests.CreateDispatchRow,
             ["qodercli"] = QoderCliConsoleIntegrationTests.CreateDispatchRow,
             ["kiro-cli"] = KiroConsoleIntegrationTests.CreateDispatchRow,
-            ["reasonix"] = ReasonixConsoleIntegrationTests.CreateDispatchRow,
             ["opencode"] = OpenCodeConsoleIntegrationTests.CreateDispatchRow,
             ["copilot"] = CopilotConsoleIntegrationTests.CreateDispatchRow,
             ["hermes"] = HermesConsoleIntegrationTests.CreateDispatchRow,

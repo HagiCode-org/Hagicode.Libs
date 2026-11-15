@@ -26,7 +26,6 @@ public sealed class CliInstallRegistryWindowsPolicyTests
             .ToArray();
 
         preferred.ShouldContain("OpenCode");
-        preferred.ShouldContain("Reasonix");
         preferred.ShouldContain("Pi");
         preferred.ShouldNotContain("ClaudeCode");
         preferred.ShouldNotContain("Copilot");
@@ -42,23 +41,7 @@ public sealed class CliInstallRegistryWindowsPolicyTests
             .OrderBy(static name => name, StringComparer.Ordinal)
             .ToArray();
 
-        layouts.ShouldBe(["ClaudeCode", "Codex", "Copilot", "OpenCode", "Reasonix"]);
-    }
-
-    [Test]
-    public void OpenCode_and_reasonix_stay_prefer_native_while_their_layouts_are_recorded()
-    {
-        var opencode = CliInstallRegistry.FindByProviderName("OpenCode")!;
-        var reasonix = CliInstallRegistry.FindByProviderName("Reasonix")!;
-
-        opencode.WindowsExecutablePolicy.ShouldBe(CliWindowsExecutablePolicy.PreferNative);
-        opencode.PackagedBinaryLayout!.MainPackage.ShouldBe("@opencode/cli");
-        opencode.PackagedBinaryLayout.Targets.Select(static target => target.PlatformPackage)
-            .ShouldBe(["@opencode/cli-windows-x64", "@opencode/cli-windows-x64-baseline", "@opencode/cli-windows-arm64"]);
-
-        reasonix.WindowsExecutablePolicy.ShouldBe(CliWindowsExecutablePolicy.PreferNative);
-        reasonix.PackagedBinaryLayout!.Targets.Select(static target => target.PlatformPackage)
-            .ShouldBe(["@reasonix/cli-win32-x64", "@reasonix/cli-win32-arm64"]);
+        layouts.ShouldBe(["ClaudeCode", "Codex", "Copilot", "OpenCode"]);
     }
 
     [Test]
