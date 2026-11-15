@@ -239,8 +239,8 @@ await foreach (var message in kiro.ExecuteAsync(kiroOptions, "Reply with exactly
 var piOptions = new PiOptions
 {
     WorkingDirectory = "/path/to/repo",
-    Provider = "omniroute",
-    Model = "glm/glm-4.7",
+    Provider = "anthropic",
+    Model = "claude-haiku-4-5-20251001",
     DisableAllTools = true,
     NoSession = true,
     EnvironmentVariables = new Dictionary<string, string?>
@@ -388,7 +388,7 @@ Set `PiOptions.UserInputHandler` and the Pi agent can ask the user multiple-choi
 var options = new PiOptions
 {
     WorkingDirectory = "/path/to/repo",
-    Model = "omniroute/cc/claude-haiku-4-5-20251001",
+    Model = "claude-haiku-4-5-20251001",
     QuestionTimeout = TimeSpan.FromMinutes(10), // default 30 minutes, Timeout.InfiniteTimeSpan for no limit
     UserInputHandler = async (request, cancellationToken) =>
     {

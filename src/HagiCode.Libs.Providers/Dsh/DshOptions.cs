@@ -16,7 +16,7 @@ public sealed record DshOptions
     public string? WorkingDirectory { get; init; }
 
     /// <summary>
-    /// Gets or sets the dsh provider id, for example <c>omniroute</c>. Required when <see cref="Model"/> is set.
+    /// Gets or sets the dsh provider id, for example <c>anthropic</c>. Required when <see cref="Model"/> is set.
     /// The provider and model are sent together as dsh's advertised <c>["provider","model"]</c> value through <c>session/set_config_option</c>.
     /// Ignored when <see cref="Model"/> is blank.
     /// </summary>

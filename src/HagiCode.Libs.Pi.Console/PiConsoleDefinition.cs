@@ -12,7 +12,7 @@ public static class PiConsoleDefinition
         aliases: ["pi-cli"],
         optionLines:
         [
-            "--provider <name>       Override the upstream Pi provider (default: omniroute)",
+            "--provider <name>       Select the upstream Pi provider paired with --model (default: none, Pi native configuration)",
             "--model <model>         Override the Pi model (default: glm/glm-4.7)",
             "--repo <path>           Include the repository summary scenario in the suite",
             "--workspace <path>      Reuse a stable working directory for non-repo scenarios",
@@ -25,6 +25,6 @@ public static class PiConsoleDefinition
         [
             "HagiCode.Libs.Pi.Console",
             "HagiCode.Libs.Pi.Console --test-provider pi-cli",
-            "HagiCode.Libs.Pi.Console --test-provider-full --provider omniroute --model glm/glm-4.7 --repo ."
+            "HagiCode.Libs.Pi.Console --test-provider-full --provider <provider> --model <model> --repo ."
         ]);
 }
