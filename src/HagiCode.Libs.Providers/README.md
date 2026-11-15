@@ -1,6 +1,6 @@
 # HagiCode.Libs.Providers
 
-`HagiCode.Libs.Providers` builds on `HagiCode.Libs.Core` and adds reusable provider abstractions plus built-in integrations for Claude Code, Copilot, Codex, DeepAgents, CodeBuddy, Gemini, Junie, Hermes, Dsh, Kimi, Kiro, OpenCode, Pi, OMP, QoderCLI, and Reasonix.
+`HagiCode.Libs.Providers` builds on `HagiCode.Libs.Core` and adds reusable provider abstractions plus built-in integrations for Claude Code, Copilot, Codex, DeepAgents, CodeBuddy, Gemini, Junie, Hermes, Dsh, Kimi, Kiro, OpenCode, Pi, OMP, and QoderCLI.
 
 ## What is included
 
@@ -38,7 +38,6 @@ using HagiCode.Libs.Providers.Kiro;
 using HagiCode.Libs.Providers.OpenCode;
 using HagiCode.Libs.Providers.Omp;
 using HagiCode.Libs.Providers.Pi;
-using HagiCode.Libs.Providers.Reasonix;
 using Microsoft.Extensions.DependencyInjection;
 
 var services = new ServiceCollection();
@@ -59,7 +58,6 @@ var kiro = serviceProvider.GetRequiredService<ICliProvider<KiroOptions>>();
 var openCode = serviceProvider.GetRequiredService<ICliProvider<OpenCodeOptions>>();
 var pi = serviceProvider.GetRequiredService<ICliProvider<PiOptions>>();
 var omp = serviceProvider.GetRequiredService<ICliProvider<OmpOptions>>();
-var reasonix = serviceProvider.GetRequiredService<ICliProvider<ReasonixOptions>>();
 ```
 
 The same DI graph also exposes the shared pool services for Hermes diagnostics or explicit cleanup:
@@ -115,7 +113,6 @@ using HagiCode.Libs.Providers.Kimi;
 using HagiCode.Libs.Providers.Kiro;
 using HagiCode.Libs.Providers.Omp;
 using HagiCode.Libs.Providers.Pi;
-using HagiCode.Libs.Providers.Reasonix;
 
 var codebuddyOptions = new CodebuddyOptions
 {
@@ -257,17 +254,6 @@ await foreach (var message in pi.ExecuteAsync(piOptions, "Plan a two-day Chongqi
     Console.WriteLine($"{message.Type}: {message.Content}");
 }
 
-var reasonixOptions = new ReasonixOptions
-{
-    WorkingDirectory = "/path/to/repo",
-    Model = "provider/model", // a provider or provider/model ref defined in your Reasonix configuration
-    SessionId = "reasonix-session-123"
-};
-
-await foreach (var message in reasonix.ExecuteAsync(reasonixOptions, "Reply with exactly the word 'pong'"))
-{
-    Console.WriteLine($"{message.Type}: {message.Content}");
-}
 ```
 
 ## Claude Code run steering
@@ -464,45 +450,6 @@ await foreach (var message in omp.ExecuteAsync(options, "Ask me which database t
 ```
 
 A declined, unanswered or expired question ends the OMP run (`terminal.completed` with `stop_reason: "aborted"`), unlike Claude and Pi, whose agents continue; continue the session with a normal next message (`SessionId`). Dialogs of OMP extensions are answered cancelled and never reach the handler. Cancelling the call sends `abort`, lets OMP close the open question itself and ends the OMP process. See the repository README (OMP provider) for the wire contract, the answer mapping, the failure cases and the opt-in real-CLI tests.
-
-## Reasonix interactive questions
-
-Reasonix's built-in `ask` tool is always available in `reasonix acp`. Each question it asks arrives as its own ACP `session/request_permission` (tool call id `ask-<hex>-<turn>-qN`, options `qN:1`, `qN:2`, … plus `qN:cancel`), and the next question of the same `ask` call arrives only after the previous one is answered. Set `ReasonixOptions.UserInputHandler` and the provider routes those requests to the handler instead of answering them itself. Verified against Reasonix v2.41.0.
-
-```csharp
-var options = new ReasonixOptions
-{
-    WorkingDirectory = "/path/to/repo",
-    Model = "provider/model",
-    QuestionTimeout = TimeSpan.FromMinutes(10), // default 30 minutes, Timeout.InfiniteTimeSpan for no limit
-    UserInputHandler = async (request, cancellationToken) =>
-    {
-        // One question per request: request.RequestId is the ask-…-qN tool call id; Question has Id, Header,
-        // MultiSelect (as Reasonix reported it) and Options (label and description, without the cancel option).
-        var label = await AskTheUserToPickOneAsync(request.Question, cancellationToken);
-        return new ReasonixUserInputResponse(new Dictionary<string, IReadOnlyList<string>>
-        {
-            [request.Question.Question] = [label] // exactly one offered label; anything else declines
-        });
-    }
-};
-
-await foreach (var message in reasonix.ExecuteAsync(options, "Ask me which database to use, then set it up."))
-{
-    if (message.Type == ReasonixUserInputRequest.MessageType &&
-        ReasonixUserInputRequest.TryFromCliMessage(message, out var question))
-    {
-        // The question as it arrived in the stream (the handler is already running); show it, or ignore it.
-    }
-}
-```
-
-- **Mapping:** an answer that is exactly one offered label is sent as `selected` with that option's id (`qN:<i>`). A `null` response, an empty answer, text that is not an offered label, more than one value, a handler that throws and `QuestionTimeout` passing all decline the question: `selected qN:cancel` when the request offers it, otherwise the `cancelled` outcome. Labels are matched exactly and as a whole, so a label may contain a comma; when two options share a label, the first one is selected.
-- **Single choice, no free text:** ACP carries one option id per answer. A question that the agent marked `multi` is still answered with one label, and free text cannot be sent; show these questions as single-choice without a custom-answer field.
-- **Decline:** Reasonix 2.41.0 does not continue after a decline. It fails the `ask` call (`ask: context canceled`) and ends the turn with stop reason `error`. Because the provider declined, it reports that turn as `terminal.completed` with `question_declined: true` and the original `stop_reason`; a turn that ends with `error` and no declined question is still `terminal.failed`. Continue the session with a normal next message (`SessionId`).
-- **Stop:** cancelling the call cancels the handler token, answers a pending question `cancelled` when the transport is still open, records no decline, and ends the Reasonix process; the stream ends with `OperationCanceledException` as before.
-- **No handler:** `UserInputHandler` is `null` by default and nothing changes: a question request is answered with its first option like any permission request, no question message is produced, and a warning naming the question is logged. Tool approvals (`gate-*`) are never routed to the handler and are answered as before, with or without one.
-- The question message (`question.request`) carries the raw request in `params` and follows the `tool.call` of the `ask` call; the `ask` call itself (its `tool.call` and its completed or failed `tool.update`) stays an ordinary tool message whose `toolCallId` differs from the question's `RequestId`, so callers hide it by the tool title `ask` (`ReasonixUserInputRequest.QuestionToolName`).
 
 ## Copilot interactive questions
 
@@ -707,12 +654,7 @@ The precedence and the blank-value rule are covered by `CreateStartInfo_Injected
 - `kiro-cli` is the canonical built-in provider name across the shared provider registry and the dedicated console.
 - `pi` is the canonical built-in provider name; `ProviderRegistry` also accepts `pi-cli` as a compatibility alias and the built-in provider runs Pi through `--mode json --print` one-shot execution, or through `--mode rpc` when `PiOptions.UserInputHandler` is set.
 - `omp` is the canonical built-in provider name; `ProviderRegistry` also accepts `omp-cli` as a compatibility alias and the built-in provider runs OMP through `--mode json --print` one-shot execution, or through `--mode rpc-ui` when `OmpOptions.UserInputHandler` is set.
-- `reasonix` is the canonical built-in provider name and targets the Reasonix 2.x ACP contract (npm `latest`, 2.59.0 as pinned by the desktop; the committed transcripts were recorded from `v2.41.0` and have not yet been re-recorded against 2.59.0). The 1.x line is supported on a best-effort basis without dedicated tests.
-- Reasonix forwards only the startup-time `-model` selector. `Model` must be a provider or provider/model ref defined in your Reasonix configuration; an unknown ref fails session start with a readable `terminal.failed` message whose `failure_kind` is `unknown_model`.
 - Resume uses `session/resume` when `initialize` advertises `sessionCapabilities.resume`, which restores the session without replaying history. Otherwise `session/load` is used, and the replayed history is filtered out of the turn output by message shape.
 - An unknown session id fails with `failure_kind` `unknown_session`. `EnableYolo` maps to `session/set_config_option` with `tool_approval=yolo` when the session advertises that option; a missing option or a failed call is logged and the turn still runs.
-- `Effort`, `BudgetUsd` and `TranscriptPath` are accepted for compatibility but not applied, because Reasonix 2.x has no ACP flag or option for them. Permissions, MCP servers and similar policy live in the Reasonix configuration.
-- `ReasonixOptions.UserInputHandler` (default `null`, nothing changes) routes Reasonix `ask` questions to the host one at a time; see **Reasonix interactive questions** above for the mapping, the single-choice and no-free-text limits and the decline behavior. Question transcripts are recorded under `tests/HagiCode.Libs.Providers.Tests/Fixtures/Reasonix/v2.41.0/ask-*.jsonl`.
-- Reasonix verification status: `reject_once` is verified (fixture `permission-reject-once`): the rejected tool update is `failed` and the turn still ends with `end_turn`. `agent_thought_chunk` is **unverified** against Reasonix 2.41.0: no reasoning chunk was observed for `claude-haiku-5-5` or `claude-opus-5` in ACP transcripts, so the assistant-thought mapping is covered by unit tests only. Image prompts are **unverified**: `promptCapabilities.image` is advertised, but the Reasonix provider sends text prompts only.
 - Kiro discovery is strict: the shared provider only supports `kiro-cli` executables. Generic `kiro` launchers are not accepted for implicit discovery, explicit `ExecutablePath`, or readiness checks.
 - `CliInstallRegistry` now treats DeepAgents as local-only validation metadata because the managed runtime expects a `deepagents` executable (or `uvx --from deepagents-cli deepagents --acp`) rather than the legacy `deepagents-acp` npm package.

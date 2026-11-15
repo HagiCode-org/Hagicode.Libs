@@ -183,13 +183,12 @@ The fixed first three do not depend on how `PATHEXT` lists them. A native `.exe`
 | Copilot | `@github/copilot` (Node loader) | `@github/copilot-win32-x64`: `copilot.exe` | 1.0.60 (pin), 1.0.102 | `RequireNative` |
 | Codex | `@openai/codex` (Node script) | `@openai/codex-win32-x64`: `vendor\x86_64-pc-windows-msvc\codex\codex.exe` | 0.115.0 (pin), 0.163.0 | `RequireNative` |
 | OpenCode | `@opencode/cli` | `@opencode/cli-windows-x64`: `bin\opencode.exe` (and `-baseline`, `-windows-arm64`) | 2.2.7 (pin) | `PreferNative` with a packaged layout |
-| Reasonix | `reasonix` (Node script) | `@reasonix/cli-win32-x64`: `bin\reasonix.exe` | 2.59.0 (no registry pin) | `PreferNative` with a packaged layout |
 | Pi, Omp, Gemini, QoderCLI, Codebuddy | Node scripts | none found | 1.4.0, 18.12.6, 0.65.0, 1.1.76, 2.172.1 | `PreferNative`, script only |
 | Kimi, Hermes, DeepAgents, Kiro, Junie, Dsh | not npm packages in this registry | not examined | none | `PreferNative`, not examined |
 
 The arm64 package names and file paths come from the optional-dependency lists and follow the x64 pattern, so they are unverified. The oldest release that ships the `.exe` was not established for any agent. Every registry entry carries its evidence note in `WindowsExecutableEvidence`.
 
-An agent is promoted to `RequireNative` only when its Windows package or installer ships a native executable at the pinned version and at the current release, and every documented Windows install route yields that executable. OpenCode and Reasonix are the next promotion candidates. Their supported install routes were not checked.
+An agent is promoted to `RequireNative` only when its Windows package or installer ships a native executable at the pinned version and at the current release, and every documented Windows install route yields that executable. OpenCode is the next promotion candidate. Its supported install routes were not checked.
 
 ### Packaged binaries behind a shim
 
@@ -242,7 +241,7 @@ Only a command-script launch is affected by the rules above. These arguments wer
 - **Pi and Omp** pass the user prompt, and `--system-prompt` or `--append-system-prompt`, as argv on the one-shot path. On Windows, a prompt that contains `%`, a line break or an odd number of quotes is refused before launch. These are the agents most likely to hit the rule, because they are script-only. Passing the prompt through stdin is the fix, and it is a per-provider change.
 - **Claude Code** passes `--system-prompt`, `--append-system-prompt`, and an `--mcp-config` JSON payload as argv. Only an explicitly configured `.cmd` path reaches `cmd.exe`.
 - **Codex and Copilot** are `RequireNative`, so their arguments reach `cmd.exe` only through an explicitly configured `.cmd` path.
-- The remaining one-shot providers (Gemini, QoderCLI, Codebuddy, Kimi, Junie, Hermes, Dsh, Kiro, Reasonix) send the prompt through the transport's stdin. Their argument builders were not read line by line.
+- The remaining one-shot providers (Gemini, QoderCLI, Codebuddy, Kimi, Junie, Hermes, Dsh, Kiro) send the prompt through the transport's stdin. Their argument builders were not read line by line.
 
 ## Lane status
 
