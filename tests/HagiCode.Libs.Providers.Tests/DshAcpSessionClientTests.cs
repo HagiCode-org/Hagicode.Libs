@@ -11,13 +11,13 @@ public sealed class DshAcpSessionClientTests
     public async Task StartSessionAsync_sends_provider_and_model_as_dsh_selector_value()
     {
         var inner = new RecordingAcpSessionClient();
-        var client = new DshAcpSessionClient(inner, "omniroute");
+        var client = new DshAcpSessionClient(inner, "anthropic");
 
         await client.StartSessionAsync("/tmp/project", null, "claude/claude-haiku-5-5");
 
         var modelCall = inner.Calls.Single(static call => call.Method == "session/set_config_option");
         modelCall.Parameters.GetProperty("configId").GetString().ShouldBe("model");
-        modelCall.Parameters.GetProperty("value").GetString().ShouldBe("[\"omniroute\",\"claude/claude-haiku-5-5\"]");
+        modelCall.Parameters.GetProperty("value").GetString().ShouldBe("[\"anthropic\",\"claude/claude-haiku-5-5\"]");
     }
 
     [Test]
@@ -36,7 +36,7 @@ public sealed class DshAcpSessionClientTests
     public async Task StartSessionAsync_skips_model_selection_when_model_is_blank()
     {
         var inner = new RecordingAcpSessionClient();
-        var client = new DshAcpSessionClient(inner, "omniroute");
+        var client = new DshAcpSessionClient(inner, "anthropic");
 
         await client.StartSessionAsync("/tmp/project", null, "   ");
 

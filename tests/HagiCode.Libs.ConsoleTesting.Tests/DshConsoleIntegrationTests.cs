@@ -12,7 +12,7 @@ namespace HagiCode.Libs.ConsoleTesting.Tests;
 public sealed class DshConsoleIntegrationTests
 {
     private const string RealCliTestsEnvironmentVariable = "HAGICODE_REAL_CLI_TESTS";
-    private const string TestProvider = "omniroute";
+    private const string TestProvider = "anthropic";
     private const string TestModel = "claude/claude-haiku-5-5";
 
     [TestCase("--bogus", "Unknown option: --bogus")]

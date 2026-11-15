@@ -10,7 +10,7 @@ public sealed class DshAcpSessionClientImageCapabilityTests
     [Test]
     public async Task SupportsImageInput_is_false_before_initialize()
     {
-        var client = new DshAcpSessionClient(new InitializeOnlyAcpSessionClient("{\"agentCapabilities\":{\"promptCapabilities\":{\"image\":true}}}"), "omniroute");
+        var client = new DshAcpSessionClient(new InitializeOnlyAcpSessionClient("{\"agentCapabilities\":{\"promptCapabilities\":{\"image\":true}}}"), "anthropic");
 
         client.SupportsImageInput.ShouldBeFalse();
         await client.DisposeAsync();
@@ -25,7 +25,7 @@ public sealed class DshAcpSessionClientImageCapabilityTests
     [TestCase("{}", false)]
     public async Task InitializeAsync_reads_prompt_image_capability_and_treats_anything_else_as_false(string initializeJson, bool expected)
     {
-        var client = new DshAcpSessionClient(new InitializeOnlyAcpSessionClient(initializeJson), "omniroute");
+        var client = new DshAcpSessionClient(new InitializeOnlyAcpSessionClient(initializeJson), "anthropic");
 
         await client.InitializeAsync();
 
@@ -36,8 +36,8 @@ public sealed class DshAcpSessionClientImageCapabilityTests
     [Test]
     public async Task MarkImageInputUnsupported_downgrades_only_this_connection()
     {
-        var first = new DshAcpSessionClient(new InitializeOnlyAcpSessionClient("{\"agentCapabilities\":{\"promptCapabilities\":{\"image\":true}}}"), "omniroute");
-        var second = new DshAcpSessionClient(new InitializeOnlyAcpSessionClient("{\"agentCapabilities\":{\"promptCapabilities\":{\"image\":true}}}"), "omniroute");
+        var first = new DshAcpSessionClient(new InitializeOnlyAcpSessionClient("{\"agentCapabilities\":{\"promptCapabilities\":{\"image\":true}}}"), "anthropic");
+        var second = new DshAcpSessionClient(new InitializeOnlyAcpSessionClient("{\"agentCapabilities\":{\"promptCapabilities\":{\"image\":true}}}"), "anthropic");
         await first.InitializeAsync();
         await second.InitializeAsync();
 
@@ -52,7 +52,7 @@ public sealed class DshAcpSessionClientImageCapabilityTests
     [Test]
     public async Task SendPromptAsync_with_images_is_refused_by_clients_without_inline_support()
     {
-        var client = new DshAcpSessionClient(new InitializeOnlyAcpSessionClient("{}"), "omniroute");
+        var client = new DshAcpSessionClient(new InitializeOnlyAcpSessionClient("{}"), "anthropic");
         var image = new AcpImageBlock("image/png", "AAEC");
 
         await Should.ThrowAsync<NotSupportedException>(() => client.SendPromptAsync("session-1", "describe", [image]));

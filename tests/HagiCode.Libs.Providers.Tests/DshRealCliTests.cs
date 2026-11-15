@@ -14,7 +14,7 @@ public sealed class DshRealCliTests
     private const string TestModel = "claude-haiku-5-5";
 
     // DshOptions.Model requires DshOptions.Provider, so the tool-call check uses dsh's advertised pair.
-    private const string ToolCallTestProvider = "omniroute";
+    private const string ToolCallTestProvider = "anthropic";
     private const string ToolCallTestModel = "claude/claude-haiku-5-5";
 
     [Test]
