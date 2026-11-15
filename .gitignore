@@ -36,3 +36,6 @@ CodeCoverage/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Local deja session-rule export (auto-extracted from agent sessions; not committed)
+.deja/
