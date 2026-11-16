@@ -698,6 +698,148 @@ public sealed class CopilotProviderTests
     }
 
     [Test]
+    public async Task ExecuteAsync_preserves_the_parent_of_subagent_stream_events()
+    {
+        var provider = CreateProvider(gateway: new StubCopilotSdkGateway(
+        [
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.TextDelta, Content: "child", ParentToolUseId: "task-1", SourceTracked: true),
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.ReasoningDelta, Content: "thinking", ParentToolUseId: "task-1", SourceTracked: true),
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.ToolExecutionStart, ToolCallId: "tool-1", ParentToolUseId: "task-1", SourceTracked: true),
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.ToolExecutionEnd, ToolCallId: "tool-1", ParentToolUseId: "task-1", SourceTracked: true),
+            new CopilotSdkStreamEvent(CopilotSdkStreamEventType.Completed)
+        ]));
+        var messages = new List<CliMessage>();
+
+        await foreach (var message in provider.ExecuteAsync(new CopilotOptions(), "hello"))
+        {
+            messages.Add(message);
+        }
+
+        messages.Where(static message => message.Type is "assistant" or "reasoning" or "tool.started" or "tool.completed")
+            .Select(static message => message.Content.GetProperty("parent_tool_use_id").GetString())
+            .ShouldBe(["task-1", "task-1", "task-1", "task-1"]);
+        messages.Where(static message => message.Type is "assistant" or "reasoning" or "tool.started" or "tool.completed")
+            .All(static message => message.Content.GetProperty("source_tracked").GetBoolean())
+            .ShouldBeTrue();
+    }
+
+    [Test]
+    public void DispatchSessionEvent_resolves_subagent_reasoning_to_the_parent_tool_call()
+    {
+        var sources = new GitHubCopilotSdkGateway.CopilotEventSourceTracker();
+        GitHubCopilotSdkGateway.DispatchSessionEvent(
+            new SubagentStartedEvent
+            {
+                AgentId = "agent-1",
+                Data = new SubagentStartedData
+                {
+                    ToolCallId = "task-1",
+                    AgentName = "agent",
+                    AgentDisplayName = "Agent",
+                    AgentDescription = "Child agent"
+                }
+            },
+            sawDelta: false,
+            sourceTracker: sources);
+
+        var child = GitHubCopilotSdkGateway.DispatchSessionEvent(
+            new AssistantReasoningDeltaEvent
+            {
+                AgentId = "agent-1",
+                Data = new AssistantReasoningDeltaData { DeltaContent = "thinking", ReasoningId = "reasoning-1" }
+            },
+            sawDelta: false,
+            sourceTracker: sources);
+        var root = GitHubCopilotSdkGateway.DispatchSessionEvent(
+            new AssistantMessageDeltaEvent
+            {
+                Data = new AssistantMessageDeltaData { DeltaContent = "answer", MessageId = "message-1" }
+            },
+            sawDelta: false,
+            sourceTracker: sources);
+
+        child.Events.ShouldHaveSingleItem().ParentToolUseId.ShouldBe("task-1");
+        root.Events.ShouldHaveSingleItem().ParentToolUseId.ShouldBeNull();
+        child.Events.Single().SourceTracked.ShouldBeTrue();
+        root.Events.Single().SourceTracked.ShouldBeTrue();
+    }
+
+    [Test]
+    public void DispatchSessionEvent_uses_a_direct_parent_before_subagent_start_is_observed()
+    {
+        var sources = new GitHubCopilotSdkGateway.CopilotEventSourceTracker();
+#pragma warning disable GHCP001 // Verify the fallback for older SDK parent fields.
+        var text = GitHubCopilotSdkGateway.DispatchSessionEvent(
+            new AssistantMessageDeltaEvent
+            {
+                AgentId = "agent-1",
+                Data = new AssistantMessageDeltaData
+                {
+                    DeltaContent = "answer",
+                    MessageId = "message-1",
+                    ParentToolCallId = "task-1"
+                }
+            },
+            sawDelta: false,
+            sourceTracker: sources);
+#pragma warning restore GHCP001
+        var reasoning = GitHubCopilotSdkGateway.DispatchSessionEvent(
+            new AssistantReasoningDeltaEvent
+            {
+                AgentId = "agent-1",
+                Data = new AssistantReasoningDeltaData { DeltaContent = "thinking", ReasoningId = "reasoning-1" }
+            },
+            sawDelta: false,
+            sourceTracker: sources);
+
+        text.Events.ShouldHaveSingleItem().ParentToolUseId.ShouldBe("task-1");
+        reasoning.Events.ShouldHaveSingleItem().ParentToolUseId.ShouldBe("task-1");
+    }
+
+    [Test]
+    public void DispatchSessionEvent_keeps_an_unmapped_subagent_separate_after_its_tool_id_arrives()
+    {
+        var sources = new GitHubCopilotSdkGateway.CopilotEventSourceTracker();
+        var reasoning = GitHubCopilotSdkGateway.DispatchSessionEvent(
+            new AssistantReasoningDeltaEvent
+            {
+                AgentId = "late-agent",
+                Data = new AssistantReasoningDeltaData { DeltaContent = "thinking", ReasoningId = "reasoning-1" }
+            },
+            sawDelta: false,
+            sourceTracker: sources);
+        GitHubCopilotSdkGateway.DispatchSessionEvent(
+            new SubagentStartedEvent
+            {
+                AgentId = "late-agent",
+                Data = new SubagentStartedData
+                {
+                    ToolCallId = "late-tool",
+                    AgentName = "agent",
+                    AgentDisplayName = "Agent",
+                    AgentDescription = "Child agent"
+                }
+            },
+            sawDelta: false,
+            sourceTracker: sources);
+
+        var text = GitHubCopilotSdkGateway.DispatchSessionEvent(
+            new AssistantMessageDeltaEvent
+            {
+                AgentId = "late-agent",
+                Data = new AssistantMessageDeltaData { DeltaContent = "answer", MessageId = "message-1" }
+            },
+            sawDelta: false,
+            sourceTracker: sources);
+
+        reasoning.Events.Single(static item => item.Type == CopilotSdkStreamEventType.ReasoningDelta)
+            .ParentToolUseId.ShouldBe("copilot-agent:late-agent");
+        reasoning.Events.Single(static item => item.Type == CopilotSdkStreamEventType.Diagnostic)
+            .Content!.ShouldContain("no known parent tool call");
+        text.Events.ShouldHaveSingleItem().ParentToolUseId.ShouldBe("copilot-agent:late-agent");
+    }
+
+    [Test]
     public async Task ExecuteAsync_uses_authoritative_tool_success_over_result_text_heuristics()
     {
         var provider = CreateProvider(gateway: new StubCopilotSdkGateway(

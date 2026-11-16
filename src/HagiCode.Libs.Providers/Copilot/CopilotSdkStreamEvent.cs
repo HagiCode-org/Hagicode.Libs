@@ -35,4 +35,6 @@ internal sealed record CopilotSdkStreamEvent(
     string? QuestionId = null,
     string? Question = null,
     IReadOnlyList<string>? Choices = null,
-    bool AllowFreeform = false);
+    bool AllowFreeform = false,
+    string? ParentToolUseId = null,
+    bool SourceTracked = false);

@@ -591,9 +591,9 @@ public class CopilotProvider : ICliProvider<CopilotOptions>, ICopilotModelCapabi
                     ["reuse_key"] = requestedSessionId ?? sessionId
                 }),
             CopilotSdkStreamEventType.TextDelta when !string.IsNullOrEmpty(eventData.Content) =>
-                CreateAssistantMessage(eventData.Content, sessionId, isAuthoritativeSnapshot: false),
+                CreateAssistantMessage(eventData.Content, sessionId, eventData.ParentToolUseId, eventData.SourceTracked, isAuthoritativeSnapshot: false),
             CopilotSdkStreamEventType.AssistantSnapshot when !string.IsNullOrEmpty(eventData.Content) =>
-                CreateAssistantMessage(eventData.Content, sessionId, isAuthoritativeSnapshot: true),
+                CreateAssistantMessage(eventData.Content, sessionId, eventData.ParentToolUseId, eventData.SourceTracked, isAuthoritativeSnapshot: true),
             CopilotSdkStreamEventType.ReasoningDelta when !string.IsNullOrEmpty(eventData.Content) =>
                 CreateMessage("reasoning", new Dictionary<string, object?>
                 {
@@ -601,14 +601,18 @@ public class CopilotProvider : ICliProvider<CopilotOptions>, ICopilotModelCapabi
                     ["session_id"] = sessionId,
                     ["text"] = eventData.Content,
                     ["reasoning_id"] = eventData.ReasoningId,
-                    ["is_authoritative_replay"] = eventData.IsAuthoritativeReasoningReplay
+                    ["is_authoritative_replay"] = eventData.IsAuthoritativeReasoningReplay,
+                    ["parent_tool_use_id"] = eventData.ParentToolUseId,
+                    ["source_tracked"] = eventData.SourceTracked
                 }),
             CopilotSdkStreamEventType.StreamingDelta when eventData.TotalResponseSizeBytes.HasValue =>
                 CreateMessage("streaming.delta", new Dictionary<string, object?>
                 {
                     ["type"] = "streaming.delta",
                     ["session_id"] = sessionId,
-                    ["total_response_size_bytes"] = eventData.TotalResponseSizeBytes.Value
+                    ["total_response_size_bytes"] = eventData.TotalResponseSizeBytes.Value,
+                    ["parent_tool_use_id"] = eventData.ParentToolUseId,
+                    ["source_tracked"] = eventData.SourceTracked
                 }),
             CopilotSdkStreamEventType.ToolExecutionStart =>
                 CreateMessage("tool.started", new Dictionary<string, object?>
@@ -616,7 +620,9 @@ public class CopilotProvider : ICliProvider<CopilotOptions>, ICopilotModelCapabi
                     ["type"] = "tool.started",
                     ["session_id"] = sessionId,
                     ["tool_name"] = eventData.ToolName,
-                    ["tool_call_id"] = eventData.ToolCallId
+                    ["tool_call_id"] = eventData.ToolCallId,
+                    ["parent_tool_use_id"] = eventData.ParentToolUseId,
+                    ["source_tracked"] = eventData.SourceTracked
                 }),
             CopilotSdkStreamEventType.ToolExecutionEnd =>
                 CreateMessage("tool.completed", new Dictionary<string, object?>
@@ -626,6 +632,8 @@ public class CopilotProvider : ICliProvider<CopilotOptions>, ICopilotModelCapabi
                     ["tool_name"] = eventData.ToolName,
                     ["tool_call_id"] = eventData.ToolCallId,
                     ["text"] = eventData.Content,
+                    ["parent_tool_use_id"] = eventData.ParentToolUseId,
+                    ["source_tracked"] = eventData.SourceTracked,
                     ["failed"] = eventData.ToolSucceeded is false
                         || (eventData.ToolSucceeded is null && LooksLikeToolFailure(eventData.Content))
                 }),
@@ -694,6 +702,8 @@ public class CopilotProvider : ICliProvider<CopilotOptions>, ICopilotModelCapabi
     private static CliMessage CreateAssistantMessage(
         string content,
         string? sessionId,
+        string? parentToolUseId,
+        bool sourceTracked,
         bool isAuthoritativeSnapshot)
     {
         return CreateMessage("assistant", new Dictionary<string, object?>
@@ -702,6 +712,8 @@ public class CopilotProvider : ICliProvider<CopilotOptions>, ICopilotModelCapabi
             ["role"] = "assistant",
             ["session_id"] = sessionId,
             ["text"] = content,
+            ["parent_tool_use_id"] = parentToolUseId,
+            ["source_tracked"] = sourceTracked,
             ["is_authoritative_snapshot"] = isAuthoritativeSnapshot
         });
     }

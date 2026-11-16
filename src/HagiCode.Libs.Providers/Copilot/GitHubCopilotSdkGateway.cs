@@ -292,9 +292,19 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
     internal static SessionEventDispatchResult DispatchSessionEvent(
         SessionEvent evt,
         bool sawDelta,
-        CopilotPendingQuestions? pendingQuestions = null)
+        CopilotPendingQuestions? pendingQuestions = null,
+        CopilotEventSourceTracker? sourceTracker = null)
     {
         var events = new List<CopilotSdkStreamEvent>();
+        var missingParent = false;
+        var parentToolUseId = sourceTracker?.Resolve(evt, out missingParent);
+        if (missingParent)
+        {
+            events.Add(new CopilotSdkStreamEvent(
+                CopilotSdkStreamEventType.Diagnostic,
+                Content: $"Copilot subagent {evt.AgentId} has no known parent tool call; its messages will use a separate group."));
+        }
+
         string? sessionId = evt switch
         {
             SessionStartEvent sessionStartEvent => sessionStartEvent.Data?.SessionId,
@@ -413,7 +423,53 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
                 break;
         }
 
-        return new SessionEventDispatchResult(sawDelta, events);
+        return new SessionEventDispatchResult(
+            sawDelta,
+            sourceTracker is null
+                ? events
+                : events.Select(item => item with { ParentToolUseId = parentToolUseId, SourceTracked = true }).ToArray());
+    }
+
+    internal sealed class CopilotEventSourceTracker
+    {
+        private readonly Dictionary<string, string> _parentByAgent = new(StringComparer.Ordinal);
+
+        public string? Resolve(SessionEvent evt, out bool missingParent)
+        {
+            missingParent = false;
+#pragma warning disable GHCP001 // Older SDK events may expose the parent before subagent.started.
+            var parentToolUseId = evt switch
+            {
+                SubagentStartedEvent started => started.Data.ToolCallId,
+                AssistantMessageDeltaEvent delta => delta.Data.ParentToolCallId,
+                AssistantMessageEvent message => message.Data.ParentToolCallId,
+                ToolExecutionStartEvent started => started.Data.ParentToolCallId,
+                ToolExecutionCompleteEvent completed => completed.Data.ParentToolCallId,
+                _ => null
+            };
+#pragma warning restore GHCP001
+            var agentId = evt.AgentId;
+            if (string.IsNullOrWhiteSpace(agentId))
+            {
+                return string.IsNullOrWhiteSpace(parentToolUseId) ? null : parentToolUseId;
+            }
+
+            lock (_parentByAgent)
+            {
+                if (_parentByAgent.TryGetValue(agentId, out var knownParent))
+                {
+                    return knownParent;
+                }
+
+                // A resumed child may emit reasoning before its parent tool call is observed.
+                var resolved = string.IsNullOrWhiteSpace(parentToolUseId)
+                    ? $"copilot-agent:{agentId}"
+                    : parentToolUseId;
+                missingParent = string.IsNullOrWhiteSpace(parentToolUseId);
+                _parentByAgent.Add(agentId, resolved);
+                return resolved;
+            }
+        }
     }
 
     internal static CopilotClientOptions BuildClientOptions(CopilotSdkRequest request)
@@ -722,6 +778,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
             {
                 var terminalEventWritten = 0;
                 var sawDelta = false;
+                var sourceTracker = new CopilotEventSourceTracker();
                 var lastEventUtcTicks = DateTimeOffset.UtcNow.UtcTicks;
                 using var requestCancellationTokenSource =
                     CancellationTokenSource.CreateLinkedTokenSource(streamCancellationToken);
@@ -766,7 +823,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
                         request.Steering?.ObserveUserMessage(userMessage.Data?.Content);
                     }
 
-                    var dispatchResult = DispatchSessionEvent(evt, sawDelta, pendingQuestions);
+                    var dispatchResult = DispatchSessionEvent(evt, sawDelta, pendingQuestions, sourceTracker);
                     sawDelta = dispatchResult.SawDelta;
 
                     foreach (var mappedEvent in dispatchResult.Events)
