@@ -455,6 +455,94 @@ public sealed class OmpProviderTests
     }
 
     [Test]
+    public async Task ExecuteAsync_emits_text_block_after_tool_call_once_when_block_end_repeats_streamed_text()
+    {
+        var processManager = new StubCliProcessManager
+        {
+            ExecuteResult = CreateTextBlockAfterToolCallExecutionResult()
+        };
+        var provider = CreateProvider(processManager: processManager);
+
+        var messages = await CollectMessagesAsync(
+            provider,
+            new OmpOptions
+            {
+                WorkingDirectory = "/tmp/omp-project",
+                Model = "glm/glm-4.7",
+                NoSession = true
+            },
+            "Read, then answer.");
+
+        var assistantTexts = messages.Where(static message => message.Type == "assistant")
+            .Select(static message => message.Content.GetProperty("text").GetString())
+            .ToArray();
+        assistantTexts.ShouldBe(["Alpha", " one", "Beta"]);
+        string.Concat(assistantTexts).ShouldBe("Alpha oneBeta");
+    }
+
+    [Test]
+    public async Task ExecuteAsync_emits_block_end_content_once_when_block_has_no_deltas()
+    {
+        var processManager = new StubCliProcessManager
+        {
+            ExecuteResult = CreateScriptedOmpExecutionResult(
+                new { type = "turn_start" },
+                new { type = "message_update", assistantMessageEvent = new { type = "text_end", contentIndex = 0, content = "Gamma" } },
+                new { type = "message_end", message = CreateTextAssistantMessage("Gamma", "response-gamma-1") },
+                new { type = "turn_end", message = CreateTextAssistantMessage("Gamma", "response-gamma-1"), toolResults = Array.Empty<object>() })
+        };
+        var provider = CreateProvider(processManager: processManager);
+
+        var messages = await CollectMessagesAsync(
+            provider,
+            new OmpOptions
+            {
+                WorkingDirectory = "/tmp/omp-project",
+                Model = "glm/glm-4.7",
+                NoSession = true
+            },
+            "Reply with Gamma.");
+
+        messages.Where(static message => message.Type == "assistant")
+            .Select(static message => message.Content.GetProperty("text").GetString())
+            .ShouldBe(["Gamma"]);
+        messages.Single(static message => message.Type == "terminal.completed")
+            .Content.TryGetProperty("text", out _).ShouldBeFalse();
+    }
+
+    [Test]
+    public async Task ExecuteAsync_emits_streamed_block_once_when_block_end_equals_streamed_text()
+    {
+        var processManager = new StubCliProcessManager
+        {
+            ExecuteResult = CreateScriptedOmpExecutionResult(
+                new { type = "turn_start" },
+                new { type = "message_update", assistantMessageEvent = new { type = "text_delta", contentIndex = 0, delta = "Hello" } },
+                new { type = "message_update", assistantMessageEvent = new { type = "text_delta", contentIndex = 0, delta = " world" } },
+                new { type = "message_update", assistantMessageEvent = new { type = "text_end", contentIndex = 0, content = "Hello world" } },
+                new { type = "message_end", message = CreateTextAssistantMessage("Hello world", "response-hello-1") },
+                new { type = "turn_end", message = CreateTextAssistantMessage("Hello world", "response-hello-1"), toolResults = Array.Empty<object>() })
+        };
+        var provider = CreateProvider(processManager: processManager);
+
+        var messages = await CollectMessagesAsync(
+            provider,
+            new OmpOptions
+            {
+                WorkingDirectory = "/tmp/omp-project",
+                Model = "glm/glm-4.7",
+                NoSession = true
+            },
+            "Reply with hello.");
+
+        messages.Where(static message => message.Type == "assistant")
+            .Select(static message => message.Content.GetProperty("text").GetString())
+            .ShouldBe(["Hello", " world"]);
+        messages.Single(static message => message.Type == "terminal.completed")
+            .Content.TryGetProperty("text", out _).ShouldBeFalse();
+    }
+
+    [Test]
     public async Task ExecuteAsync_normalizes_toolcall_updates_and_results_into_shared_cli_messages()
     {
         var processManager = new StubCliProcessManager
@@ -1410,6 +1498,59 @@ public sealed class OmpProviderTests
         };
 
         return new ProcessResult(0, string.Join(Environment.NewLine, lines) + Environment.NewLine, string.Empty);
+    }
+
+    private static ProcessResult CreateScriptedOmpExecutionResult(params object[] events)
+    {
+        var lines = events.Select(static scriptedEvent => JsonSerializer.Serialize(scriptedEvent));
+        return new ProcessResult(0, string.Join(Environment.NewLine, lines) + Environment.NewLine, string.Empty);
+    }
+
+    private static object CreateTextAssistantMessage(string text, string responseId)
+    {
+        return new
+        {
+            role = "assistant",
+            content = new object[] { new { type = "text", text } },
+            provider = "anthropic",
+            model = "glm/glm-4.7",
+            stopReason = "stop",
+            responseId,
+            responseModel = "glm-4.7"
+        };
+    }
+
+    private static ProcessResult CreateTextBlockAfterToolCallExecutionResult()
+    {
+        var toolUseAssistant = new
+        {
+            role = "assistant",
+            content = new object[]
+            {
+                new { type = "text", text = "Alpha one" },
+                new { type = "toolCall", id = "tool-1", name = "ls", arguments = new { path = "/tmp/omp-project" } }
+            },
+            provider = "anthropic",
+            model = "glm/glm-4.7",
+            stopReason = "toolUse",
+            responseId = "response-block-1",
+            responseModel = "glm-4.7"
+        };
+        var finalAssistant = CreateTextAssistantMessage("Beta", "response-block-2");
+
+        return CreateScriptedOmpExecutionResult(
+            new { type = "turn_start" },
+            new { type = "message_update", assistantMessageEvent = new { type = "text_delta", contentIndex = 0, delta = "Alpha" } },
+            new { type = "message_update", assistantMessageEvent = new { type = "text_delta", contentIndex = 0, delta = " one" } },
+            new { type = "message_end", message = toolUseAssistant },
+            new { type = "turn_end", message = toolUseAssistant, toolResults = Array.Empty<object>() },
+            new { type = "turn_start" },
+            new { type = "message_update", assistantMessageEvent = new { type = "text_start", contentIndex = 0 } },
+            new { type = "message_update", assistantMessageEvent = new { type = "text_delta", contentIndex = 0, delta = "Beta" } },
+            new { type = "message_update", assistantMessageEvent = new { type = "text_end", contentIndex = 0, content = "Beta" } },
+            new { type = "message_end", message = finalAssistant },
+            new { type = "turn_end", message = finalAssistant, toolResults = Array.Empty<object>() },
+            new { type = "agent_end", messages = new object[] { toolUseAssistant, finalAssistant }, willRetry = false });
     }
 
     private static IEnumerable<string> EnumerateStringValues(JsonElement element)

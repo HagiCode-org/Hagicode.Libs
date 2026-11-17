@@ -48,6 +48,8 @@ internal sealed class OmpJsonEventMapper
         private string? _pendingThinkingText;
         private JsonElement? _pendingThinkingMessage;
         private string? _lastAssistantTextSnapshot;
+        private string? _runAssistantTextSnapshot;
+        private int? _assistantTextContentIndex;
 
         public IReadOnlyList<CliMessage> ProcessOutputLine(string? line)
         {
@@ -82,6 +84,7 @@ internal sealed class OmpJsonEventMapper
                 case "turn_start":
                     ClearPendingThinking();
                     _pendingToolCallDeltas.Clear();
+                    ResetAssistantTextBlock(null);
                     break;
 
                 case "session":
@@ -287,23 +290,28 @@ internal sealed class OmpJsonEventMapper
 
             if (IsTextUpdateType(updateType))
             {
+                EnterTextBlock(updateType, assistantEvent);
                 var textDelta = GetString(assistantEvent, "delta");
                 if (!string.IsNullOrEmpty(textDelta))
                 {
                     // Emit the raw delta immediately so consumers see stream progress.
                     _assistantText = (_assistantText ?? string.Empty) + textDelta;
                     _lastAssistantTextSnapshot = _assistantText;
+                    RecordEmittedAssistantText(textDelta);
                     messages.Add(CreateAssistantMessage(_sessionId, textDelta!, assistantMessage));
                 }
                 else if (IsEndUpdateType(updateType, "text")
                          && !string.IsNullOrEmpty(GetString(assistantEvent, "content")))
                 {
                     var completedText = GetString(assistantEvent, "content")!;
-                    _assistantText = completedText;
-                    if (TryCreateAssistantMessage(completedText, assistantMessage) is { } completedDelta)
+                    if (ReconcileBlockEndText(completedText) is { } completedDelta)
                     {
-                        messages.Add(completedDelta);
+                        RecordEmittedAssistantText(completedDelta);
+                        messages.Add(CreateAssistantMessage(_sessionId, completedDelta, assistantMessage));
                     }
+
+                    _assistantText = completedText;
+                    _lastAssistantTextSnapshot = completedText;
                 }
                 else if (hasSnapshot)
                 {
@@ -365,32 +373,82 @@ internal sealed class OmpJsonEventMapper
             {
                 return null;
             }
+            RecordEmittedAssistantText(delta);
 
             return CreateAssistantMessage(_sessionId, delta, assistantMessage);
         }
 
         private string? ReconcileAssistantTextSnapshot(string text)
         {
-            if (_lastAssistantTextSnapshot is null)
+            // A streamed block reconciles against its own text. A block that streamed no text falls back to the
+            // run-wide text, so a prefix replayed from an earlier turn is still dropped.
+            var snapshot = _lastAssistantTextSnapshot ?? _runAssistantTextSnapshot;
+            if (snapshot is null)
             {
                 _lastAssistantTextSnapshot = text;
                 return text;
             }
 
-            if (text.StartsWith(_lastAssistantTextSnapshot, StringComparison.Ordinal))
+            if (text.StartsWith(snapshot, StringComparison.Ordinal))
             {
-                var delta = text[_lastAssistantTextSnapshot.Length..];
+                var delta = text[snapshot.Length..];
                 _lastAssistantTextSnapshot = text;
                 return delta.Length == 0 ? null : delta;
             }
 
-            if (_lastAssistantTextSnapshot.StartsWith(text, StringComparison.Ordinal))
+            if (snapshot.StartsWith(text, StringComparison.Ordinal))
             {
+                _lastAssistantTextSnapshot = text;
                 return null;
             }
 
             _lastAssistantTextSnapshot = text;
             return text;
+        }
+
+        private void EnterTextBlock(string? updateType, JsonElement assistantEvent)
+        {
+            var contentIndex = TryGetInt32(assistantEvent, "contentIndex");
+            var startsBlock = string.Equals(updateType, "text_start", StringComparison.OrdinalIgnoreCase)
+                              || (contentIndex is not null && _assistantTextContentIndex is not null && contentIndex != _assistantTextContentIndex);
+            if (startsBlock)
+            {
+                ResetAssistantTextBlock(contentIndex);
+            }
+            else if (contentIndex is not null)
+            {
+                _assistantTextContentIndex = contentIndex;
+            }
+        }
+
+        private void ResetAssistantTextBlock(int? contentIndex)
+        {
+            _assistantText = null;
+            _lastAssistantTextSnapshot = null;
+            _assistantTextContentIndex = contentIndex;
+        }
+
+        private string? ReconcileBlockEndText(string text)
+        {
+            // Only text that extends what this block already streamed is new. Divergent content cannot retract
+            // streamed text, so it is dropped; the terminal message still carries the final block text.
+            if (_lastAssistantTextSnapshot is null)
+            {
+                return text;
+            }
+
+            if (!text.StartsWith(_lastAssistantTextSnapshot, StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            var delta = text[_lastAssistantTextSnapshot.Length..];
+            return delta.Length == 0 ? null : delta;
+        }
+
+        private void RecordEmittedAssistantText(string emittedText)
+        {
+            _runAssistantTextSnapshot = (_runAssistantTextSnapshot ?? string.Empty) + emittedText;
         }
 
         private void ClearPendingThinking()
