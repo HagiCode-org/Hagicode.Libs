@@ -81,6 +81,18 @@ The [discovery guide](https://github.com/HagiCode-org/Hagicode.Libs/blob/main/do
 
 On Windows, `ClaudeCode`, `Copilot`, and `Codex` resolve only to a native `.exe` (or the packaged binary of their npm package). When only a command script exists, the result is not found with `NotFoundReason = NativeExecutableMissing`, and `SkippedCommandScripts` lists the scripts. A `.cmd` or `.bat` is started through `cmd.exe` only when it is the resolved path of an agent that allows it, or when a caller configures it explicitly. Its arguments are checked before launch, and an argument that could change what `cmd.exe` runs is rejected with `CliCommandScriptArgumentException`, which never shows the value. The [discovery guide](https://github.com/HagiCode-org/Hagicode.Libs/blob/main/docs/agent-cli-discovery-guide.md#windows-executable-policy) has the per-agent table and the rules.
 
+## Model preference ordering
+
+`HagiCode.Libs.Core.Models` ranks catalog models for an agent CLI family. Each model declares one preference group (`ModelPreferenceGroup`): `claude`, `claude-compatible`, `gpt` or `other`. Use `AgentModelPreferenceRanker.Order(agentCliFamily, models)` to get the models in preference order; the zero-based index of a model in the result is its rank for that family.
+
+- `codex` profile: `gpt` first, then every other model in catalog order.
+- `claude` profile: `claude`, then `claude-compatible`, then `gpt`, then every other model.
+- Any other family has no profile and keeps catalog order.
+- A model whose group is missing or unknown is treated as `other`, so it stays selectable and ranks last in the profiles above.
+- Ties inside a group are broken by `sortOrder`, then name, then id (ordinal comparison).
+
+The ranker reads only the declared group. It never infers a group from the model identifier.
+
 ## Adoption boundaries
 
 - Use `CliExecutionFacade` when you want typed requests, policy evaluation, normalized diagnostics, and structured success/failure/timeout handling.
