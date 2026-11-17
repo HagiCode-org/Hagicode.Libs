@@ -293,10 +293,10 @@ public sealed class OmpProviderTests
         messages.Select(static message => message.Type).ShouldBe(
         [
             "session.started",
-            "assistant",
-            "assistant",
-            "assistant",
             "assistant.thought",
+            "assistant",
+            "assistant",
+            "assistant",
             "terminal.completed"
         ]);
         messages.Where(static message => message.Type == "assistant")

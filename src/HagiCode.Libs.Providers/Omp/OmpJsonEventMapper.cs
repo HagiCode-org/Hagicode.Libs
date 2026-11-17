@@ -249,6 +249,13 @@ internal sealed class OmpJsonEventMapper
                     _assistantProvider);
             }
 
+            // Thinking precedes text/tool calls in the stream; release it before any other block
+            // so consumers receive it in stream order instead of after the answer.
+            if (!IsThinkingUpdateType(updateType))
+            {
+                messages.AddRange(DrainBufferedThinkingMessages());
+            }
+
             if (IsThinkingUpdateType(updateType))
             {
                 // Real OMP print/json streams thinking as incremental deltas without a partial snapshot.
@@ -271,6 +278,11 @@ internal sealed class OmpJsonEventMapper
                         BufferThinkingSnapshot(thinkingText!, assistantMessage);
                     }
                 }
+            }
+
+            if (IsEndUpdateType(updateType, "thinking"))
+            {
+                messages.AddRange(DrainBufferedThinkingMessages());
             }
 
             if (IsTextUpdateType(updateType))
