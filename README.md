@@ -133,7 +133,7 @@ All CLI metadata is centralized in `HagiCode.Libs.Core.Discovery.CliInstallRegis
 | Provider | npm Package | Pinned Version | CI-Covered |
 |----------|-------------|----------------|------------|
 | Claude Code | `@anthropic-ai/claude-code` | 2.1.168 | Yes |
-| Copilot | `@github/copilot` | 1.0.60 | Yes |
+| Copilot | `@github/copilot` | 1.0.114 | Yes |
 | Codex | `@openai/codex` | 0.115.0 | Yes |
 | OpenCode | `@opencode/cli` | 2.2.7 | Yes |
 | CodeBuddy | (private) | — | No |

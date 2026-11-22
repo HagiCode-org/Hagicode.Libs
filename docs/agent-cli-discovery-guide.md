@@ -180,7 +180,7 @@ The fixed first three do not depend on how `PATHEXT` lists them. A native `.exe`
 | Agent | Npm package | Windows native binary | Versions checked | Policy |
 | --- | --- | --- | --- | --- |
 | ClaudeCode | `@anthropic-ai/claude-code` | `@anthropic-ai/claude-code-win32-x64`: `claude.exe` at the package root | 2.1.168 (pin), 2.1.307 | `RequireNative` |
-| Copilot | `@github/copilot` (Node loader) | `@github/copilot-win32-x64`: `copilot.exe` | 1.0.60 (pin), 1.0.102 | `RequireNative` |
+| Copilot | `@github/copilot` (Node loader) | `@github/copilot-win32-x64`: `copilot.exe` | 1.0.114 (pin), 1.0.60, 1.0.102 | `RequireNative` |
 | Codex | `@openai/codex` (Node script) | `@openai/codex-win32-x64`: `vendor\x86_64-pc-windows-msvc\codex\codex.exe` | 0.115.0 (pin), 0.163.0 | `RequireNative` |
 | OpenCode | `@opencode/cli` | `@opencode/cli-windows-x64`: `bin\opencode.exe` (and `-baseline`, `-windows-arm64`) | 2.2.7 (pin) | `PreferNative` with a packaged layout |
 | Pi, Omp, Gemini, QoderCLI, Codebuddy | Node scripts | none found | 1.4.0, 18.12.6, 0.65.0, 1.1.76, 2.172.1 | `PreferNative`, script only |
