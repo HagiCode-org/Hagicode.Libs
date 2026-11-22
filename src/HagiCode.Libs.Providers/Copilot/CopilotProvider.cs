@@ -4,7 +4,7 @@ using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Environment;
 using HagiCode.Libs.Core.Process;
 using HagiCode.Libs.Core.Transport;
-using GitHub.Copilot;
+using Microsoft.Copilot;
 
 namespace HagiCode.Libs.Providers.Copilot;
 
@@ -368,7 +368,7 @@ public class CopilotProvider : ICliProvider<CopilotOptions>, ICopilotModelCapabi
             SupportedMediaTypes: entry.SupportedMediaTypes is { Count: > 0 } mediaTypes ? mediaTypes : null);
     }
 
-    private static int? PositiveOrNull(int? value) => value is > 0 ? value : null;
+    private static int? PositiveOrNull(long? value) => value is > 0 ? (int)Math.Min(value.Value, int.MaxValue) : null;
 
     private async Task<IReadOnlyDictionary<string, string?>> ResolveRuntimeEnvironmentAsync(CancellationToken cancellationToken)
     {

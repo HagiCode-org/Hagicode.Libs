@@ -1,6 +1,6 @@
 using System.Reflection;
 using System.Text.Json.Serialization;
-using GitHub.Copilot;
+using Microsoft.Copilot;
 using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Environment;
 using HagiCode.Libs.Core.Process;
@@ -411,14 +411,14 @@ public sealed class CopilotProviderSteeringTests
 
         private sealed class SteerFakeClient(SteerFakeClientFactory owner) : ICopilotSdkClient
         {
-            public Task<ICopilotSdkSession> CreateSessionAsync(SessionConfig config, CancellationToken cancellationToken)
+            public Task<ICopilotSdkSession> CreateSessionAsync(CreateSessionOptions config, CancellationToken cancellationToken)
             {
-                var session = new SteerFakeSession(config.SessionId ?? "steer-session", config.OnUserInputRequest);
+                var session = new SteerFakeSession(config.SessionId ?? "steer-session", config.Interaction?.OnUserInputRequest);
                 owner.FirstSession.TrySetResult(session);
                 return Task.FromResult<ICopilotSdkSession>(session);
             }
 
-            public Task<ICopilotSdkSession> ResumeSessionAsync(string sessionId, ResumeSessionConfig config, CancellationToken cancellationToken)
+            public Task<ICopilotSdkSession> ResumeSessionAsync(string sessionId, ResumeSessionOptions config, CancellationToken cancellationToken)
                 => Task.FromException<ICopilotSdkSession>(new NotSupportedException("These tests start fresh sessions only."));
 
             public Task<IReadOnlyList<CopilotSdkModelInfo>> ListModelsAsync(CancellationToken cancellationToken)

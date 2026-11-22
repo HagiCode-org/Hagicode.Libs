@@ -1,4 +1,4 @@
-using GitHub.Copilot;
+using Microsoft.Copilot;
 using HagiCode.Libs.Providers.Copilot;
 using Shouldly;
 
@@ -70,13 +70,13 @@ public sealed class CopilotFusionRestoreTests
 
         private sealed class RefusingClient(ResumeRefusingClientFactory owner) : ICopilotSdkClient
         {
-            public Task<ICopilotSdkSession> CreateSessionAsync(SessionConfig config, CancellationToken cancellationToken)
+            public Task<ICopilotSdkSession> CreateSessionAsync(CreateSessionOptions config, CancellationToken cancellationToken)
             {
                 owner.CreateSessionCount++;
                 throw new InvalidOperationException("A fresh session must not be created after a terminal compatibility refusal.");
             }
 
-            public Task<ICopilotSdkSession> ResumeSessionAsync(string sessionId, ResumeSessionConfig config, CancellationToken cancellationToken)
+            public Task<ICopilotSdkSession> ResumeSessionAsync(string sessionId, ResumeSessionOptions config, CancellationToken cancellationToken)
             {
                 owner.ResumeSessionCount++;
                 throw owner._refusal;

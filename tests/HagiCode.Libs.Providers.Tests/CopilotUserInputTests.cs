@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Threading.Channels;
-using GitHub.Copilot;
+using Microsoft.Copilot;
 using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Process;
 using HagiCode.Libs.Core.Transport;
@@ -461,10 +461,10 @@ public sealed class CopilotUserInputTests
 
         var withHandler = factory.SessionConfigs[0];
         var withoutHandler = factory.SessionConfigs[1];
-        withHandler.OnUserInputRequest.ShouldNotBeNull();
-        withoutHandler.OnUserInputRequest.ShouldBeNull();
-        withHandler.OnPermissionRequest.ShouldBe(withoutHandler.OnPermissionRequest);
-        withHandler.Hooks.ShouldNotBeNull();
+        withHandler.Interaction.ShouldNotBeNull().OnUserInputRequest.ShouldNotBeNull();
+        (withoutHandler.Interaction?.OnUserInputRequest).ShouldBeNull();
+        withHandler.Permissions.ShouldNotBeNull().OnRequest.ShouldBe(withoutHandler.Permissions.ShouldNotBeNull().OnRequest);
+        withHandler.Hooks.ShouldNotBeNull().Handlers.ShouldNotBeNull();
     }
 
     [Test]
@@ -480,9 +480,9 @@ public sealed class CopilotUserInputTests
         await gateway.CreateRuntimeAsync(CreateSdkRequest(NoAnswerHandler, sessionId: "resume-2", startupTimeout: TimeSpan.FromSeconds(30)));
 
         factory.SessionConfigs.Count.ShouldBe(2);
-        factory.SessionConfigs.ShouldAllBe(config => config.OnUserInputRequest != null);
+        factory.SessionConfigs.ShouldAllBe(config => config.Interaction != null && config.Interaction.OnUserInputRequest != null);
         factory.ResumeConfigs.Count.ShouldBe(4);
-        factory.ResumeConfigs.Take(2).ShouldAllBe(config => config.OnUserInputRequest != null);
+        factory.ResumeConfigs.Take(2).ShouldAllBe(config => config.Interaction != null && config.Interaction.OnUserInputRequest != null);
     }
 
     [Test]
@@ -493,7 +493,7 @@ public sealed class CopilotUserInputTests
 
         _ = gateway.CreateRuntimeAsync(CreateSdkRequest(handler: null, sessionId: "resume-1")).Result;
 
-        factory.ResumeConfigs.Single().OnUserInputRequest.ShouldBeNull();
+        (factory.ResumeConfigs.Single().Interaction?.OnUserInputRequest).ShouldBeNull();
     }
 
     [Test]
@@ -979,9 +979,9 @@ public sealed class CopilotUserInputTests
 
         public Func<ScriptedSession, CancellationToken, Task> Script { get; } = script;
 
-        public List<SessionConfig> SessionConfigs { get; } = [];
+        public List<CreateSessionOptions> SessionConfigs { get; } = [];
 
-        public List<ResumeSessionConfig> ResumeConfigs { get; } = [];
+        public List<ResumeSessionOptions> ResumeConfigs { get; } = [];
 
         public Exception? ResumeFailure { get; set; }
 
@@ -992,14 +992,14 @@ public sealed class CopilotUserInputTests
 
         private sealed class ScriptedClient(ScriptedSdkClientFactory owner) : ICopilotSdkClient
         {
-            public Task<ICopilotSdkSession> CreateSessionAsync(SessionConfig config, CancellationToken cancellationToken)
+            public Task<ICopilotSdkSession> CreateSessionAsync(CreateSessionOptions config, CancellationToken cancellationToken)
             {
                 owner.SessionConfigs.Add(config);
                 var sessionId = config.SessionId ?? $"scripted-session-{Interlocked.Increment(ref owner._sessionCounter)}";
-                return Task.FromResult<ICopilotSdkSession>(new ScriptedSession(sessionId, owner.Script, config.OnUserInputRequest));
+                return Task.FromResult<ICopilotSdkSession>(new ScriptedSession(sessionId, owner.Script, config.Interaction?.OnUserInputRequest));
             }
 
-            public Task<ICopilotSdkSession> ResumeSessionAsync(string sessionId, ResumeSessionConfig config, CancellationToken cancellationToken)
+            public Task<ICopilotSdkSession> ResumeSessionAsync(string sessionId, ResumeSessionOptions config, CancellationToken cancellationToken)
             {
                 owner.ResumeConfigs.Add(config);
                 if (owner.ResumeFailure is { } failure)
@@ -1007,7 +1007,7 @@ public sealed class CopilotUserInputTests
                     return Task.FromException<ICopilotSdkSession>(failure);
                 }
 
-                return Task.FromResult<ICopilotSdkSession>(new ScriptedSession(sessionId, owner.Script, config.OnUserInputRequest));
+                return Task.FromResult<ICopilotSdkSession>(new ScriptedSession(sessionId, owner.Script, config.Interaction?.OnUserInputRequest));
             }
 
             public Task<IReadOnlyList<CopilotSdkModelInfo>> ListModelsAsync(CancellationToken cancellationToken)

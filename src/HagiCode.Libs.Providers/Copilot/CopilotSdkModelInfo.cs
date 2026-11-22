@@ -6,6 +6,6 @@ namespace HagiCode.Libs.Providers.Copilot;
 internal sealed record CopilotSdkModelInfo(
     string Id,
     bool? SupportsVision,
-    int? MaxPromptImages,
-    int? MaxPromptImageSize,
+    long? MaxPromptImages,
+    long? MaxPromptImageSize,
     IReadOnlyList<string>? SupportedMediaTypes);

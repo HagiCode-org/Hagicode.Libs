@@ -4,7 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading.Channels;
-using GitHub.Copilot;
+using Microsoft.Copilot;
 
 namespace HagiCode.Libs.Providers.Copilot;
 
@@ -78,7 +78,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
                     // network blip). Fall back to a fresh session so the request still executes.
                     // When an explicit GitHub token is configured, this also recovers auth failures.
                     session = await client.CreateSessionAsync(
-                        BuildSessionConfig(request, pendingQuestions),
+                        ConfigureSession(new CreateSessionOptions { SessionId = request.SessionId }, request, pendingQuestions),
                         startupCancellationTokenSource.Token).ConfigureAwait(false);
                     lifecycleEvent = new CopilotSdkStreamEvent(
                         CopilotSdkStreamEventType.SessionStarted,
@@ -89,7 +89,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
             else
             {
                 session = await client.CreateSessionAsync(
-                    BuildSessionConfig(request, pendingQuestions),
+                    ConfigureSession(new CreateSessionOptions { SessionId = request.SessionId }, request, pendingQuestions),
                     startupCancellationTokenSource.Token).ConfigureAwait(false);
                 lifecycleEvent = new CopilotSdkStreamEvent(
                     CopilotSdkStreamEventType.SessionStarted,
@@ -250,7 +250,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
             {
                 return await client.ResumeSessionAsync(
                     request.SessionId!,
-                    BuildResumeSessionConfig(request, pendingQuestions),
+                    ConfigureSession(new ResumeSessionOptions(), request, pendingQuestions),
                     cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex) when (!EnumerateExceptionMessages(ex).Any(IsAuthenticationFailure) && !IsFusionCompatibilityFailure(ex))
@@ -437,17 +437,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
         public string? Resolve(SessionEvent evt, out bool missingParent)
         {
             missingParent = false;
-#pragma warning disable GHCP001 // Older SDK events may expose the parent before subagent.started.
-            var parentToolUseId = evt switch
-            {
-                SubagentStartedEvent started => started.Data.ToolCallId,
-                AssistantMessageDeltaEvent delta => delta.Data.ParentToolCallId,
-                AssistantMessageEvent message => message.Data.ParentToolCallId,
-                ToolExecutionStartEvent started => started.Data.ParentToolCallId,
-                ToolExecutionCompleteEvent completed => completed.Data.ParentToolCallId,
-                _ => null
-            };
-#pragma warning restore GHCP001
+            var parentToolUseId = (evt as SubagentStartedEvent)?.Data.ToolCallId;
             var agentId = evt.AgentId;
             if (string.IsNullOrWhiteSpace(agentId))
             {
@@ -474,59 +464,68 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
 
     internal static CopilotClientOptions BuildClientOptions(CopilotSdkRequest request)
     {
-        RuntimeConnection? connection = null;
         if (!string.IsNullOrWhiteSpace(request.CliUrl))
         {
-            connection = RuntimeConnection.ForUri(request.CliUrl);
-        }
-        else if (!string.IsNullOrWhiteSpace(request.CliPath) || request.CliArgs.Count > 0)
-        {
-            connection = RuntimeConnection.ForStdio(
-                string.IsNullOrWhiteSpace(request.CliPath) ? null : request.CliPath,
-                [.. request.CliArgs]);
+            return new CopilotClientOptions
+            {
+                Mode = CopilotClientMode.CodingAgent,
+                Runtime = BuildAttachedRuntime(request.CliUrl)
+            };
         }
 
         return new CopilotClientOptions
         {
-            Connection = connection,
-            WorkingDirectory = request.WorkingDirectory,
-            // The SDK treats Environment as a complete child environment, not a set of overrides.
-            Environment = Environment.GetEnvironmentVariables()
-                .Cast<DictionaryEntry>()
-                .ToDictionary(static entry => (string)entry.Key, static entry => (string)entry.Value!, StringComparer.Ordinal),
-            UseLoggedInUser = string.IsNullOrWhiteSpace(request.CliUrl) ? request.UseLoggedInUser : null
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForSpawnedStdio(
+                path: string.IsNullOrWhiteSpace(request.CliPath) ? null : request.CliPath,
+                args: [.. request.CliArgs],
+                // Supply the complete environment after the request lease applies its overrides.
+                environment: Environment.GetEnvironmentVariables()
+                    .Cast<DictionaryEntry>()
+                    .ToDictionary(static entry => (string)entry.Key, static entry => (string)entry.Value!, StringComparer.Ordinal),
+                workingDirectory: request.WorkingDirectory),
+            GitHub = new ClientGitHubOptions { UseLoggedInUser = request.UseLoggedInUser }
         };
     }
 
-    private static SessionConfig BuildSessionConfig(CopilotSdkRequest request, CopilotPendingQuestions? pendingQuestions)
+    private static RuntimeConnection BuildAttachedRuntime(string url)
     {
-        return new SessionConfig
+        if (url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
         {
-            SessionId = request.SessionId,
-            Model = request.Model,
-            Capi = BuildCapiOptions(request),
-            GitHubToken = request.GitHubToken,
-            WorkingDirectory = request.WorkingDirectory,
-            Streaming = true,
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            Hooks = CreateAllowAllHooks(),
-            OnUserInputRequest = pendingQuestions is null ? null : pendingQuestions.HandleAsync
-        };
+            throw new ArgumentException("Copilot CLI URL must use plaintext TCP.", nameof(url));
+        }
+
+        if (int.TryParse(url, out var port))
+        {
+            return RuntimeConnection.ForTcp("localhost", port);
+        }
+
+        // The v1 SDK defaulted bare hostnames to port 443 and http URLs to port 80.
+        var uri = new Uri(url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ? url : $"https://{url}");
+        return RuntimeConnection.ForTcp(uri.Host.Trim('[', ']'), uri.Port);
     }
 
-    private static ResumeSessionConfig BuildResumeSessionConfig(CopilotSdkRequest request, CopilotPendingQuestions? pendingQuestions)
+    private static TOptions ConfigureSession<TOptions>(
+        TOptions options, CopilotSdkRequest request, CopilotPendingQuestions? pendingQuestions)
+        where TOptions : SessionOptionsBase
     {
-        return new ResumeSessionConfig
+        options.Model = request.Model;
+        options.WorkingDirectory = request.WorkingDirectory;
+        var capi = BuildCapiOptions(request);
+        if (capi is not null || request.GitHubToken is not null)
         {
-            Model = request.Model,
-            Capi = BuildCapiOptions(request),
-            GitHubToken = request.GitHubToken,
-            WorkingDirectory = request.WorkingDirectory,
-            Streaming = true,
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            Hooks = CreateAllowAllHooks(),
-            OnUserInputRequest = pendingQuestions is null ? null : pendingQuestions.HandleAsync
-        };
+            options.GitHub = new SessionGitHubOptions { Capi = capi, Token = request.GitHubToken };
+        }
+
+        options.Events = new SessionEventOptions { Streaming = true };
+        options.Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll };
+        options.Hooks = new SessionHookOptions { Handlers = CreateAllowAllHooks() };
+        if (pendingQuestions is not null)
+        {
+            options.Interaction = new SessionInteractionOptions { OnUserInputRequest = pendingQuestions.HandleAsync };
+        }
+
+        return options;
     }
 
     private static CapiSessionOptions? BuildCapiOptions(CopilotSdkRequest request)
@@ -536,12 +535,12 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
             return null;
         }
 
-#pragma warning disable GHCP001 // Fusion is exposed as an experimental typed SDK API.
+#pragma warning disable MCPSDK001 // Fusion is exposed as an experimental typed SDK API.
         return new CapiSessionOptions
         {
-            FusionTier = new GitHub.Copilot.Rpc.FusionTier(CopilotFusionTierJsonConverter.ToWireValue(tier))
+            FusionTier = new Microsoft.Copilot.Rpc.FusionTier(CopilotFusionTierJsonConverter.ToWireValue(tier))
         };
-#pragma warning restore GHCP001
+#pragma warning restore MCPSDK001
     }
 
     private static SessionHooks CreateAllowAllHooks()

@@ -1,5 +1,5 @@
 using System.Text.Json;
-using GitHub.Copilot;
+using Microsoft.Copilot;
 using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Environment;
 using HagiCode.Libs.Core.Process;
@@ -431,13 +431,13 @@ public sealed class CopilotImageAttachmentTests
 
         private sealed class RecordingClient(RecordingClientFactory owner) : ICopilotSdkClient
         {
-            public Task<ICopilotSdkSession> CreateSessionAsync(SessionConfig config, CancellationToken cancellationToken)
+            public Task<ICopilotSdkSession> CreateSessionAsync(CreateSessionOptions config, CancellationToken cancellationToken)
             {
                 owner.CreateSessionCount++;
                 return Task.FromResult<ICopilotSdkSession>(new RecordingSession(config.SessionId ?? "fresh-session", owner));
             }
 
-            public Task<ICopilotSdkSession> ResumeSessionAsync(string sessionId, ResumeSessionConfig config, CancellationToken cancellationToken)
+            public Task<ICopilotSdkSession> ResumeSessionAsync(string sessionId, ResumeSessionOptions config, CancellationToken cancellationToken)
             {
                 owner.ResumeSessionCount++;
                 if (owner.ResumeFails)

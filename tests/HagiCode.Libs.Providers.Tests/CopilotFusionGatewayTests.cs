@@ -1,4 +1,4 @@
-using GitHub.Copilot;
+using Microsoft.Copilot;
 using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Process;
 using HagiCode.Libs.Providers.Copilot;
@@ -55,9 +55,9 @@ public sealed class CopilotFusionGatewayTests
         factory.CreateSessionCount.ShouldBe(1);
         factory.ResumeSessionCount.ShouldBe(0);
         factory.LastSessionConfig.ShouldNotBeNull().Model.ShouldBe("fusion");
-#pragma warning disable GHCP001
-        factory.LastSessionConfig!.Capi?.FusionTier?.Value.ShouldBe(tier?.ToString().ToLowerInvariant());
-#pragma warning restore GHCP001
+#pragma warning disable MCPSDK001
+        (factory.LastSessionConfig.GitHub?.Capi?.FusionTier?.Value).ShouldBe(tier?.ToString().ToLowerInvariant());
+#pragma warning restore MCPSDK001
     }
 
     [TestCase(null)]
@@ -74,9 +74,9 @@ public sealed class CopilotFusionGatewayTests
         factory.CreateSessionCount.ShouldBe(0);
         factory.ResumeSessionCount.ShouldBe(1);
         factory.LastResumeConfig.ShouldNotBeNull().Model.ShouldBe("fusion");
-#pragma warning disable GHCP001
-        factory.LastResumeConfig!.Capi?.FusionTier?.Value.ShouldBe(tier?.ToString().ToLowerInvariant());
-#pragma warning restore GHCP001
+#pragma warning disable MCPSDK001
+        (factory.LastResumeConfig.GitHub?.Capi?.FusionTier?.Value).ShouldBe(tier?.ToString().ToLowerInvariant());
+#pragma warning restore MCPSDK001
     }
 
     [TestCase("auto", "standard", CopilotFusionTier.Standard)]
@@ -147,9 +147,14 @@ public sealed class CopilotFusionGatewayTests
         var factory = new CountingClientFactory();
         var gateway = new GitHubCopilotSdkGateway(factory, new CopilotSdkEnvironmentLeaseCoordinator());
 
+        var explicitSessionToken = Guid.NewGuid().ToString();
         var inheritedPath = Environment.GetEnvironmentVariable("PATH");
         await using var runtime = await gateway.CreateRuntimeAsync(CreateRequest("gpt-5") with
         {
+            WorkingDirectory = Path.GetTempPath(),
+            CliArgs = ["--no-ask-user"],
+            GitHubToken = explicitSessionToken,
+            UseLoggedInUser = false,
             EnvironmentVariables = new Dictionary<string, string?>
             {
                 ["HAGICODE_COPILOT_NATIVE_TEST_ENV"] = "configured",
@@ -160,12 +165,37 @@ public sealed class CopilotFusionGatewayTests
         factory.CreateSessionCount.ShouldBe(1);
         factory.LastSessionConfig.ShouldNotBeNull();
         factory.LastSessionConfig!.Model.ShouldBe("gpt-5");
-        factory.LastSessionConfig.ReasoningEffort.ShouldBeNull();
-        factory.LastSessionConfig.Capi.ShouldBeNull();
-        var environment = factory.LastClientOptions.ShouldNotBeNull().Environment.ShouldNotBeNull();
+        (factory.LastSessionConfig.Inference?.ReasoningEffort).ShouldBeNull();
+        factory.LastSessionConfig.GitHub.ShouldNotBeNull().Capi.ShouldBeNull();
+        factory.LastSessionConfig.GitHub.Token.ShouldBe(explicitSessionToken);
+        factory.LastSessionConfig.WorkingDirectory.ShouldBe(Path.GetTempPath());
+        factory.LastSessionConfig.Events.ShouldNotBeNull().Streaming.ShouldBe(true);
+        var client = factory.LastClientOptions.ShouldNotBeNull();
+        client.Mode.ShouldBe(CopilotClientMode.CodingAgent);
+        client.GitHub.ShouldNotBeNull().UseLoggedInUser.ShouldBe(false);
+        var spawned = client.Runtime.ShouldBeOfType<SpawnedStdioRuntimeConnection>();
+        spawned.Path.ShouldBe("/resolved/copilot");
+        spawned.Args.ShouldBe(["--no-ask-user"]);
+        spawned.WorkingDirectory.ShouldBe(Path.GetTempPath());
+        var environment = spawned.Environment.ShouldNotBeNull();
         environment["PATH"].ShouldBe(inheritedPath);
         environment["HAGICODE_COPILOT_NATIVE_TEST_ENV"].ShouldBe("configured");
         environment.ContainsKey("HAGICODE_COPILOT_NATIVE_UNSET_ENV").ShouldBeFalse();
+    }
+
+    [TestCase("1234", "localhost", 1234)]
+    [TestCase("host.example:1234", "host.example", 1234)]
+    [TestCase("http://host.example:1234", "host.example", 1234)]
+    [TestCase("[::1]:1234", "::1", 1234)]
+    public void BuildClientOptions_preserves_attached_cli_addresses(string url, string host, int port)
+    {
+        var options = GitHubCopilotSdkGateway.BuildClientOptions(CreateRequest(null) with { CliUrl = url });
+
+        options.Mode.ShouldBe(CopilotClientMode.CodingAgent);
+        (options.GitHub?.UseLoggedInUser).ShouldBeNull();
+        var attached = options.Runtime.ShouldBeOfType<TcpRuntimeConnection>();
+        attached.Host.ShouldBe(host);
+        attached.Port.ShouldBe(port);
     }
 
     private static CopilotSdkRequest CreateRequest(
@@ -200,9 +230,9 @@ public sealed class CopilotFusionGatewayTests
 
         public int ResumeSessionCount { get; private set; }
 
-        public SessionConfig? LastSessionConfig { get; private set; }
+        public CreateSessionOptions? LastSessionConfig { get; private set; }
 
-        public ResumeSessionConfig? LastResumeConfig { get; private set; }
+        public ResumeSessionOptions? LastResumeConfig { get; private set; }
 
         public CopilotClientOptions? LastClientOptions { get; private set; }
 
@@ -215,14 +245,14 @@ public sealed class CopilotFusionGatewayTests
 
         private sealed class CountingClient(CountingClientFactory owner) : ICopilotSdkClient
         {
-            public Task<ICopilotSdkSession> CreateSessionAsync(SessionConfig config, CancellationToken cancellationToken)
+            public Task<ICopilotSdkSession> CreateSessionAsync(CreateSessionOptions config, CancellationToken cancellationToken)
             {
                 owner.CreateSessionCount++;
                 owner.LastSessionConfig = config;
                 return Task.FromResult<ICopilotSdkSession>(new CountingSession(config.SessionId ?? "fresh-session"));
             }
 
-            public Task<ICopilotSdkSession> ResumeSessionAsync(string sessionId, ResumeSessionConfig config, CancellationToken cancellationToken)
+            public Task<ICopilotSdkSession> ResumeSessionAsync(string sessionId, ResumeSessionOptions config, CancellationToken cancellationToken)
             {
                 owner.ResumeSessionCount++;
                 owner.LastResumeConfig = config;

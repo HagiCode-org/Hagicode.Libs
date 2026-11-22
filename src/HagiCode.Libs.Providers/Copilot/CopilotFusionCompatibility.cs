@@ -1,5 +1,5 @@
 using System.Reflection;
-using GitHub.Copilot;
+using Microsoft.Copilot;
 
 namespace HagiCode.Libs.Providers.Copilot;
 
@@ -42,8 +42,8 @@ internal static class CopilotFusionCompatibility
 
     internal static bool HasTypedFusionTierApi =>
         typeof(CapiSessionOptions).GetProperty("FusionTier") is not null
-        && typeof(SessionConfig).GetProperty("Capi")?.PropertyType == typeof(CapiSessionOptions)
-        && typeof(ResumeSessionConfig).GetProperty("Capi")?.PropertyType == typeof(CapiSessionOptions);
+        && typeof(SessionGitHubOptions).GetProperty("Capi")?.PropertyType == typeof(CapiSessionOptions)
+        && typeof(SessionOptionsBase).GetProperty("GitHub")?.PropertyType == typeof(SessionGitHubOptions);
 
     internal static bool IsFusionModel(string? model)
         => string.Equals(model, "fusion", StringComparison.OrdinalIgnoreCase);
@@ -154,12 +154,12 @@ internal static class CopilotFusionCompatibility
 
         if (sdkVersion is null)
         {
-            unknownReasons.Add("the resolved GitHub.Copilot.SDK version could not be determined");
+            unknownReasons.Add("the resolved Microsoft.Copilot.SDK version could not be determined");
         }
 
         if (!sdkHasTypedTierApi)
         {
-            unsupportedReasons.Add("the resolved GitHub.Copilot.SDK has no typed Fusion tier field for both create and restore configuration");
+            unsupportedReasons.Add("the resolved Microsoft.Copilot.SDK has no typed Fusion tier field for both create and restore configuration");
         }
 
         if (!gatewayMapsTier)

@@ -1,5 +1,5 @@
 using System.Text.Json;
-using GitHub.Copilot;
+using Microsoft.Copilot;
 using HagiCode.Libs.Core.Transport;
 
 namespace HagiCode.Libs.Providers.Copilot;

@@ -1,12 +1,12 @@
-using GitHub.Copilot;
+using Microsoft.Copilot;
 
 namespace HagiCode.Libs.Providers.Copilot;
 
 internal interface ICopilotSdkClient : IAsyncDisposable
 {
-    Task<ICopilotSdkSession> CreateSessionAsync(SessionConfig config, CancellationToken cancellationToken);
+    Task<ICopilotSdkSession> CreateSessionAsync(CreateSessionOptions config, CancellationToken cancellationToken);
 
-    Task<ICopilotSdkSession> ResumeSessionAsync(string sessionId, ResumeSessionConfig config, CancellationToken cancellationToken);
+    Task<ICopilotSdkSession> ResumeSessionAsync(string sessionId, ResumeSessionOptions config, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<CopilotSdkModelInfo>> ListModelsAsync(CancellationToken cancellationToken);
 }
@@ -38,20 +38,20 @@ internal sealed class GitHubCopilotSdkClientFactory : ICopilotSdkClientFactory
 
     private sealed class CopilotSdkClientAdapter(CopilotClient client) : ICopilotSdkClient
     {
-        public async Task<ICopilotSdkSession> CreateSessionAsync(SessionConfig config, CancellationToken cancellationToken)
+        public async Task<ICopilotSdkSession> CreateSessionAsync(CreateSessionOptions config, CancellationToken cancellationToken)
         {
             var session = await client.CreateSessionAsync(config, cancellationToken).ConfigureAwait(false);
             return await ValidateFusionSessionAsync(session, config, cancellationToken).ConfigureAwait(false);
         }
 
-        public async Task<ICopilotSdkSession> ResumeSessionAsync(string sessionId, ResumeSessionConfig config, CancellationToken cancellationToken)
+        public async Task<ICopilotSdkSession> ResumeSessionAsync(string sessionId, ResumeSessionOptions config, CancellationToken cancellationToken)
         {
             var session = await client.ResumeSessionAsync(sessionId, config, cancellationToken).ConfigureAwait(false);
             return await ValidateFusionSessionAsync(session, config, cancellationToken).ConfigureAwait(false);
         }
 
         private static async Task<ICopilotSdkSession> ValidateFusionSessionAsync(
-            CopilotSession session, SessionConfigBase config, CancellationToken cancellationToken)
+            CopilotSession session, SessionOptionsBase config, CancellationToken cancellationToken)
         {
             try
             {
@@ -60,8 +60,8 @@ internal sealed class GitHubCopilotSdkClientFactory : ICopilotSdkClientFactory
                     // Cold resume may not have tier metadata until the session model catalog has been read.
                     var catalog = await session.Rpc.Model.ListAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
                     var current = await session.Rpc.Model.GetCurrentAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
-#pragma warning disable GHCP001 // Fusion is exposed as an experimental typed SDK API.
-                    var requestedTier = config.Capi?.FusionTier is { } tier
+#pragma warning disable MCPSDK001 // Fusion is exposed as an experimental typed SDK API.
+                    var requestedTier = config.GitHub?.Capi?.FusionTier is { } tier
                         ? CopilotFusionTierJsonConverter.TryParseWireValue(tier.Value, out var parsed)
                             ? parsed
                             : throw new InvalidOperationException($"Unexpected SDK Fusion tier '{tier.Value}'.")
@@ -73,7 +73,7 @@ internal sealed class GitHubCopilotSdkClientFactory : ICopilotSdkClientFactory
                         var preference = current.AutoTier?.Value ?? routing.DefaultTier;
                         actualTier = routing.Tiers.FirstOrDefault(candidate => candidate.Id == preference)?.FusionTier;
                     }
-#pragma warning restore GHCP001
+#pragma warning restore MCPSDK001
                     CopilotFusionCompatibility.EnsureRuntimeApplied(config.Model, requestedTier, current.ModelId, actualTier);
                 }
 

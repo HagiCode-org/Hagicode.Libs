@@ -1,7 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Collections.Concurrent;
-using GitHub.Copilot;
+using Microsoft.Copilot;
 using HagiCode.Libs.Core.Acp;
 using HagiCode.Libs.Core.Discovery;
 using HagiCode.Libs.Core.Environment;
@@ -762,38 +762,6 @@ public sealed class CopilotProviderTests
         root.Events.ShouldHaveSingleItem().ParentToolUseId.ShouldBeNull();
         child.Events.Single().SourceTracked.ShouldBeTrue();
         root.Events.Single().SourceTracked.ShouldBeTrue();
-    }
-
-    [Test]
-    public void DispatchSessionEvent_uses_a_direct_parent_before_subagent_start_is_observed()
-    {
-        var sources = new GitHubCopilotSdkGateway.CopilotEventSourceTracker();
-#pragma warning disable GHCP001 // Verify the fallback for older SDK parent fields.
-        var text = GitHubCopilotSdkGateway.DispatchSessionEvent(
-            new AssistantMessageDeltaEvent
-            {
-                AgentId = "agent-1",
-                Data = new AssistantMessageDeltaData
-                {
-                    DeltaContent = "answer",
-                    MessageId = "message-1",
-                    ParentToolCallId = "task-1"
-                }
-            },
-            sawDelta: false,
-            sourceTracker: sources);
-#pragma warning restore GHCP001
-        var reasoning = GitHubCopilotSdkGateway.DispatchSessionEvent(
-            new AssistantReasoningDeltaEvent
-            {
-                AgentId = "agent-1",
-                Data = new AssistantReasoningDeltaData { DeltaContent = "thinking", ReasoningId = "reasoning-1" }
-            },
-            sawDelta: false,
-            sourceTracker: sources);
-
-        text.Events.ShouldHaveSingleItem().ParentToolUseId.ShouldBe("task-1");
-        reasoning.Events.ShouldHaveSingleItem().ParentToolUseId.ShouldBe("task-1");
     }
 
     [Test]
@@ -2052,10 +2020,10 @@ public sealed class CopilotProviderTests
 
     private sealed class ThrowingResumeStubClient(string resumeErrorMessage) : ICopilotSdkClient
     {
-        public Task<ICopilotSdkSession> CreateSessionAsync(SessionConfig config, CancellationToken cancellationToken)
+        public Task<ICopilotSdkSession> CreateSessionAsync(CreateSessionOptions config, CancellationToken cancellationToken)
             => Task.FromResult<ICopilotSdkSession>(new ThrowingResumeStubSession("created-session"));
 
-        public Task<ICopilotSdkSession> ResumeSessionAsync(string sessionId, ResumeSessionConfig config, CancellationToken cancellationToken)
+        public Task<ICopilotSdkSession> ResumeSessionAsync(string sessionId, ResumeSessionOptions config, CancellationToken cancellationToken)
             => throw new InvalidOperationException(resumeErrorMessage);
 
         public Task<IReadOnlyList<CopilotSdkModelInfo>> ListModelsAsync(CancellationToken cancellationToken)
@@ -2267,13 +2235,13 @@ public sealed class CopilotProviderTests
             ControlledCopilotSdkClientFactory owner,
             CreateInvocation invocation) : ICopilotSdkClient
         {
-            public Task<ICopilotSdkSession> CreateSessionAsync(SessionConfig config, CancellationToken cancellationToken)
+            public Task<ICopilotSdkSession> CreateSessionAsync(CreateSessionOptions config, CancellationToken cancellationToken)
             {
                 var sessionId = $"gateway-session-{Interlocked.Increment(ref owner._sessionCounter):D4}";
                 return Task.FromResult<ICopilotSdkSession>(new ControlledCopilotSdkSession(sessionId, owner._promptHandler, invocation.ObservedEnvironment));
             }
 
-            public Task<ICopilotSdkSession> ResumeSessionAsync(string sessionId, ResumeSessionConfig config, CancellationToken cancellationToken)
+            public Task<ICopilotSdkSession> ResumeSessionAsync(string sessionId, ResumeSessionOptions config, CancellationToken cancellationToken)
             {
                 return Task.FromResult<ICopilotSdkSession>(new ControlledCopilotSdkSession(sessionId, owner._promptHandler, invocation.ObservedEnvironment));
             }
@@ -2360,13 +2328,13 @@ public sealed class CopilotProviderTests
             ResumeFailureCopilotSdkClientFactory owner,
             Exception resumeFailure) : ICopilotSdkClient
         {
-            public Task<ICopilotSdkSession> CreateSessionAsync(SessionConfig config, CancellationToken cancellationToken)
+            public Task<ICopilotSdkSession> CreateSessionAsync(CreateSessionOptions config, CancellationToken cancellationToken)
             {
                 owner.CreateAttemptCount++;
                 return Task.FromResult<ICopilotSdkSession>(new ResumeFailureCopilotSdkSession(config.SessionId ?? "created-session"));
             }
 
-            public Task<ICopilotSdkSession> ResumeSessionAsync(string sessionId, ResumeSessionConfig config, CancellationToken cancellationToken)
+            public Task<ICopilotSdkSession> ResumeSessionAsync(string sessionId, ResumeSessionOptions config, CancellationToken cancellationToken)
             {
                 owner.ResumeAttemptCount++;
                 return Task.FromException<ICopilotSdkSession>(resumeFailure);

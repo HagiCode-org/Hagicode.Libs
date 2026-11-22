@@ -1,6 +1,6 @@
 using System.Diagnostics;
 using System.Threading.Channels;
-using GitHub.Copilot;
+using Microsoft.Copilot;
 
 namespace HagiCode.Libs.Providers.Copilot;
 
