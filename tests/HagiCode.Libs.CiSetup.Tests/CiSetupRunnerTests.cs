@@ -73,7 +73,7 @@ public sealed class CiSetupRunnerTests
         var exitCode = await harness.Run(["--install", "--provider", "Copilot"]);
 
         exitCode.ShouldBe(0);
-        harness.Commands.Single().Arguments.ShouldBe(["install", "--global", "@github/copilot@1.0.60"]);
+        harness.Commands.Single().Arguments.ShouldBe(["install", "--global", "@github/copilot@1.0.114"]);
     }
 
     [Test]

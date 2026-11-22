@@ -58,14 +58,14 @@ public static class CliInstallRegistry
         new CliInstallDescriptor(
             ProviderName: "Copilot",
             NpmPackage: "@github/copilot",
-            PinnedVersion: "1.0.60",
+            PinnedVersion: "1.0.114",
             ExecutableCandidates: ["copilot"],
             IsPubliclyInstallable: true)
         {
-            // @github/copilot is a Node loader; the native copilot.exe is in @github/copilot-win32-x64 (checked at 1.0.60 and 1.0.102).
+            // @github/copilot is a Node loader; the native copilot.exe is in @github/copilot-win32-x64 (checked at 1.0.60, 1.0.102 and 1.0.114).
             WindowsExecutablePolicy = CliWindowsExecutablePolicy.RequireNative,
             WindowsExecutableEvidence =
-                "RequireNative. @github/copilot-win32-x64 holds copilot.exe at the package root (pin 1.0.60, current 1.0.102); the main package is a Node loader. "
+                "RequireNative. @github/copilot-win32-x64 holds copilot.exe at the package root (pin 1.0.114; also checked at 1.0.60 and 1.0.102); the main package is a Node loader. "
                 + "The -win32-arm64 name comes from the optional dependencies and its file list was not read. "
                 + "The first npm publish of the platform package is 1.0.0 (2025-12-16); the oldest release that ships the .exe was not established.",
             PackagedBinaryLayout = new CliPackagedBinaryLayout(
