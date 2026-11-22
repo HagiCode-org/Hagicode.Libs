@@ -91,9 +91,9 @@ var poolDefaults = serviceProvider.GetRequiredService<CliProviderPoolConfigurati
 
 ### Copilot Fusion compatibility
 
-The official [Copilot CLI model-selection guide](https://docs.github.com/en/copilot/how-tos/copilot-cli/use-copilot-cli/choose-a-model) documents `fusion` with `--fusion-tier standard|high|max`. The provider uses `GitHub.Copilot.SDK` `1.0.34`, which exposes the native field at `SessionConfig.Capi.FusionTier` and `ResumeSessionConfig.Capi.FusionTier`, not directly on the session configuration. Fusion is distinct from reasoning effort and `ContextTier`.
+The provider uses `Microsoft.Copilot.SDK` `2.0.1` with Copilot CLI protocol v4. Copilot CLI `1.0.114` is the tested runtime version. The native Fusion field for create and resume is `GitHub.Capi.FusionTier`. The official [Copilot CLI model-selection guide](https://docs.github.com/en/copilot/how-tos/copilot-cli/use-copilot-cli/choose-a-model) documents `fusion` with `--fusion-tier standard|high|max`.
 
-CLI `1.0.112` hides `--fusion-tier` from help but supports it natively. When help omits it, preflight passes an intentionally invalid tier and requires the parser's rejection to list `standard, high, max`. This starts no session and sends no prompt. A missing flag or inconclusive probe still blocks execution. Probes use the same executable and environment as the SDK.
+CLI `1.0.114` omits `--fusion-tier` from help and validates it in the argument parser. When help omits it, preflight passes an intentionally invalid tier and requires the parser's rejection to list `standard, high, max`. Probes use the same executable and environment as the SDK.
 
 Before any Fusion prompt, the SDK adapter reads the session's model catalog and current configuration. The runtime reports Fusion under canonical model id `auto`. The adapter resolves the actual tier from `fusionTier` or the catalog entry for the committed routing preference (the account's declared default when no preference is committed), and requires an exact match for explicit tiers. A substituted single model, missing tier metadata, failed verification or different tier is a terminal compatibility failure, not a reason to retry or fall back to a fresh session. The provider never rewrites the requested model to `auto` or uses a raw CLI prompt fallback.
 
