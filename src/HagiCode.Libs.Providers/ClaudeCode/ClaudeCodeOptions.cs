@@ -98,6 +98,13 @@ public sealed record ClaudeCodeOptions
     public string? SessionId { get; init; }
 
     /// <summary>
+    /// Gets or sets the caller's session id that owns the CLI process, used only for process ledger attribution.
+    /// It is separate from <see cref="SessionId" />, which is the Claude conversation id and can differ from the caller's session.
+    /// When unset, the process is attributed to <see cref="SessionId" />. It is never sent to the CLI.
+    /// </summary>
+    public string? OwnerSessionId { get; init; }
+
+    /// <summary>
     /// Gets or sets directories that Claude should additionally access.
     /// </summary>
     public IReadOnlyList<string> AddDirectories { get; init; } = [];
