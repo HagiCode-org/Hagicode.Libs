@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading.Channels;
+using HagiCode.Libs.Core.Process;
 using Microsoft.Copilot;
 
 namespace HagiCode.Libs.Providers.Copilot;
@@ -20,19 +21,27 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
     private readonly ICopilotSdkClientFactory _clientFactory;
     private readonly CopilotSdkEnvironmentLeaseCoordinator _environmentLeaseCoordinator;
     private readonly TimeSpan _idleWatchdogInterval;
+    private readonly CliProcessManager? _processManager;
 
     internal GitHubCopilotSdkGateway()
-        : this(new GitHubCopilotSdkClientFactory(), SharedEnvironmentLeaseCoordinator)
+        : this(processManager: null)
+    {
+    }
+
+    internal GitHubCopilotSdkGateway(CliProcessManager? processManager)
+        : this(new GitHubCopilotSdkClientFactory(), SharedEnvironmentLeaseCoordinator, processManager: processManager)
     {
     }
 
     internal GitHubCopilotSdkGateway(
         ICopilotSdkClientFactory clientFactory,
         CopilotSdkEnvironmentLeaseCoordinator environmentLeaseCoordinator,
-        TimeSpan? idleWatchdogInterval = null)
+        TimeSpan? idleWatchdogInterval = null,
+        CliProcessManager? processManager = null)
     {
         _clientFactory = clientFactory ?? throw new ArgumentNullException(nameof(clientFactory));
         _environmentLeaseCoordinator = environmentLeaseCoordinator ?? throw new ArgumentNullException(nameof(environmentLeaseCoordinator));
+        _processManager = processManager;
         _idleWatchdogInterval = idleWatchdogInterval ?? DefaultIdleWatchdogInterval;
     }
 
@@ -47,9 +56,24 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
         var environmentLease = await _environmentLeaseCoordinator.AcquireAsync(request, cancellationToken).ConfigureAwait(false);
         ICopilotSdkClient? client = null;
         CopilotPendingQuestions? pendingQuestions = null;
+        OwnedCopilotCli? ownedCli = null;
         try
         {
-            client = _clientFactory.Create(BuildClientOptions(request));
+            // A run of a session with no CliUrl gets its own headless CLI, started after the lease so it sees the lease's overrides.
+            if (request.CliUrl is null && request.OwnerSessionId is not null)
+            {
+                ownedCli = await OwnedCopilotCli.StartAsync(
+                        _processManager,
+                        request.CliPath,
+                        request.WorkingDirectory,
+                        request.CliArgs,
+                        request.OwnerSessionId,
+                        request.StartupTimeout,
+                        startupCancellationTokenSource.Token)
+                    .ConfigureAwait(false);
+            }
+
+            client = _clientFactory.Create(BuildClientOptions(request, ownedCli));
             pendingQuestions = request.UserInputHandler is null
                 ? null
                 : new CopilotPendingQuestions(request.UserInputHandler, request.QuestionTimeout, cancellationToken);
@@ -96,7 +120,7 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
                     SessionId: session.SessionId);
             }
 
-            return new PooledCopilotSdkRuntime(client, session, environmentLease, lifecycleEvent, pendingQuestions, _idleWatchdogInterval);
+            return new PooledCopilotSdkRuntime(client, session, environmentLease, lifecycleEvent, pendingQuestions, _idleWatchdogInterval, ownedCli);
         }
         catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested && startupCancellationTokenSource.IsCancellationRequested)
         {
@@ -104,6 +128,11 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
             if (client is not null)
             {
                 await client.DisposeAsync().ConfigureAwait(false);
+            }
+
+            if (ownedCli is not null)
+            {
+                await ownedCli.DisposeAsync().ConfigureAwait(false);
             }
 
             await environmentLease.DisposeAsync().ConfigureAwait(false);
@@ -117,6 +146,11 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
             if (client is not null)
             {
                 await client.DisposeAsync().ConfigureAwait(false);
+            }
+
+            if (ownedCli is not null)
+            {
+                await ownedCli.DisposeAsync().ConfigureAwait(false);
             }
 
             await environmentLease.DisposeAsync().ConfigureAwait(false);
@@ -462,8 +496,19 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
         }
     }
 
-    internal static CopilotClientOptions BuildClientOptions(CopilotSdkRequest request)
+    internal static CopilotClientOptions BuildClientOptions(CopilotSdkRequest request, OwnedCopilotCli? ownedCli = null)
     {
+        if (ownedCli is not null)
+        {
+            // Like any TCP runtime, the headless CLI manages its own startup configuration: the SDK rejects GitHub client
+            // options here, and the CLI runs as the logged-in user it was started under.
+            return new CopilotClientOptions
+            {
+                Mode = CopilotClientMode.CodingAgent,
+                Runtime = RuntimeConnection.ForTcp(OwnedCopilotCli.LoopbackHost, ownedCli.Port, ownedCli.ConnectionToken),
+            };
+        }
+
         if (!string.IsNullOrWhiteSpace(request.CliUrl))
         {
             return new CopilotClientOptions
@@ -762,7 +807,8 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
         IAsyncDisposable environmentLease,
         CopilotSdkStreamEvent lifecycleEvent,
         CopilotPendingQuestions? pendingQuestions,
-        TimeSpan idleWatchdogInterval) : ICopilotSdkRuntime
+        TimeSpan idleWatchdogInterval,
+        OwnedCopilotCli? ownedCli = null) : ICopilotSdkRuntime
     {
         private bool _lifecycleEventSent;
         private Task? _shutdownTask;
@@ -970,6 +1016,18 @@ internal sealed class GitHubCopilotSdkGateway : ICopilotSdkGateway
             }
             catch
             {
+            }
+
+            // The CLI this runtime started is stopped after its client has disconnected from it.
+            if (ownedCli is not null)
+            {
+                try
+                {
+                    await ownedCli.DisposeAsync().ConfigureAwait(false);
+                }
+                catch
+                {
+                }
             }
 
             try

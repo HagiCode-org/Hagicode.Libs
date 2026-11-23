@@ -19,4 +19,7 @@ internal sealed record CopilotSdkRequest(
     IReadOnlyList<CopilotImageAttachment>? Images = null,
     CopilotSteerTurn? Steering = null,
     CopilotFusionTier? FusionTier = null,
-    bool FusionTierIsExplicitlyUnset = false);
+    bool FusionTierIsExplicitlyUnset = false,
+    // HagiCode: the session that runs this request. With a session and no CliUrl, the runtime is started as a headless CLI
+    // owned by the gateway and attributed to this session in the process ledger. Never sent to the CLI.
+    string? OwnerSessionId = null);

@@ -33,7 +33,7 @@ public class CopilotProvider : ICliProvider<CopilotOptions>, ICopilotModelCapabi
         CliExecutableResolver executableResolver,
         CliProcessManager processManager,
         IRuntimeEnvironmentResolver? runtimeEnvironmentResolver = null)
-        : this(executableResolver, processManager, new GitHubCopilotSdkGateway(), runtimeEnvironmentResolver)
+        : this(executableResolver, processManager, new GitHubCopilotSdkGateway(processManager), runtimeEnvironmentResolver)
     {
     }
 
@@ -197,7 +197,8 @@ public class CopilotProvider : ICliProvider<CopilotOptions>, ICopilotModelCapabi
             Steering: steering,
             FusionTier: options.FusionTier,
             FusionTierIsExplicitlyUnset: options.FusionTierIsExplicitlyUnset
-                && string.Equals(options.Model, "fusion", StringComparison.OrdinalIgnoreCase));
+                && string.Equals(options.Model, "fusion", StringComparison.OrdinalIgnoreCase),
+            OwnerSessionId: OwnedCopilotCli.OwnerSessionIdOf(runtimeEnvironment));
     }
 
     internal virtual IReadOnlyDictionary<string, string?> BuildEnvironmentVariables(

@@ -50,7 +50,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IRuntimeEnvironmentResolver, RuntimeEnvironmentResolver>();
         services.AddSingleton<ICliExecutionPolicy, AllowAllCliExecutionPolicy>();
         services.AddSingleton<ICliExecutionFacade, CliExecutionFacade>();
-        services.AddSingleton<ICopilotSdkGateway>(static _ => new GitHubCopilotSdkGateway());
+        services.AddSingleton<ICopilotSdkGateway>(serviceProvider => new GitHubCopilotSdkGateway(serviceProvider.GetRequiredService<CliProcessManager>()));
         services.AddSingleton<ICliAcpSessionPool, CliAcpSessionPool>();
         services.AddSingleton<CliProviderPoolCoordinator>();
         services.AddSingleton(static _ =>
