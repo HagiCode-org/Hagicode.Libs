@@ -27,9 +27,13 @@ public sealed class OpenCodeProcessLauncher
     private readonly Func<bool> _isWindows;
     private readonly ICliResourceLimitProvider? _resourceLimitProvider;
     private readonly CgroupScopeCapabilityProbe _cgroupScopeProbe;
+    private readonly CliProcessManager? _processManager;
 
-    public OpenCodeProcessLauncher(CliExecutableResolver executableResolver, ICliResourceLimitProvider? resourceLimitProvider = null)
-        : this(executableResolver, static () => OperatingSystem.IsWindows(), resourceLimitProvider)
+    public OpenCodeProcessLauncher(
+        CliExecutableResolver executableResolver,
+        ICliResourceLimitProvider? resourceLimitProvider = null,
+        CliProcessManager? processManager = null)
+        : this(executableResolver, static () => OperatingSystem.IsWindows(), resourceLimitProvider, processManager: processManager)
     {
     }
 
@@ -37,15 +41,48 @@ public sealed class OpenCodeProcessLauncher
         CliExecutableResolver executableResolver,
         Func<bool> isWindows,
         ICliResourceLimitProvider? resourceLimitProvider = null,
-        CgroupScopeCapabilityProbe? cgroupScopeProbe = null)
+        CgroupScopeCapabilityProbe? cgroupScopeProbe = null,
+        CliProcessManager? processManager = null)
     {
         _executableResolver = executableResolver ?? throw new ArgumentNullException(nameof(executableResolver));
         _isWindows = isWindows ?? throw new ArgumentNullException(nameof(isWindows));
         _resourceLimitProvider = resourceLimitProvider;
         _cgroupScopeProbe = cgroupScopeProbe ?? CgroupScopeCapabilityProbe.Default;
+        _processManager = processManager;
     }
 
     internal ICliResourceLimitProvider? ResourceLimitProvider => _resourceLimitProvider;
+
+    // Attribution is best effort: the run needs the server, not its ledger entry, so a failed registration is not fatal.
+    private async Task<IAsyncDisposable?> RegisterInLedgerAsync(
+        Process process,
+        string? ownerSessionId,
+        CancellationToken cancellationToken)
+    {
+        if (_processManager is null || ownerSessionId is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return await _processManager.RegisterExternalProcessAsync(
+                    process,
+                    new CliExternalProcessRequest
+                    {
+                        ProviderName = "opencode",
+                        SessionId = ownerSessionId,
+                        ExecutablePath = process.StartInfo.FileName,
+                        WorkingDirectory = process.StartInfo.WorkingDirectory,
+                    },
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return null;
+        }
+    }
 
     public async Task<OpenCodeProcessHandle> StartAsync(
         OpenCodeStandaloneServerOptions options,
@@ -105,7 +142,13 @@ public sealed class OpenCodeProcessLauncher
         {
             var passwordLine = await Task.WhenAny(passwordSource.Task, Task.Delay(PasswordLineGrace, cancellationToken)).ConfigureAwait(false);
             var serverPassword = passwordLine == passwordSource.Task ? passwordSource.Task.Result : null;
-            return new OpenCodeProcessHandle(process, readySource.Task.Result, serverPassword, output, stdoutPump, stderrPump);
+            // The server is attributed to the run's session; a session-less run has no owner and stays unregistered.
+            var ledgerEntry = await RegisterInLedgerAsync(
+                    process,
+                    OpenCodeStandaloneServerHost.SessionIdOf(options.RunEnvironmentVariables),
+                    cancellationToken)
+                .ConfigureAwait(false);
+            return new OpenCodeProcessHandle(process, readySource.Task.Result, serverPassword, output, stdoutPump, stderrPump, ledgerEntry);
         }
 
         TryKill(process);
@@ -301,6 +344,7 @@ public sealed class OpenCodeProcessHandle : IAsyncDisposable
     private readonly StringBuilder _output;
     private readonly Task _stdoutPump;
     private readonly Task _stderrPump;
+    private readonly IAsyncDisposable? _ledgerEntry;
     private int _disposed;
 
     internal OpenCodeProcessHandle(
@@ -309,7 +353,8 @@ public sealed class OpenCodeProcessHandle : IAsyncDisposable
         string? serverPassword,
         StringBuilder output,
         Task stdoutPump,
-        Task stderrPump)
+        Task stderrPump,
+        IAsyncDisposable? ledgerEntry = null)
     {
         _process = process;
         BaseUri = baseUri;
@@ -317,6 +362,7 @@ public sealed class OpenCodeProcessHandle : IAsyncDisposable
         _output = output;
         _stdoutPump = stdoutPump;
         _stderrPump = stderrPump;
+        _ledgerEntry = ledgerEntry;
     }
 
     public Uri BaseUri { get; }
@@ -345,6 +391,17 @@ public sealed class OpenCodeProcessHandle : IAsyncDisposable
         if (Interlocked.Exchange(ref _disposed, 1) == 1)
         {
             return;
+        }
+
+        if (_ledgerEntry is not null)
+        {
+            try
+            {
+                await _ledgerEntry.DisposeAsync().ConfigureAwait(false);
+            }
+            catch
+            {
+            }
         }
 
         try

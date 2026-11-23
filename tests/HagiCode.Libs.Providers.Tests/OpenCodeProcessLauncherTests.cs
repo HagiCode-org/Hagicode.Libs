@@ -1,5 +1,6 @@
 using System.Text;
 using HagiCode.Libs.Core.Discovery;
+using HagiCode.Libs.Core.Process;
 using HagiCode.Libs.Providers.OpenCode;
 using Shouldly;
 
@@ -76,6 +77,41 @@ public sealed class OpenCodeProcessLauncherTests
             handle.CapturedOutput.ShouldContain("server listening on http://127.0.0.1:49999");
             handle.CapturedOutput.ShouldContain("server password <redacted>");
             handle.CapturedOutput.ShouldNotContain(LauncherPassword);
+        }
+        finally
+        {
+            File.Delete(executablePath);
+        }
+    }
+
+    [Test]
+    public async Task StartAsync_registers_the_server_under_the_run_session_and_disposing_the_handle_removes_the_entry()
+    {
+        const string sessionId = "opencode-owner-session";
+        var executablePath = CreateRuntimeShim("http://127.0.0.1:49996", password: null, keepRunning: true);
+        var manager = new CliProcessManager();
+        var launcher = new OpenCodeProcessLauncher(new CliExecutableResolver(), processManager: manager);
+        var query = new CliManagedProcessQuery { ProviderName = "opencode", SessionId = sessionId };
+
+        try
+        {
+            var handle = await launcher.StartAsync(
+                executablePath,
+                new OpenCodeStandaloneServerOptions
+                {
+                    StartupTimeout = TimeSpan.FromSeconds(15),
+                    RunEnvironmentVariables = new Dictionary<string, string?> { ["HAGI_SESSION_ID"] = sessionId },
+                },
+                new Dictionary<string, string?>(StringComparer.Ordinal),
+                CancellationToken.None);
+
+            var entry = manager.GetAliveManagedProcesses(query).Single();
+            entry.ProviderName.ShouldBe("opencode");
+            entry.SessionId.ShouldBe(sessionId);
+
+            await handle.DisposeAsync();
+
+            manager.GetAliveManagedProcesses(query).ShouldBeEmpty();
         }
         finally
         {

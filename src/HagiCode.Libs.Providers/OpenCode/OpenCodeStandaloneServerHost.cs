@@ -37,8 +37,9 @@ public sealed class OpenCodeStandaloneServerHost : IOpenCodeStandaloneServerClie
     public OpenCodeStandaloneServerHost(
         CliExecutableResolver executableResolver,
         IRuntimeEnvironmentResolver? runtimeEnvironmentResolver = null,
-        ICliResourceLimitProvider? resourceLimitProvider = null)
-        : this(executableResolver, runtimeEnvironmentResolver, new OpenCodeProcessLauncher(executableResolver, resourceLimitProvider))
+        ICliResourceLimitProvider? resourceLimitProvider = null,
+        CliProcessManager? processManager = null)
+        : this(executableResolver, runtimeEnvironmentResolver, new OpenCodeProcessLauncher(executableResolver, resourceLimitProvider, processManager))
     {
     }
 
