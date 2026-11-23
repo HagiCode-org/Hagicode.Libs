@@ -238,7 +238,7 @@ Operational notes:
 - Faulted transports and broken ACP sessions are removed immediately instead of being returned to the pool.
 - `CliAcpSessionPool.GetDiagnosticsSnapshot()` now reports global plus provider-scoped hit/miss/evict/fault counters, along with the latest eviction/fault reason; the pool also emits structured logs and `System.Diagnostics.Metrics` counters for monitoring hooks.
 - Default ACP idle TTL baselines remain provider-specific: `codebuddy/deepagents/gemini/kimi/kiro/qodercli=10m` and `hermes=24h`. `claude-code`, `codex`, `copilot`, and `opencode` do not register shared local-runtime TTL entries.
-- Hosts can enable `CliProcessOwnershipOptions` to persist managed subprocess PID ownership.
+- Hosts can enable `CliProcessOwnershipOptions` to persist managed subprocess PID ownership. The ledger, snapshots, termination and Windows containment built on it are described in [Process ownership, snapshots and termination](#process-ownership-snapshots-and-termination).
 
 CodeBuddy execution options cover the ACP-specific runtime settings without forcing raw command lines:
 
@@ -470,6 +470,115 @@ Requirements: Linux with cgroup v2, `systemd-run` on `PATH`, and a running syste
 Memory and CPU are decided separately. A limit the host can enforce still applies when the other cannot be enforced, and the agent starts without the unenforceable part. One warning is logged per resource and reason.
 
 Version probes, discovery and CI setup set `ProcessStartContext.ApplyResourceLimits = false` (or `CliExecutionRequest.ApplyResourceLimits = false`) and are never limited.
+
+## Process ownership, snapshots and termination
+
+`CliProcessManager` can tell which agent CLI processes it owns, read their process trees, and end them safely. Every process is identified by a `ProcessIdentity`: its process id and its start time in UTC. A process id alone is not enough, because the operating system reuses ids. Every identity check allows `CliProcessOwnershipOptions.StartTimeTolerance` (default one second) between the recorded and the live start time.
+
+Platform support:
+
+| Platform | Process table and details | Termination | Windows Job containment |
+| --- | --- | --- | --- |
+| Linux | `/proc`. Verified by the Core unit and integration tests. | `Process.Kill` on the single pid, after an identity check | Not applicable |
+| Windows | Toolhelp and `OpenProcess`. Implemented; the Job Object path is covered by control-flow tests that run on Linux with a fake Job factory. Not yet verified on a Windows host. | `TerminateProcess` on the single pid, or `TerminateJobObject` for contained trees | Implemented; see below |
+| macOS | `ps` with `LC_ALL=C` and `TZ=UTC`. Parser tests run on recorded `ps` output. Not verified on a macOS host. | `Process.Kill` on the single pid | Not applicable |
+
+Other platforms throw `PlatformNotSupportedException` from the snapshot and termination calls.
+
+### Ownership and the ledger
+
+The ledger is an in-memory record of processes that are alive now. It is separate from the JSON state file, and the state file format is unchanged. The ledger is kept whether or not persistence is enabled; only the state file depends on `CliProcessOwnershipOptions` persistence. Pass one `CliManagedProcessLedger` to several managers to give them a shared view; without one, each manager keeps its own.
+
+- `StartAsync` adds a process to the ledger when `ProcessStartContext.Ownership` is set. The origin is `CliManagedProcessOrigin.Started`.
+- `CliProcessOwnershipRegistration.SessionId` names the session that owns the process. It is kept in memory for queries and is not written to the state file.
+- The provider adapters pass `options.SessionId` for every agent launch. Version probes and `PingAsync` checks carry no session and are not tracked. Copilot and OpenCode do not use ownership, so their processes are not tracked.
+- Disposing the handle, or calling `StopAsync`, removes the entry. `CliProcessHandle` caches `Pid`, `StartedAtUtc` and `Identity` right after the process starts, so they stay readable after the process exits or its `Process` is disposed.
+- `GetAliveManagedProcesses(query)` returns only the entries that are still alive with the same start time. It removes the entries that have exited or whose id was reused. Each result is a `CliManagedProcessInfo`, with its `Identity`, `ProviderName`, `SessionId`, `ExecutablePath`, `WorkingDirectory`, `Origin` (`CliManagedProcessOrigin`) and `IsContained`.
+
+```csharp
+var alive = manager.GetAliveManagedProcesses(new CliManagedProcessQuery { ProviderName = "claude-code", SessionId = sessionId });
+```
+
+### Registering a process the caller started
+
+A host that starts its own process, for example an ACP runtime, can register it so it appears in the ledger and the state file:
+
+```csharp
+var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("claude") { UseShellExecute = false })!;
+await using var registration = await manager.RegisterExternalProcessAsync(
+    process,
+    new CliExternalProcessRequest { ProviderName = "claude-code", SessionId = sessionId, WorkingDirectory = workingDirectory });
+
+// Later: find the session's processes and end one of them by identity.
+var alive = manager.GetAliveManagedProcesses(new CliManagedProcessQuery { SessionId = sessionId });
+var result = await manager.TerminateProcessTreeAsync(alive[0].Identity);
+```
+
+Disposing the `CliExternalProcessRegistration` removes the ledger entry and the persisted record. **It does not stop the process.** `RegisterExternalProcessAsync` throws `InvalidOperationException` when the process has already exited or its start time cannot be read.
+
+### Process trees
+
+`CaptureManagedProcessTreesAsync(query, options)` reads the process table once for all matching managed processes and returns one `CliManagedProcessTree` per process, pairing the ledger entry with its `ProcessTreeRootSnapshot`. `ProcessTreeSnapshotter.CaptureAsync` does the same for any identities you supply.
+
+The snapshot types are: `IProcessTreeSnapshotter`, the capture interface; `ProcessTreeSnapshotRequest`, which names the roots and the `ProcessTreeSnapshotOptions`; `ProcessTreeSnapshot`, which holds one `ProcessTreeRootSnapshot` per requested root in request order; `ProcessTreeRootStatus` (`Found`, `NotFound` or `IdentityMismatch`) on each root; and `ProcessSnapshotEntry`, one per listed process, which carries `ProcessMembership` (`Root` or `Descendant`) and `ProcessAccessibility`.
+
+- Entries are listed parent before child, with a `Depth` of 0 for the root. Members are listed at depth 1 and beyond.
+- A root reports `ProcessTreeRootStatus.Found`, `NotFound` (no such process) or `IdentityMismatch` (the id now belongs to a different process). Only `Found` lists entries.
+- `ProcessSnapshotEntry.Accessibility` is `Accessible`, `Partial` (for example, the command line could not be read) or `Denied`. A `Denied` entry has no `StartedAtUtc`, so it cannot be turned into a termination request.
+- `ProcessTreeSnapshotOptions.MaxProcessesPerRoot` (default 512) bounds the walk and sets `Truncated`. `Timeout` throws `TimeoutException`.
+- `IncludeCommandLine` defaults to `true`. Command lines can contain secrets, so set it to `false` to skip the read entirely. The snapshot never redacts them.
+- Each entry's `Accessibility` (`ProcessAccessibility`) says how much was read: `Accessible` (every field), `Partial` (the process was listed, but some details such as the command line were withheld), or `Denied` (the operating system refused the detail read, so its start time and identity are unknown and it is not used for termination).
+- A child that started more than `StartTimeTolerance` before its parent is not followed. Its parent link is treated as stale, because the parent's id was reused.
+- `ProcessCpuUsage.CalculatePercentOfOneProcessor` and `CalculatePercentOfHost` derive a percentage from two snapshots of the same process. They return `null` when either sample is missing, the CPU time is unavailable, the process was replaced, or the clock did not advance. `CalculatePercentOfHost` divides the same delta by the logical processor count you pass.
+
+```csharp
+var trees = await manager.CaptureManagedProcessTreesAsync(new CliManagedProcessQuery { SessionId = sessionId });
+foreach (var tree in trees)
+{
+    foreach (var entry in tree.Tree.Processes)
+    {
+        Console.WriteLine($"{new string(' ', entry.Depth * 2)}{entry.Pid} {entry.Name}");
+    }
+}
+```
+
+### Termination
+
+`TerminateProcessAsync(identity, options)` ends one process. `TerminateProcessTreeAsync(identity, options)` ends a process and its descendants. `CliProcessTerminator` provides the same two calls without a manager.
+
+Every call first checks the root's identity, so a reused id ends nothing. The tree walk then re-checks each descendant's identity immediately before its kill, and it kills leaves first, so a parent cannot respawn a child that has already been killed. `CliProcessTerminationOptions.ExitWaitTimeout` (default five seconds) bounds how long each killed process gets to exit.
+
+The identity check and the kill are separate system calls. The check runs immediately before each kill, which keeps the window small, but an id that is reused in the moment between the two cannot be ruled out. A `Terminated` result is therefore best effort for a process id that might be reused, not a guarantee.
+
+Results are typed. `CliProcessTerminationResult.Outcome` is one of:
+
+| Outcome | Meaning |
+| --- | --- |
+| `Terminated` | The process (or every process in the tree) is gone. Descendants that were already gone or whose id was reused count as ended. |
+| `AlreadyExited` | No process with this identity was running when the call started. Nothing was killed. |
+| `AccessDenied` | The operating system refused the kill, or the start time could not be read, so the identity cannot be verified. Nothing was killed. |
+| `IdentityMismatch` | A different process now has this id. Nothing was killed. |
+| `PartiallyTerminated` | The root ended, but at least one descendant could not be ended (`AccessDenied` or `Failed`). |
+| `Failed` | The process did not exit within `ExitWaitTimeout`, or the kill failed for another reason. |
+
+`CliProcessTerminationResult.Method` (a `CliProcessTerminationMethod`) is `Single` (one process), `TreeWalk` (the tree was walked and each process was killed), or `Containment` (a Windows Job ended the members, see below). `Items` lists one `CliProcessTerminationItem` per process attempted or checked, with the identity it was checked against.
+
+`TerminateProcessAsync` and `TerminateProcessTreeAsync` never throw for an expected case. Only `OperationCanceledException` escapes, and only when the token is already cancelled before work starts.
+
+`RecoverOwnedProcessesAsync` uses `TerminateProcessTreeAsync` for each persisted record, logs the outcome, and removes the record in every case. A record whose identity no longer matches is skipped.
+
+### Windows Job containment
+
+On Windows, a launch with `ProcessStartContext.Ownership` set, and an external registration, is placed in a Job Object so that the Job can end the whole tree:
+
+- The Job is created before the process starts, and the process is assigned right after `Start()`. Any child that was spawned in that short window is swept into the Job.
+- The Job is created with `KILL_ON_JOB_CLOSE`. **This is a behavior change for an agent CLI that deliberately leaves a background daemon after its command finishes.** Stopping the handle, or disposing it, now ends that daemon as well. Set `CliProcessOwnershipOptions.WindowsJobContainment` to `false` to restore the previous behavior. The switch defaults to `true`.
+- Any failure to create, configure or assign the Job logs a warning with the Win32 error code. The process is then not contained (`IsContained` is `false`), and the existing `Kill(entireProcessTree: true)` path stays in force. The launch does not fail.
+- Disposing an external registration only removes the Job's kill-on-close limit and releases the handle. It does not end the members, because the process must keep running after its registration is disposed.
+- Contained processes do not depend on recovery after a host crash. If the host dies, Windows closes the Job handle and ends the members. A new host's `RecoverOwnedProcessesAsync` finds nothing for them.
+- `TerminateProcessTreeAsync` on a contained process ends the Job's members even after the root has exited, so an orphaned descendant is still ended. A root whose identity check fails for any other reason (a reused pid, for example) ends nothing.
+
+Verified on an unpackaged Windows 11 host (build 26200, .NET 10.0.404, 2026-11-22). The `WindowsOnly` live tests pass: a Job is created, assigned and terminated; a descendant that outlives its exited parent is gone after stop; an orphan is ended by `TerminateProcessTreeAsync` through the Job; and `WindowsProcessPlatform` reads every field of a live child. In a measurement where a launcher started eight children as its first action, all eight were inside the Job and none escaped. The window between `Start()` and assignment was not timed separately. In the same environment, a grandchild started through `Start-Process` (which uses ShellExecute) was not inherited into the Job, while one started with `Process.Start` and `UseShellExecute = false` was, so containment does not reach processes created through ShellExecute. The cause of that difference was inferred, not isolated. The full Core test project fails the same 88 tests on the host with and without this change; they need `/bin/sh` or Unix file modes. The fallback and access-denied paths are covered on Windows only through fake-platform tests. A packaged (MSIX) run and a real Medium-IL access-denied check have not been performed.
 
 ## Guides
 
