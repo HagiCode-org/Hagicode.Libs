@@ -93,7 +93,7 @@ public sealed class CodexClient : IDisposable
             _options.CodexExecutablePath,
             _options.EnvironmentVariables,
             _options.Config,
-            new DefaultCodexProcessRunner(_options.ResourceLimitProvider),
+            new DefaultCodexProcessRunner(_options.ResourceLimitProvider, _options.ProcessManager, _options.OwnerSessionId),
             _options.Logger);
     }
 

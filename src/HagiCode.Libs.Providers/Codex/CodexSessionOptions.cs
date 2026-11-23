@@ -30,6 +30,12 @@ public sealed record CodexSessionOptions
     public string? ThreadId { get; init; }
 
     /// <summary>
+    /// Gets or sets the caller's session id that owns the Codex processes of this run, used only for process ledger
+    /// attribution. It is never sent to the CLI. When unset, the processes run without a ledger entry.
+    /// </summary>
+    public string? OwnerSessionId { get; init; }
+
+    /// <summary>
     /// Gets or sets the optional raw Codex config override object.
     /// </summary>
     public JsonObject? Config { get; init; }

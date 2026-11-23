@@ -8,6 +8,7 @@ using ManagedCode.CodexSharpSDK.Internal;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using HagiCode.Libs.Core.Process;
+using HagiCode.Libs.Providers.Codex;
 
 namespace ManagedCode.CodexSharpSDK.Execution;
 
@@ -428,10 +429,17 @@ internal sealed class DefaultCodexProcessRunner : ICodexProcessRunner
     private static readonly UTF8Encoding Utf8NoBom = new(false);
 
     private readonly ICliResourceLimitProvider? _resourceLimitProvider;
+    private readonly CliProcessManager? _processManager;
+    private readonly string? _ownerSessionId;
 
-    public DefaultCodexProcessRunner(ICliResourceLimitProvider? resourceLimitProvider = null)
+    public DefaultCodexProcessRunner(
+        ICliResourceLimitProvider? resourceLimitProvider = null,
+        CliProcessManager? processManager = null,
+        string? ownerSessionId = null)
     {
         _resourceLimitProvider = resourceLimitProvider;
+        _processManager = processManager;
+        _ownerSessionId = ownerSessionId;
     }
 
     internal ICliResourceLimitProvider? ResourceLimitProvider => _resourceLimitProvider;
@@ -497,6 +505,14 @@ internal sealed class DefaultCodexProcessRunner : ICodexProcessRunner
         {
             throw new InvalidOperationException($"Failed to start Codex CLI at '{invocation.ExecutablePath}'", exception);
         }
+
+        // HagiCode: the ledger entry lives as long as the exec process; it is removed before the process handle is disposed.
+        await using var ledgerEntry = await CodexProcessLedger.TryRegisterAsync(
+            _processManager,
+            _ownerSessionId,
+            process,
+            logger,
+            cancellationToken).ConfigureAwait(false);
 
         try
         {

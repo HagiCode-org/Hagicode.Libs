@@ -72,7 +72,9 @@ internal sealed class CodexAppServerSession : IAsyncDisposable
         TimeSpan questionTimeout,
         ILogger? logger,
         CancellationToken cancellationToken,
-        ICliResourceLimitProvider? resourceLimitProvider = null)
+        ICliResourceLimitProvider? resourceLimitProvider = null,
+        CliProcessManager? processManager = null,
+        string? ownerSessionId = null)
     {
         var effectiveLogger = logger ?? NullLogger.Instance;
 
@@ -80,6 +82,7 @@ internal sealed class CodexAppServerSession : IAsyncDisposable
         var client = new CodexAppServerClient(process.Output, process.Input, userInputHandler, questionTimeout, effectiveLogger);
         try
         {
+            await process.RegisterInLedgerAsync(processManager, ownerSessionId, cancellationToken).ConfigureAwait(false);
             client.Start();
 
             using var handshakeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);

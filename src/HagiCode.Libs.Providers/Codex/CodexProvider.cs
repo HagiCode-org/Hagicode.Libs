@@ -23,19 +23,22 @@ public sealed class CodexProvider : ICodexProvider
     private readonly ICliExecutionFacade? _executionFacade;
     private readonly ILogger<CodexProvider> _logger;
     private readonly ICliResourceLimitProvider? _resourceLimitProvider;
+    private readonly CliProcessManager? _processManager;
 
     public CodexProvider(
         CliExecutableResolver executableResolver,
         IRuntimeEnvironmentResolver? runtimeEnvironmentResolver = null,
         ICliExecutionFacade? executionFacade = null,
         ILogger<CodexProvider>? logger = null,
-        ICliResourceLimitProvider? resourceLimitProvider = null)
+        ICliResourceLimitProvider? resourceLimitProvider = null,
+        CliProcessManager? processManager = null)
     {
         _executableResolver = executableResolver ?? throw new ArgumentNullException(nameof(executableResolver));
         _runtimeEnvironmentResolver = runtimeEnvironmentResolver;
         _executionFacade = executionFacade;
         _logger = logger ?? NullLogger<CodexProvider>.Instance;
         _resourceLimitProvider = resourceLimitProvider;
+        _processManager = processManager;
     }
 
     /// <summary>
@@ -72,7 +75,9 @@ public sealed class CodexProvider : ICodexProvider
             Config = options.Config,
             EnvironmentVariables = BuildEnvironmentVariables(runtimeEnvironment, options.EnvironmentVariables),
             Logger = _logger,
-            ResourceLimitProvider = _resourceLimitProvider
+            ResourceLimitProvider = _resourceLimitProvider,
+            ProcessManager = _processManager,
+            OwnerSessionId = NormalizeOptional(options.OwnerSessionId),
         };
 
         var client = new CodexClient(new CodexClientOptions
@@ -168,7 +173,9 @@ public sealed class CodexProvider : ICodexProvider
                     options.QuestionTimeout,
                     _logger,
                     cancellationToken,
-                    _resourceLimitProvider)
+                    _resourceLimitProvider,
+                    sdkOptions.ProcessManager,
+                    sdkOptions.OwnerSessionId)
                 .ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)

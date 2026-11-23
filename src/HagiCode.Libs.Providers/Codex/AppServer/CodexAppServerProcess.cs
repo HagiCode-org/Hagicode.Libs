@@ -17,6 +17,7 @@ internal sealed class CodexAppServerProcess : IAsyncDisposable
 
     private readonly Process _process;
     private readonly ILogger _logger;
+    private IAsyncDisposable? _ledgerEntry;
     private int _disposed;
 
     private CodexAppServerProcess(Process process, ILogger logger)
@@ -115,6 +116,16 @@ internal sealed class CodexAppServerProcess : IAsyncDisposable
         return startInfo;
     }
 
+    /// <summary>
+    /// Records this process in the shared process ledger under the owner session. A failed registration is logged and the
+    /// process runs without a visible tree. The ledger entry is removed when this process is disposed.
+    /// </summary>
+    internal async Task RegisterInLedgerAsync(CliProcessManager? processManager, string? ownerSessionId, CancellationToken cancellationToken)
+    {
+        _ledgerEntry = await CodexProcessLedger.TryRegisterAsync(processManager, ownerSessionId, _process, _logger, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
@@ -148,6 +159,11 @@ internal sealed class CodexAppServerProcess : IAsyncDisposable
         }
         finally
         {
+            if (_ledgerEntry is not null)
+            {
+                await _ledgerEntry.DisposeAsync().ConfigureAwait(false);
+            }
+
             _process.Dispose();
         }
     }

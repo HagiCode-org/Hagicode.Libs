@@ -20,4 +20,10 @@ public sealed record CodexOptions
 
     // HagiCode: the agent memory limit for the exec process; null runs it without a limit.
     internal ICliResourceLimitProvider? ResourceLimitProvider { get; init; }
+
+    // HagiCode: the shared process ledger and the caller's session id that owns the Codex processes. Both are needed for
+    // attribution only; the owner id is never sent to the CLI. Without either, the processes run unregistered.
+    internal CliProcessManager? ProcessManager { get; init; }
+
+    internal string? OwnerSessionId { get; init; }
 }
