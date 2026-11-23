@@ -1,3 +1,5 @@
+using HagiCode.Libs.Core.Process.Windows;
+
 namespace HagiCode.Libs.Core.Process;
 
 /// <summary>
@@ -9,6 +11,8 @@ public sealed class CliProcessHandle : IAsyncDisposable
     private CliOwnedProcessState? _ownedProcessState;
     private readonly Func<CliOwnedProcessState, ValueTask>? _ownedProcessCleanup;
     private readonly string? _resolvedExecutablePath;
+    private readonly IWindowsProcessJob? _containment;
+    private readonly Func<ValueTask>? _ledgerRelease;
 
     internal CliProcessHandle(
         System.Diagnostics.Process process,
@@ -17,7 +21,10 @@ public sealed class CliProcessHandle : IAsyncDisposable
         StreamReader standardError,
         CliOwnedProcessState? ownedProcessState = null,
         Func<CliOwnedProcessState, ValueTask>? ownedProcessCleanup = null,
-        string? resolvedExecutablePath = null)
+        string? resolvedExecutablePath = null,
+        DateTimeOffset? startedAtUtc = null,
+        IWindowsProcessJob? containment = null,
+        Func<ValueTask>? ledgerRelease = null)
     {
         Process = process;
         StandardInput = standardInput;
@@ -26,6 +33,12 @@ public sealed class CliProcessHandle : IAsyncDisposable
         _resolvedExecutablePath = resolvedExecutablePath;
         _ownedProcessState = ownedProcessState;
         _ownedProcessCleanup = ownedProcessCleanup;
+        _containment = containment;
+        _ledgerRelease = ledgerRelease;
+
+        // Read once, right after Start(), so the values stay available after the process exits or Process is disposed.
+        Pid = process.Id;
+        StartedAtUtc = startedAtUtc;
     }
 
     /// <summary>
@@ -63,6 +76,26 @@ public sealed class CliProcessHandle : IAsyncDisposable
     /// </summary>
     public CliOwnedProcessState? OwnedProcessState => _ownedProcessState;
 
+    /// <summary>
+    /// Gets the process id, captured right after the process started.
+    /// </summary>
+    public int Pid { get; }
+
+    /// <summary>
+    /// Gets the process start time in UTC, captured right after the process started. <see langword="null" /> only when the operating system refused to report it.
+    /// </summary>
+    public DateTimeOffset? StartedAtUtc { get; }
+
+    /// <summary>
+    /// Gets the process identity, or <see langword="null" /> when the start time could not be read.
+    /// </summary>
+    public ProcessIdentity? Identity => StartedAtUtc is { } startedAtUtc ? new ProcessIdentity(Pid, startedAtUtc) : null;
+
+    /// <summary>
+    /// Gets a value indicating whether the process is held in a Windows Job Object that ends its members on stop. A fallback process reports <see langword="false" />.
+    /// </summary>
+    public bool IsContained => _containment is not null;
+
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
@@ -77,9 +110,18 @@ public sealed class CliProcessHandle : IAsyncDisposable
         TryDispose(StandardOutput);
         TryDispose(StandardError);
         Process.Dispose();
+
+        // Closing a contained Job ends any member still running, which is the containment guarantee for handles.
+        _containment?.Dispose();
+
         if (ownedProcessState is not null && _ownedProcessCleanup is not null)
         {
             await _ownedProcessCleanup(ownedProcessState).ConfigureAwait(false);
+        }
+
+        if (_ledgerRelease is not null)
+        {
+            await _ledgerRelease().ConfigureAwait(false);
         }
     }
 
@@ -89,6 +131,8 @@ public sealed class CliProcessHandle : IAsyncDisposable
         _ownedProcessState = null;
         return state;
     }
+
+    internal IWindowsProcessJob? Containment => _containment;
 
     private static void TryDispose(IDisposable disposable)
     {

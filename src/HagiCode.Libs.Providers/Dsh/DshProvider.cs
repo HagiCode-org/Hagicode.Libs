@@ -91,7 +91,7 @@ public class DshProvider : ICliProvider<DshOptions>
             Arguments = BuildCommandArguments(options),
             WorkingDirectory = workingDirectory,
             EnvironmentVariables = BuildEnvironmentVariables(options, runtimeEnvironment),
-            Ownership = new CliProcessOwnershipRegistration { ProviderName = Name }
+            Ownership = new CliProcessOwnershipRegistration { ProviderName = Name, SessionId = options.SessionId }
         };
 
         await foreach (var message in ExecuteOneShotAsync(options, prompt, workingDirectory, startContext, cancellationToken).ConfigureAwait(false))
@@ -485,7 +485,7 @@ public class DshProvider : ICliProvider<DshOptions>
                 Arguments = BuildCommandArguments(options),
                 WorkingDirectory = ResolveWorkingDirectory(options.WorkingDirectory),
                 EnvironmentVariables = BuildEnvironmentVariables(options, runtimeEnvironment),
-                Ownership = new CliProcessOwnershipRegistration { ProviderName = Name }
+                Ownership = new CliProcessOwnershipRegistration { ProviderName = Name, SessionId = options.SessionId }
             };
 
             var handshake = await HandshakeWithCapabilityAsync(startContext, cancellationToken).ConfigureAwait(false);

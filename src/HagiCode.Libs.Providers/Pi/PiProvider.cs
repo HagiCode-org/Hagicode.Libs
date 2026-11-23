@@ -105,7 +105,7 @@ public class PiProvider : ICliProvider<PiOptions>
                 EnvironmentVariables = BuildEnvironmentVariables(options, runtimeEnvironment),
                 InputEncoding = Utf8NoBom,
                 OutputEncoding = Utf8NoBom,
-                Ownership = new CliProcessOwnershipRegistration { ProviderName = Name }
+                Ownership = new CliProcessOwnershipRegistration { ProviderName = Name, SessionId = options.SessionId }
             };
 
         }

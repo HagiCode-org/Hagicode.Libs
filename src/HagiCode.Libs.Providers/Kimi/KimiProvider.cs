@@ -64,7 +64,7 @@ public class KimiProvider : ICliProvider<KimiOptions>
             Arguments = BuildCommandArguments(options),
             WorkingDirectory = workingDirectory,
             EnvironmentVariables = BuildEnvironmentVariables(options, runtimeEnvironment),
-            Ownership = new CliProcessOwnershipRegistration { ProviderName = Name }
+            Ownership = new CliProcessOwnershipRegistration { ProviderName = Name, SessionId = options.SessionId }
         };
 
         await foreach (var message in ExecuteOneShotAsync(options, prompt, workingDirectory, startContext, cancellationToken).ConfigureAwait(false))

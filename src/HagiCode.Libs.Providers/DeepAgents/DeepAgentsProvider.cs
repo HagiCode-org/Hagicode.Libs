@@ -257,7 +257,7 @@ public class DeepAgentsProvider : ICliProvider<DeepAgentsOptions>
             Arguments = launcher.Arguments,
             WorkingDirectory = workingDirectory,
             EnvironmentVariables = BuildEnvironmentVariables(options, runtimeEnvironment),
-            Ownership = new CliProcessOwnershipRegistration { ProviderName = Name }
+            Ownership = new CliProcessOwnershipRegistration { ProviderName = Name, SessionId = options.SessionId }
         };
     }
 

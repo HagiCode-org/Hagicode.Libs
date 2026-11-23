@@ -24,4 +24,11 @@ public sealed class CliProcessOwnershipOptions
     /// Gets or sets the tolerance used when comparing persisted and live process start times.
     /// </summary>
     public TimeSpan StartTimeTolerance { get; set; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>
+    /// Gets or sets a value indicating whether agent CLI processes that carry ownership metadata are placed in a Windows Job Object on start.
+    /// The Job ends every member, including orphaned descendants, when the process stops or its handle is disposed.
+    /// Set to <see langword="false" /> to keep the previous behavior. Ignored on other platforms.
+    /// </summary>
+    public bool WindowsJobContainment { get; set; } = true;
 }

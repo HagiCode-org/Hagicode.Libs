@@ -167,7 +167,7 @@ public class ClaudeCodeProvider : ICliProvider<ClaudeCodeOptions>
             EnvironmentVariables = BuildEnvironmentVariables(options, runtimeEnvironment),
             InputEncoding = Utf8NoBom,
             OutputEncoding = Utf8NoBom,
-            Ownership = new CliProcessOwnershipRegistration { ProviderName = Name }
+            Ownership = new CliProcessOwnershipRegistration { ProviderName = Name, SessionId = options.SessionId }
         };
 
         var debugContext = CreateDebugContext(options, startContext);

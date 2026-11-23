@@ -75,7 +75,7 @@ public class HermesProvider : ICliProvider<HermesOptions>
             Arguments = BuildCommandArguments(options),
             WorkingDirectory = workingDirectory,
             EnvironmentVariables = BuildEnvironmentVariables(options, runtimeEnvironment),
-            Ownership = new CliProcessOwnershipRegistration { ProviderName = Name }
+            Ownership = new CliProcessOwnershipRegistration { ProviderName = Name, SessionId = options.SessionId }
         };
         var resolvedModeId = ResolveModeId(options.ModeId);
 
