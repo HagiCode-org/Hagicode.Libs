@@ -10,6 +10,7 @@ using HagiCode.Libs.Providers.Codex;
 using HagiCode.Libs.Providers.DeepAgents;
 using HagiCode.Libs.Providers.Dsh;
 using HagiCode.Libs.Providers.Gemini;
+using HagiCode.Libs.Providers.Antigravity;
 using HagiCode.Libs.Providers.Junie;
 using HagiCode.Libs.Providers.Hermes;
 using HagiCode.Libs.Providers.Kimi;
@@ -42,6 +43,7 @@ public sealed class DependencyInjectionTests
         var codexProvider = serviceProvider.GetRequiredService<ICodexProvider>();
         var deepAgentsProvider = serviceProvider.GetRequiredService<ICliProvider<DeepAgentsOptions>>();
         var geminiProvider = serviceProvider.GetRequiredService<ICliProvider<GeminiOptions>>();
+        var antigravityProvider = serviceProvider.GetRequiredService<ICliProvider<AntigravityOptions>>();
         var junieProvider = serviceProvider.GetRequiredService<ICliProvider<JunieOptions>>();
         var dshProvider = serviceProvider.GetRequiredService<ICliProvider<DshOptions>>();
         var hermesProvider = serviceProvider.GetRequiredService<ICliProvider<HermesOptions>>();
@@ -84,6 +86,8 @@ public sealed class DependencyInjectionTests
         registry.GetProvider("deepagents-acp").ShouldBeNull();
         registry.GetProvider("gemini").ShouldNotBeNull();
         registry.GetProvider("gemini-cli").ShouldNotBeNull();
+        registry.GetProvider("antigravity").ShouldNotBeNull();
+        registry.GetProvider("antigravity-cli").ShouldNotBeNull();
         registry.GetProvider("junie").ShouldNotBeNull();
         registry.GetProvider("junie-cli").ShouldNotBeNull();
         registry.GetProvider("dsh").ShouldNotBeNull();
@@ -107,6 +111,7 @@ public sealed class DependencyInjectionTests
         codexProvider.ShouldBeOfType<CodexProvider>();
         deepAgentsProvider.ShouldBeOfType<DeepAgentsProvider>();
         geminiProvider.ShouldBeOfType<GeminiProvider>();
+        antigravityProvider.ShouldBeOfType<AntigravityProvider>();
         junieProvider.ShouldBeOfType<JunieProvider>();
         dshProvider.ShouldBeOfType<DshProvider>();
         hermesProvider.ShouldBeOfType<HermesProvider>();
@@ -118,6 +123,7 @@ public sealed class DependencyInjectionTests
         qoderCliProvider.ShouldBeOfType<QoderCliProvider>();
         allProviders.ShouldContain(provider => provider is CodexProvider);
         allProviders.ShouldContain(provider => provider is GeminiProvider);
+        allProviders.ShouldContain(provider => provider is AntigravityProvider);
         allProviders.ShouldContain(provider => provider is JunieProvider);
         allProviders.ShouldContain(provider => provider is DshProvider);
         allProviders.ShouldContain(provider => provider is HermesProvider);
@@ -137,6 +143,8 @@ public sealed class DependencyInjectionTests
         registry.GetProvider<DeepAgentsOptions>("deepagents-acp").ShouldBeNull();
         registry.GetProvider<GeminiOptions>("gemini").ShouldBeOfType<GeminiProvider>();
         registry.GetProvider<GeminiOptions>("gemini-cli").ShouldBeOfType<GeminiProvider>();
+        registry.GetProvider<AntigravityOptions>("antigravity").ShouldBeOfType<AntigravityProvider>();
+        registry.GetProvider<AntigravityOptions>("antigravity-cli").ShouldBeOfType<AntigravityProvider>();
         registry.GetProvider<JunieOptions>("junie").ShouldBeOfType<JunieProvider>();
         registry.GetProvider<JunieOptions>("junie-cli").ShouldBeOfType<JunieProvider>();
         registry.GetProvider<DshOptions>("dsh").ShouldBeOfType<DshProvider>();
@@ -154,7 +162,7 @@ public sealed class DependencyInjectionTests
         registry.GetProvider<OmpOptions>("omp").ShouldBeOfType<OmpProvider>();
         registry.GetProvider<OmpOptions>("omp-cli").ShouldBeOfType<OmpProvider>();
         registry.GetProvider<QoderCliOptions>("qodercli").ShouldBeOfType<QoderCliProvider>();
-        registry.GetAllProviders().Select(static provider => provider.Name).ShouldBe(["claude-code", "codebuddy", "copilot", "codex", "deepagents", "gemini", "junie", "dsh", "hermes", "kimi", "kiro-cli", "opencode", "pi", "omp", "qodercli"], ignoreOrder: true);
+        registry.GetAllProviders().Select(static provider => provider.Name).ShouldBe(["claude-code", "codebuddy", "copilot", "codex", "antigravity", "deepagents", "gemini", "junie", "dsh", "hermes", "kimi", "kiro-cli", "opencode", "pi", "omp", "qodercli"], ignoreOrder: true);
     }
 
     [Test]

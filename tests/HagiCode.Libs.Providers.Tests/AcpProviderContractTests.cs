@@ -15,6 +15,7 @@ public sealed class AcpProviderContractTests
         {
             ["kimi"] = KimiProviderTests.CreateContractRow,
             ["gemini"] = GeminiProviderTests.CreateContractRow,
+            ["antigravity"] = AntigravityProviderTests.CreateContractRow,
             ["junie"] = JunieProviderTests.CreateContractRow,
             ["codebuddy"] = CodebuddyProviderTests.CreateContractRow,
             ["qodercli"] = QoderCliProviderTests.CreateContractRow,

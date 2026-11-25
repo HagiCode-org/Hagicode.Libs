@@ -18,6 +18,7 @@ public sealed class ProviderConsoleDispatchContractTests
         {
             ["kimi"] = KimiConsoleIntegrationTests.CreateDispatchRow,
             ["gemini"] = GeminiConsoleIntegrationTests.CreateDispatchRow,
+            ["antigravity"] = AntigravityConsoleIntegrationTests.CreateDispatchRow,
             ["junie"] = JunieConsoleIntegrationTests.CreateDispatchRow,
             ["codebuddy"] = CodebuddyConsoleIntegrationTests.CreateDispatchRow,
             ["qodercli"] = QoderCliConsoleIntegrationTests.CreateDispatchRow,

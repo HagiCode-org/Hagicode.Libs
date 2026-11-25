@@ -8,6 +8,7 @@ using HagiCode.Libs.Providers.Codebuddy;
 using HagiCode.Libs.Providers.Copilot;
 using HagiCode.Libs.Providers.Codex;
 using HagiCode.Libs.Providers.DeepAgents;
+using HagiCode.Libs.Providers.Antigravity;
 using HagiCode.Libs.Providers.Dsh;
 using HagiCode.Libs.Providers.Gemini;
 using HagiCode.Libs.Providers.Junie;
@@ -70,6 +71,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICodexProvider>(serviceProvider => serviceProvider.GetRequiredService<CodexProvider>());
         services.AddSingleton<DeepAgentsProvider>();
         services.AddSingleton<GeminiProvider>();
+        services.AddSingleton<AntigravityProvider>();
         services.AddSingleton<JunieProvider>();
         services.AddSingleton<HermesProvider>();
         services.AddSingleton<KimiProvider>();
@@ -87,6 +89,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<ICodexProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<DeepAgentsProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<GeminiProvider>());
+        services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<AntigravityProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<JunieProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<HermesProvider>());
         services.AddSingleton<ICliProvider>(serviceProvider => serviceProvider.GetRequiredService<KimiProvider>());
@@ -102,6 +105,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICopilotModelCapabilityReader>(serviceProvider => serviceProvider.GetRequiredService<CopilotProvider>());
         services.AddSingleton<ICliProvider<DeepAgentsOptions>>(serviceProvider => serviceProvider.GetRequiredService<DeepAgentsProvider>());
         services.AddSingleton<ICliProvider<GeminiOptions>>(serviceProvider => serviceProvider.GetRequiredService<GeminiProvider>());
+        services.AddSingleton<ICliProvider<AntigravityOptions>>(serviceProvider => serviceProvider.GetRequiredService<AntigravityProvider>());
         services.AddSingleton<ICliProvider<JunieOptions>>(serviceProvider => serviceProvider.GetRequiredService<JunieProvider>());
         services.AddSingleton<ICliProvider<HermesOptions>>(serviceProvider => serviceProvider.GetRequiredService<HermesProvider>());
         services.AddSingleton<ICliProvider<KimiOptions>>(serviceProvider => serviceProvider.GetRequiredService<KimiProvider>());
@@ -119,6 +123,12 @@ public static class ServiceCollectionExtensions
                 if (provider is GeminiProvider)
                 {
                     registry.Register(provider.Name, provider, ["gemini-cli"]);
+                    continue;
+                }
+
+                if (provider is AntigravityProvider)
+                {
+                    registry.Register(provider.Name, provider, ["antigravity-cli"]);
                     continue;
                 }
 
