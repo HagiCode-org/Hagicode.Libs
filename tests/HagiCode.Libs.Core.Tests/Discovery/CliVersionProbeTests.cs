@@ -82,6 +82,17 @@ public sealed class CliVersionProbeTests
     }
 
     [Test]
+    public async Task ProbeVersionAsync_reads_the_bare_antigravity_version_line()
+    {
+        using var fixture = CreateExecutable("echo '1.5.17'");
+
+        var result = await new CliVersionProbe().ProbeVersionAsync(fixture.Path, [["--version"]]);
+
+        result.Version.ShouldBe("1.5.17");
+        result.Failure.ShouldBe(CliVersionProbeFailure.None);
+    }
+
+    [Test]
     public async Task ProbeVersionAsync_extracts_product_prefixed_junie_version()
     {
         using var fixture = CreateExecutable("echo 'Junie version: 26.9.22 (3419.22)'");

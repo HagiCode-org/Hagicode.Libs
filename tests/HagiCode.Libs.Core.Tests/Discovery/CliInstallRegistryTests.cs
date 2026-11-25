@@ -47,6 +47,18 @@ public sealed partial class CliInstallRegistryTests
     }
 
     [Test]
+    public void Descriptors_include_antigravity_with_explicit_local_only_metadata()
+    {
+        var descriptor = CliInstallRegistry.Descriptors.Single(d => d.ProviderName == "Antigravity");
+
+        descriptor.NpmPackage.ShouldBeEmpty();
+        descriptor.PinnedVersion.ShouldBeEmpty();
+        descriptor.ExecutableCandidates.ShouldBe(["agy"]);
+        descriptor.IsPubliclyInstallable.ShouldBeFalse();
+        descriptor.InstallStrategies.Single().WellKnownDirectories.ShouldBe(["~/.local/bin"]);
+    }
+
+    [Test]
     public void Descriptors_include_junie_with_explicit_local_only_metadata()
     {
         var descriptor = CliInstallRegistry.Descriptors.Single(d => d.ProviderName == "Junie");

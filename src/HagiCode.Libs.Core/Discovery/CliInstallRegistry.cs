@@ -190,6 +190,21 @@ public static class CliInstallRegistry
         },
 
         new CliInstallDescriptor(
+            ProviderName: "Antigravity",
+            NpmPackage: string.Empty,
+            PinnedVersion: string.Empty,
+            ExecutableCandidates: ["agy"],
+            IsPubliclyInstallable: false)
+        {
+            // Observed on Linux: agy 1.5.17 at ~/.local/bin/agy (ELF binary, not an npm package). The install route is not attributed.
+            InstallStrategies =
+            [
+                new CliInstallStrategy(CliInstallKind.Unknown, CliPlatform.Linux, ["~/.local/bin"], SupportsVersionPin: false),
+            ],
+            WindowsExecutableEvidence = "PreferNative, not examined. Only the Linux layout has been observed.",
+        },
+
+        new CliInstallDescriptor(
             ProviderName: "Hermes",
             NpmPackage: string.Empty,
             PinnedVersion: string.Empty,
