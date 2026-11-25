@@ -12,7 +12,7 @@
 
 - `src/HagiCode.Libs.Core` - transport, process management, executable discovery, and runtime environment resolution.
 - `src/HagiCode.Libs.Prompts` - file-backed Handlebars prompt catalog loading, override merging, locale fallback, diagnostics, and rendering.
-- `src/HagiCode.Libs.Providers` - provider abstractions, the Claude Code/Copilot/Codex/DeepAgents/Dsh/CodeBuddy/Gemini/Hermes/Junie/Kimi/Kiro/OpenCode/Omp/Pi/QoderCLI providers, and optional DI registration.
+- `src/HagiCode.Libs.Providers` - provider abstractions, the Claude Code/Copilot/Codex/DeepAgents/Dsh/CodeBuddy/Gemini/Antigravity/Hermes/Junie/Kimi/Kiro/OpenCode/Omp/Pi/QoderCLI providers, and optional DI registration.
 - `src/HagiCode.Libs.Skills` - skills-oriented infrastructure. Its first shipped capability is a typed online API client for search, well-known discovery, audit, telemetry, and GitHub metadata/tree requests.
 - `src/HagiCode.Libs.Imaging` - in-process AVIF conversion (PNG, JPEG, WebP and GIF first frame to AVIF) with bundled libvips native libraries. No `ffmpeg`, `avifenc` or other tool is used or looked up. Tests: `tests/HagiCode.Libs.Imaging.Tests`. Backend integration guide: `docs/avif-backend-integration-guide.md`.
 - `src/HagiCode.Libs.Git` - typed Git client (`IGitClient`) for repository discovery and state inspection. Backend integration guide: `docs/git-backend-integration-guide.md`.

@@ -1,6 +1,6 @@
 # HagiCode.Libs.Providers
 
-`HagiCode.Libs.Providers` builds on `HagiCode.Libs.Core` and adds reusable provider abstractions plus built-in integrations for Claude Code, Copilot, Codex, DeepAgents, CodeBuddy, Gemini, Junie, Hermes, Dsh, Kimi, Kiro, OpenCode, Pi, OMP, and QoderCLI.
+`HagiCode.Libs.Providers` builds on `HagiCode.Libs.Core` and adds reusable provider abstractions plus built-in integrations for Claude Code, Copilot, Codex, DeepAgents, CodeBuddy, Gemini, Antigravity, Junie, Hermes, Dsh, Kimi, Kiro, OpenCode, Pi, OMP, and QoderCLI.
 
 ## What is included
 
@@ -641,6 +641,26 @@ var options = new OpenCodeOptions
 
 The precedence and the blank-value rule are covered by `CreateStartInfo_InjectedRunValue_IsLowerThanResolvedAndConfiguredValues` and `RunEnvironmentTests`.
 
+## Antigravity CLI probe (2026-11-25)
+
+Findings from the installed Antigravity CLI, used to choose the transport for `AntigravityProvider`:
+
+- Executable: `agy`. Observed at `/home/newbe36524/.local/bin/agy` on Linux (a native ELF binary, not an npm package). `agy --version` prints `1.5.17` and exits 0. The install route is not attributed, and Windows and macOS have not been examined.
+- ACP support: yes. `agy acp` starts "the Agent Client Protocol (ACP) stdio server", and `--stdio` selects the JSON-RPC stdio transport, which is the default.
+- `initialize` (protocol version 1) answers with `agentInfo` `Antigravity ACP Server` `1.5.17`, `loadSession: true`, session capabilities `resume`, `load`, `close`, `list` and `additionalDirectories`, and prompt capabilities `image: true` and `embeddedContext: true`.
+- Advertised `authMethods`: `oauth-personal` (Log in with Google), `oauth-business` (Gemini Enterprise), `gemini-api-key` and `agent-platform`.
+- Not signed in, `session/new` fails with JSON-RPC error `-32000` "Authentication required". `agy models` fails with "Please sign in to view available models". The CLI has no headless sign-in on the ACP path; `agy acp --login` is the interactive Google sign-in.
+
+**Chosen transport (design D1, first branch):** ACP over stdio. The provider runs `agy acp --stdio` on the shared ACP session layer (`HagiCode.Libs.Core.Acp`), the same way Junie and Kiro do. Only the `acp --stdio` launch arguments are managed, and caller extra arguments follow them.
+
+Behaviour that follows from the probe:
+
+- `ProviderRegistry` accepts `antigravity-cli` as an alias. The only executable candidate is `agy`. `antigravity` is not a candidate, because that name is a likely launcher for the Antigravity IDE, which this probe did not check.
+- The provider never starts an interactive sign-in by itself. `authenticate` runs only when `AntigravityOptions.AuthenticationMethod` names a method that `initialize` advertised. A session refused with "Authentication required" raises an error that tells the operator to run `agy acp --login`.
+- `PingAsync` checks only `initialize`. It does not prove the account is signed in, because the ACP `initialize` result carries no authentication flag.
+- No model option is forwarded. The CLI exposes no model list while signed out, so Hero configuration uses the default model.
+- The shared ACP message mapper fixture under `Fixtures/ToolCalls/antigravity/` is synthetic, following the repository's existing ACP fixture convention. It is not recorded from `agy`. Real-CLI verdicts are recorded in `docs/antigravity-feature-matrix.md`.
+
 ## Adoption boundaries
 
 - Interactive provider transports still use `CliProcessManager` directly because they need open stdio sessions.
@@ -648,6 +668,7 @@ The precedence and the blank-value rule are covered by `CreateStartInfo_Injected
 - Provider callers should continue passing structured option models; the new facade is additive and does not replace provider-specific option records.
 - `gemini` is the canonical built-in provider name; `ProviderRegistry` and the dedicated console also accept `gemini-cli` as an alias.
 - `junie` is the canonical built-in provider name; `ProviderRegistry` also accepts `junie-cli` as an alias and boots ACP through `junie --acp=true`.
+- `antigravity` is the canonical built-in provider name; `ProviderRegistry` also accepts `antigravity-cli` as an alias and boots ACP through `agy acp --stdio`. See the Antigravity CLI probe above for the sign-in rules.
 - `dsh` is the canonical built-in provider name; `ProviderRegistry` also accepts `dsh-cli` as an alias and boots ACP through `dsh --profile acp`. Caller-supplied `--profile` arguments are rejected. Before any ACP start, the `dsh --help` banner (`DeepSeek Harness`) is checked so an unrelated distributed-shell `dsh` is not driven as an agent.
 - `deepagents` is the canonical built-in provider name, and the managed runtime boots ACP through `deepagents --acp`.
 - `kimi` is the canonical built-in provider name; `ProviderRegistry` and the dedicated console also accept `kimi-cli` as an alias.

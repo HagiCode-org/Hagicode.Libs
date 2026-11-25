@@ -28,7 +28,7 @@ Tier markers, switch variables and filter expressions: `docs/testing-tiers.md`.
 
 - `src/HagiCode.Libs.Core/`: transport, process management, executable discovery (`Discovery/CliExecutableResolver.cs` shares validated, expiring resolutions through `CliResolutionCache`; not-found results are never cached; guide: `docs/agent-cli-discovery-guide.md`)
 - `src/HagiCode.Libs.Prompts/`: Handlebars prompt catalog
-- `src/HagiCode.Libs.Providers/`: provider abstractions (Claude Code, Codebuddy, Codex, Copilot, DeepAgents, Dsh, Gemini, Hermes, Junie, Kimi, Kiro, OpenCode, Omp, Pi, QoderCli; one folder per provider, registered in `ProviderRegistry.cs`; each has a `src/HagiCode.Libs.<Provider>.Console` runner)
+- `src/HagiCode.Libs.Providers/`: provider abstractions (Claude Code, Codebuddy, Codex, Copilot, DeepAgents, Dsh, Gemini, Antigravity, Hermes, Junie, Kimi, Kiro, OpenCode, Omp, Pi, QoderCli; one folder per provider, registered in `ProviderRegistry.cs`; each has a `src/HagiCode.Libs.<Provider>.Console` runner)
 - `src/HagiCode.Libs.Skills/`: skills infrastructure and online API client
 - `src/HagiCode.Libs.Git/`: provider-agnostic git wrapper over the `git` CLI (`IGitClient`, typed results and failure codes; `ProbeDirtyAsync` uses a single `git status` process; tests: `tests/HagiCode.Libs.Git.Tests/`, package guide: `src/HagiCode.Libs.Git/README.md`, backend guide: `docs/git-backend-integration-guide.md`)
 - `src/HagiCode.Libs.Imaging/`: in-process AVIF conversion with bundled libvips native libraries (tests: `tests/HagiCode.Libs.Imaging.Tests/`, backend guide: `docs/avif-backend-integration-guide.md`)
