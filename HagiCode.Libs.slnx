@@ -5,6 +5,7 @@
     <Platform Name="x86" />
   </Configurations>
   <Folder Name="/integrationTests/">
+    <Project Path="src/HagiCode.Libs.Antigravity.Console/HagiCode.Libs.Antigravity.Console.csproj" />
     <Project Path="src/HagiCode.Libs.CiSetup.Console/HagiCode.Libs.CiSetup.Console.csproj" />
     <Project Path="src/HagiCode.Libs.ClaudeCode.Console/HagiCode.Libs.ClaudeCode.Console.csproj" />
     <Project Path="src/HagiCode.Libs.Codebuddy.Console/HagiCode.Libs.Codebuddy.Console.csproj" />
