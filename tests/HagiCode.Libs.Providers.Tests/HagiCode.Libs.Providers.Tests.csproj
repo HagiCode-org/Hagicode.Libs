@@ -13,6 +13,7 @@
     <None Include="Fixtures\Codex\AppServer\*.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Fixtures\OpenCode\v2.0.32\*" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Fixtures\ToolCalls\**\*.jsonl" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Fixtures\Antigravity\*.jsonl" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Fixtures\ClaudeCode\steer\*" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Fixtures\ClaudeCode\subagent\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
