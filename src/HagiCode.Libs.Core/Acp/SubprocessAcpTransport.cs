@@ -82,6 +82,21 @@ public sealed class SubprocessAcpTransport : IAcpTransport, IAcpTransportDiagnos
             var line = await handle.StandardOutput.ReadLineAsync(cancellationToken);
             if (line is null)
             {
+                // stdout reaches EOF a moment before the OS reports the exit. Wait briefly so a non-zero exit is
+                // reported with its stderr, instead of ending the stream silently and leaving the caller to time out.
+                if (!handle.Process.HasExited)
+                {
+                    using var exitWait = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    exitWait.CancelAfter(TimeSpan.FromSeconds(2));
+                    try
+                    {
+                        await handle.Process.WaitForExitAsync(exitWait.Token).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                    {
+                    }
+                }
+
                 if (handle.Process.HasExited && handle.Process.ExitCode != 0)
                 {
                     await AwaitStandardErrorPumpAsync().ConfigureAwait(false);

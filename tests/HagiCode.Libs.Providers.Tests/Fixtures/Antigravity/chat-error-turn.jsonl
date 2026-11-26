@@ -1,0 +1,2 @@
+{"fixtureHeader":{"provenance":"synthetic","format":"antigravity-acp-turn","source":"synthetic; ACP v1 session/update shapes handled by AntigravityAcpMessageMapper; not recorded from agy","notes":"Turn that the agent ends with stopReason error and no text."}}
+{"promptResult":{"stopReason":"error"}}

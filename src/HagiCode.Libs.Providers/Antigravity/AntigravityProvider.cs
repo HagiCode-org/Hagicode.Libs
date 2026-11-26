@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Text.Json;
 using HagiCode.Libs.Core.Acp;
 using HagiCode.Libs.Core.Discovery;
@@ -147,7 +148,31 @@ public class AntigravityProvider : ICliProvider<AntigravityOptions>
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        var arguments = new List<string>(ManagedArguments);
+        // Top-level flags must precede the subcommand: `agy acp --settings` is rejected by the CLI.
+        var arguments = new List<string>();
+        if (ArgumentValueNormalizer.NormalizeOptionalValue(options.SettingsPath) is { } settingsPath)
+        {
+            arguments.Add("--settings");
+            arguments.Add(settingsPath);
+        }
+
+        if (ArgumentValueNormalizer.NormalizeOptionalValue(options.Model) is { } model)
+        {
+            arguments.Add("--model");
+            arguments.Add(model);
+        }
+
+        // Each directory carries a .agents/skills layout that agy loads as skills (built-in skills use this route).
+        foreach (var directory in options.AdditionalDirectories)
+        {
+            if (ArgumentValueNormalizer.NormalizeOptionalValue(directory) is { } normalizedDirectory)
+            {
+                arguments.Add("--add-dir");
+                arguments.Add(normalizedDirectory);
+            }
+        }
+
+        arguments.AddRange(ManagedArguments);
         foreach (var rawArgument in options.ExtraArguments)
         {
             var normalizedArgument = ArgumentValueNormalizer.NormalizeOptionalValue(rawArgument);
@@ -219,18 +244,30 @@ public class AntigravityProvider : ICliProvider<AntigravityOptions>
             sessionClient,
             workingDirectory,
             options.SessionId,
+            ResolveSessionModel(options),
             startupCts.Token).ConfigureAwait(false);
 
         yield return AntigravityAcpMessageMapper.CreateSessionLifecycleMessage(sessionHandle);
 
-        await foreach (var message in StreamPromptAttemptAsync(
-                           sessionClient,
-                           sessionHandle.SessionId,
-                           sessionHandle.IsResumed,
-                           prompt,
-                           cancellationToken).ConfigureAwait(false))
+        var run = new AntigravityPromptRun(sessionClient, sessionHandle.SessionId, cancellationToken, options.Steering);
+        try
         {
-            yield return message;
+            await foreach (var message in StreamPromptAttemptAsync(
+                               sessionClient,
+                               sessionHandle.SessionId,
+                               run,
+                               sessionHandle.IsResumed,
+                               prompt,
+                               options,
+                               cancellationToken).ConfigureAwait(false))
+            {
+                yield return message;
+            }
+        }
+        finally
+        {
+            // Stops steers and answers from starting after the run has ended, and detaches the steering channel.
+            run.Close();
         }
     }
 
@@ -326,15 +363,30 @@ public class AntigravityProvider : ICliProvider<AntigravityOptions>
         }
     }
 
+    // agy's session/new ignores the --model flag and starts on its own default model (Gemini on some accounts),
+    // so the model is applied through session/set_model. Magpie-prefixed selectors are not agy model ids and
+    // are rejected by set_model (-32602), so those runs keep agy's own selection.
+    private static string? ResolveSessionModel(AntigravityOptions options)
+    {
+        var model = options.Model?.Trim();
+        if (string.IsNullOrEmpty(model) || model.StartsWith("magpie/", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return model;
+    }
+
     private static async Task<AcpSessionHandle> StartSessionOrExplainSignInAsync(
         IAcpSessionClient sessionClient,
         string workingDirectory,
         string? sessionId,
+        string? model,
         CancellationToken cancellationToken)
     {
         try
         {
-            return await sessionClient.StartSessionAsync(workingDirectory, sessionId, null, cancellationToken).ConfigureAwait(false);
+            return await sessionClient.StartSessionAsync(workingDirectory, sessionId, model, cancellationToken).ConfigureAwait(false);
         }
         catch (InvalidOperationException ex) when (IsAuthenticationRequired(ex))
         {
@@ -383,15 +435,19 @@ public class AntigravityProvider : ICliProvider<AntigravityOptions>
         IAcpSessionClient sessionClient,
         string sessionId,
         bool isResumedSession,
-        Task<JsonElement> promptTask,
+        AntigravityPromptRun run,
+        AntigravityOptions options,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var sawTerminalMessage = false;
         var sawAssistantText = false;
+        var streamedAssistantText = new StringBuilder();
         var bufferedAssistantMessages = isResumedSession ? new List<CliMessage>() : null;
+        var pendingQuestions = new Queue<AntigravityUserInputRequest>();
+        var seenQuestionToolCallIds = new HashSet<string>(StringComparer.Ordinal);
         CliMessage? terminalMessage = null;
         using var receiveUpdatesCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        _ = CancelReceiveLoopWhenPromptCompletesAsync(promptTask, receiveUpdatesCancellation);
+        _ = CancelReceiveLoopWhenRunCompletesAsync(run, receiveUpdatesCancellation);
         await using var updateEnumerator = sessionClient.ReceiveNotificationsAsync(receiveUpdatesCancellation.Token)
             .GetAsyncEnumerator(receiveUpdatesCancellation.Token);
 
@@ -408,7 +464,7 @@ public class AntigravityProvider : ICliProvider<AntigravityOptions>
 
                 notification = updateEnumerator.Current;
             }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && promptTask.IsCompleted)
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && run.AllCompleted)
             {
                 break;
             }
@@ -435,9 +491,17 @@ public class AntigravityProvider : ICliProvider<AntigravityOptions>
             foreach (var message in AntigravityAcpMessageMapper.NormalizeNotification(notification))
             {
                 if (string.Equals(message.Type, "assistant", StringComparison.OrdinalIgnoreCase) &&
-                    AntigravityAcpMessageMapper.TryExtractMessageText(message.Content, out _))
+                    AntigravityAcpMessageMapper.TryExtractMessageText(message.Content, out var chunkText))
                 {
                     sawAssistantText = true;
+                    // The rejection phrase may arrive split across chunks, so match the text streamed so far.
+                    streamedAssistantText.Append(chunkText);
+                    if (AntigravityAcpMessageMapper.ContainsLicenseRejection(streamedAssistantText.ToString()))
+                    {
+                        yield return AntigravityAcpMessageMapper.CreateLicenseRejectedMessage(sessionId, streamedAssistantText.ToString());
+                        yield break;
+                    }
+
                     if (isResumedSession)
                     {
                         bufferedAssistantMessages!.Add(message);
@@ -445,8 +509,55 @@ public class AntigravityProvider : ICliProvider<AntigravityOptions>
                     }
                 }
 
+                // A question is passed on in stream order. It is answered only after the turn that asked has ended.
+                if (string.Equals(message.Type, AntigravityUserInputRequest.MessageType, StringComparison.Ordinal) &&
+                    AntigravityUserInputRequest.TryFromCliMessage(message, out var question))
+                {
+                    if (seenQuestionToolCallIds.Add(question.ToolCallId))
+                    {
+                        pendingQuestions.Enqueue(question);
+                    }
+
+                    yield return message;
+                    continue;
+                }
+
+                // A prompt_completed notification carries the prompt result beside its update, not inside it. The license
+                // reply can arrive only there, so it is checked before the completion is passed on.
+                if (IsTerminalMessage(message.Type) &&
+                    AntigravityAcpMessageMapper.TryExtractNotificationResultText(notification, out var resultText) &&
+                    AntigravityAcpMessageMapper.ContainsLicenseRejection(resultText))
+                {
+                    yield return AntigravityAcpMessageMapper.CreateLicenseRejectedMessage(sessionId, resultText);
+                    yield break;
+                }
+
                 if (IsTerminalMessage(message.Type))
                 {
+                    // A completion is only a turn boundary while another prompt is open (a steer or an answer), so the run goes
+                    // on. A question asked in the turn that just ended is answered here, as the next prompt.
+                    if (await run.HasOpenPromptsAsync().ConfigureAwait(false) ||
+                        await TryStartAnswerAsync(pendingQuestions, run, options, cancellationToken).ConfigureAwait(false))
+                    {
+                        break;
+                    }
+
+                    if (!run.TryCloseWhenIdle())
+                    {
+                        break;
+                    }
+
+                    // A steered prompt can fail after the turn before it has ended, and the run then closes on that earlier completion.
+                    // The latest prompt's failure decides the run, so it is reported as a failure instead of a completion.
+                    if (run.LatestFailure is { } latestFailure)
+                    {
+                        await run.SettledAsync().ConfigureAwait(false);
+                        yield return AntigravityAcpMessageMapper.CreateTerminalFailureMessage(sessionId, latestFailure);
+                        yield break;
+                    }
+
+                    // The steer outcomes of this run are reported before its terminal message reaches the caller.
+                    await run.SettledAsync().ConfigureAwait(false);
                     sawTerminalMessage = true;
                     if (isResumedSession)
                     {
@@ -467,11 +578,14 @@ public class AntigravityProvider : ICliProvider<AntigravityOptions>
             }
         }
 
+        run.Close();
+        await run.SettledAsync().ConfigureAwait(false);
+
         JsonElement promptResult;
         Exception? promptFailure = null;
         try
         {
-            promptResult = await promptTask.ConfigureAwait(false);
+            promptResult = await run.LatestResult.ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -514,16 +628,30 @@ public class AntigravityProvider : ICliProvider<AntigravityOptions>
         }
     }
 
-    private static async Task CancelReceiveLoopWhenPromptCompletesAsync(
-        Task<JsonElement> promptTask,
+    // Notifications sent before a failed or cancelled prompt result can still be queued when the result arrives.
+    // Cancelling the reader at once would drop them (the partial text of a cancelled turn), so give it a short window to drain.
+    private static readonly TimeSpan PromptResultDrainGrace = TimeSpan.FromMilliseconds(500);
+
+    private static async Task CancelReceiveLoopWhenRunCompletesAsync(
+        AntigravityPromptRun run,
         CancellationTokenSource receiveUpdatesCancellation)
     {
         try
         {
-            var promptResult = await promptTask.ConfigureAwait(false);
+            // A steer or an answer started while the run is open extends it, so keep waiting until no prompt is left.
+            Task<JsonElement>[] attempts;
+            do
+            {
+                attempts = run.SnapshotResults();
+                await Task.WhenAll(attempts.Select(attempt => ObserveQuietlyAsync(attempt))).ConfigureAwait(false);
+            }
+            while (run.AttemptCount != attempts.Length);
+
+            var promptResult = await run.LatestResult.ConfigureAwait(false);
             if (!AntigravityAcpMessageMapper.ShouldPreferPromptCompletedNotification(promptResult) &&
                 !receiveUpdatesCancellation.IsCancellationRequested)
             {
+                await Task.Delay(PromptResultDrainGrace).ConfigureAwait(false);
                 TryCancelReceiveLoop(receiveUpdatesCancellation);
             }
         }
@@ -533,15 +661,66 @@ public class AntigravityProvider : ICliProvider<AntigravityOptions>
         }
     }
 
+    private static async Task ObserveQuietlyAsync(Task task)
+    {
+        try
+        {
+            await task.ConfigureAwait(false);
+        }
+        catch
+        {
+        }
+    }
+
+    private static async Task<bool> TryStartAnswerAsync(
+        Queue<AntigravityUserInputRequest> pendingQuestions,
+        AntigravityPromptRun run,
+        AntigravityOptions options,
+        CancellationToken cancellationToken)
+    {
+        if (options.UserInputHandler is null || pendingQuestions.Count == 0)
+        {
+            return false;
+        }
+
+        var question = pendingQuestions.Dequeue();
+        AntigravityUserInputResponse? response;
+        using var questionCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        questionCancellation.CancelAfter(options.QuestionTimeout);
+        try
+        {
+            response = await options.UserInputHandler(question, questionCancellation.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            // A handler that throws, or a question that times out, declines the question.
+            response = null;
+        }
+
+        if (response is null)
+        {
+            return false;
+        }
+
+        _ = run.Start(AntigravityUserInputResponse.BuildAnswerPrompt(question, response));
+        return true;
+    }
+
     private static IAsyncEnumerable<CliMessage> StreamPromptAttemptAsync(
         IAcpSessionClient sessionClient,
         string sessionId,
+        AntigravityPromptRun run,
         bool isResumedSession,
         string prompt,
+        AntigravityOptions options,
         CancellationToken cancellationToken)
     {
-        var promptTask = sessionClient.SendPromptAsync(sessionId, prompt, cancellationToken);
-        return StreamPromptMessagesAsync(sessionClient, sessionId, isResumedSession, promptTask, cancellationToken);
+        _ = run.Start(prompt);
+        return StreamPromptMessagesAsync(sessionClient, sessionId, isResumedSession, run, options, cancellationToken);
     }
 
     private static IEnumerable<CliMessage> BuildFallbackMessages(
@@ -553,6 +732,12 @@ public class AntigravityProvider : ICliProvider<AntigravityOptions>
             AntigravityAcpMessageMapper.TryExtractPromptResultText(promptResult, out var fallbackText) &&
             !AntigravityAcpMessageMapper.IsFailurePromptResult(promptResult))
         {
+            if (AntigravityAcpMessageMapper.ContainsLicenseRejection(fallbackText))
+            {
+                yield return AntigravityAcpMessageMapper.CreateLicenseRejectedMessage(sessionId, fallbackText);
+                yield break;
+            }
+
             yield return AntigravityAcpMessageMapper.CreateAssistantMessage(sessionId, fallbackText, promptResult);
         }
 
@@ -568,6 +753,12 @@ public class AntigravityProvider : ICliProvider<AntigravityOptions>
         if (!AntigravityAcpMessageMapper.IsFailurePromptResult(promptResult) &&
             AntigravityAcpMessageMapper.TryExtractPromptResultText(promptResult, out var promptText))
         {
+            if (AntigravityAcpMessageMapper.ContainsLicenseRejection(promptText))
+            {
+                yield return AntigravityAcpMessageMapper.CreateLicenseRejectedMessage(sessionId, promptText);
+                yield break;
+            }
+
             yield return AntigravityAcpMessageMapper.CreateAssistantMessage(sessionId, promptText, promptResult);
         }
         else

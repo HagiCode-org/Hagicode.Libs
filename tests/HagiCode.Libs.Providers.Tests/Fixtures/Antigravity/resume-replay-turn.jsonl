@@ -1,0 +1,4 @@
+{"fixtureHeader":{"provenance":"synthetic","format":"antigravity-acp-turn","source":"synthetic; ACP v1 session/update shapes handled by AntigravityAcpMessageMapper; not recorded from agy","notes":"On a resumed session the agent first replays a history chunk (streamed=false, no request or turn id), then the new reply."}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"antigravity-session-1","_meta":{"ai-coding/streamed":false},"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"earlier reply that is history"}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"antigravity-session-1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Welcome back."}}}}
+{"promptResult":{"stopReason":"end_turn"}}

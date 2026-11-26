@@ -1,0 +1,2 @@
+{"fixtureHeader":{"provenance":"synthetic","format":"antigravity-acp-turn","source":"synthetic; ACP v1 session/update shapes handled by AntigravityAcpMessageMapper; not recorded from agy","notes":"The license reply arrives only in the session/prompt result (no streamed chunk). It must fail the turn too."}}
+{"promptResult":{"stopReason":"end_turn","outputText":"⚠ You do not have a valid license of this product (#3501)"}}

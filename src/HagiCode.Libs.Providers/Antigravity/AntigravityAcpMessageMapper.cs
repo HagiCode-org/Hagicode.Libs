@@ -6,6 +6,36 @@ namespace HagiCode.Libs.Providers.Antigravity;
 
 internal static class AntigravityAcpMessageMapper
 {
+    /// <summary>
+    /// The phrase the CLI streams as assistant text when the signed-in account has no model entitlement (#3501).
+    /// Matching is narrow on purpose: only this phrase, case-insensitively, is treated as a license rejection.
+    /// </summary>
+    internal const string LicenseRejectionPhrase = "do not have a valid license";
+
+    /// <summary>The failure message surfaced for a license rejection instead of the CLI text.</summary>
+    internal const string LicenseRejectionMessage =
+        "Antigravity CLI reports this account has no valid license (#3501). Check the account's Antigravity entitlement and sign in again.";
+
+    public static bool ContainsLicenseRejection(string? text)
+    {
+        return !string.IsNullOrEmpty(text) &&
+               text.Contains(LicenseRejectionPhrase, StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static CliMessage CreateLicenseRejectedMessage(string sessionId, string? cliText)
+    {
+        return new CliMessage(
+            "terminal.failed",
+            JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+            {
+                ["type"] = "terminal.failed",
+                ["session_id"] = sessionId,
+                ["stop_reason"] = "error",
+                ["message"] = LicenseRejectionMessage,
+                ["text"] = cliText
+            }));
+    }
+
     public static CliMessage CreateSessionLifecycleMessage(AcpSessionHandle sessionHandle)
     {
         return new CliMessage(
@@ -100,8 +130,8 @@ internal static class AntigravityAcpMessageMapper
         {
             "assistant" or "assistant_message" or "agent_message_chunk" => [CreateAssistantUpdateMessage(sessionId, updateElement.Value, "assistant")],
             "thought" or "assistant_thought" or "agent_thought_chunk" => [CreateAssistantUpdateMessage(sessionId, updateElement.Value, "assistant.thought")],
-            "tool_call" => [CreateUpdateMessage("tool.call", sessionId, AcpToolKindAnnotator.Annotate(updateElement.Value))],
-            "tool_call_update" => [CreateUpdateMessage("tool.update", sessionId, AcpToolKindAnnotator.Annotate(updateElement.Value))],
+            "tool_call" => CreateToolCallMessages("tool.call", sessionId, updateElement.Value),
+            "tool_call_update" => CreateToolCallMessages("tool.update", sessionId, updateElement.Value),
             "error" => [CreateErrorMessage(sessionId, updateElement.Value)],
             "prompt_completed" or "completed" => [CreatePromptCompletedMessage(sessionId, updateElement.Value)],
             _ =>
@@ -151,6 +181,20 @@ internal static class AntigravityAcpMessageMapper
         }
 
         return true;
+    }
+
+    public static bool TryExtractNotificationResultText(AcpNotification notification, out string? text)
+    {
+        text = null;
+        if (!string.Equals(notification.Method, "session/update", StringComparison.OrdinalIgnoreCase) ||
+            notification.Parameters.ValueKind != JsonValueKind.Object ||
+            !notification.Parameters.TryGetProperty("result", out var resultElement) ||
+            resultElement.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        return TryExtractPromptResultText(resultElement, out text);
     }
 
     public static bool IsReplayAssistantNotification(AcpNotification notification)
@@ -216,6 +260,80 @@ internal static class AntigravityAcpMessageMapper
                 ["text"] = ExtractText(updateElement),
                 ["update"] = updateElement
             }));
+    }
+
+    // An ask_question tool call also yields a user.question message, so the caller can see the question in stream order. The
+    // tool call itself is still passed on unchanged.
+    private static IReadOnlyList<CliMessage> CreateToolCallMessages(string messageType, string sessionId, JsonElement updateElement)
+    {
+        var messages = new List<CliMessage> { CreateUpdateMessage(messageType, sessionId, AcpToolKindAnnotator.Annotate(updateElement)) };
+        if (TryCreateUserQuestionMessage(sessionId, updateElement, out var questionMessage))
+        {
+            messages.Add(questionMessage);
+        }
+
+        return messages;
+    }
+
+    private static bool TryCreateUserQuestionMessage(string sessionId, JsonElement updateElement, out CliMessage message)
+    {
+        message = null!;
+        if (!string.Equals(TryGetString(updateElement, "name"), AntigravityUserInputRequest.QuestionToolName, StringComparison.Ordinal) ||
+            TryGetString(updateElement, "toolCallId") is not { Length: > 0 } toolCallId ||
+            !updateElement.TryGetProperty("rawInput", out var rawInput) ||
+            rawInput.ValueKind != JsonValueKind.Object ||
+            !rawInput.TryGetProperty("questions", out var questions) ||
+            questions.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        var normalizedQuestions = questions.EnumerateArray()
+            .Where(static question => question.ValueKind == JsonValueKind.Object)
+            .Select(static question => new
+            {
+                question = TryGetString(question, "question") ?? string.Empty,
+                header = TryGetString(question, "header") ?? string.Empty,
+                multi_select = question.TryGetProperty("is_multi_select", out var multi) && multi.ValueKind == JsonValueKind.True,
+                options = ReadQuestionOptions(question)
+            })
+            .Where(static question => question.question.Length > 0)
+            .ToArray();
+
+        if (normalizedQuestions.Length == 0)
+        {
+            return false;
+        }
+
+        message = new CliMessage(
+            AntigravityUserInputRequest.MessageType,
+            JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+            {
+                ["type"] = AntigravityUserInputRequest.MessageType,
+                ["session_id"] = sessionId,
+                ["tool_call_id"] = toolCallId,
+                ["questions"] = normalizedQuestions
+            }));
+        return true;
+    }
+
+    private static object[] ReadQuestionOptions(JsonElement question)
+    {
+        if (!question.TryGetProperty("options", out var options) || options.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        return options.EnumerateArray()
+            .Select(static option => option.ValueKind switch
+            {
+                JsonValueKind.String => new { label = option.GetString() ?? string.Empty, description = string.Empty },
+                JsonValueKind.Object => new { label = TryGetString(option, "label") ?? string.Empty, description = TryGetString(option, "description") ?? string.Empty },
+                _ => new { label = string.Empty, description = string.Empty }
+            })
+            .Where(static option => option.label.Length > 0)
+            .Cast<object>()
+            .ToArray();
     }
 
     private static CliMessage CreateUpdateMessage(string messageType, string sessionId, JsonElement updateElement)

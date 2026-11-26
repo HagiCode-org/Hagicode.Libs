@@ -1,0 +1,4 @@
+{"fixtureHeader":{"provenance":"synthetic","format":"antigravity-acp-turn","source":"synthetic; ACP v1 session/update shapes handled by AntigravityAcpMessageMapper; not recorded from agy","notes":"The license reply from the blocker (#3501) split across two chunks. The phrase must still match, so the turn fails instead of completing with text."}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"antigravity-session-1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"⚠ You do not have a valid "}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"antigravity-session-1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"license of this product (#3501)"}}}}
+{"promptResult":{"stopReason":"end_turn"}}

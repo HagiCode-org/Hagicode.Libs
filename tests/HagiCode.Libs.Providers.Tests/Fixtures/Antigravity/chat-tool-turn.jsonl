@@ -1,0 +1,5 @@
+{"fixtureHeader":{"provenance":"synthetic","format":"antigravity-acp-turn","source":"synthetic; ACP v1 session/update shapes handled by AntigravityAcpMessageMapper; not recorded from agy","notes":"One search tool call that completes, then a text reply and end_turn."}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"antigravity-session-1","update":{"sessionUpdate":"tool_call","toolCallId":"antigravity-call-1","title":"grep","kind":"search","status":"pending","rawInput":{"pattern":"TODO","path":"src"}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"antigravity-session-1","update":{"sessionUpdate":"tool_call_update","toolCallId":"antigravity-call-1","status":"completed"}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"antigravity-session-1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Found 2 TODO lines."}}}}
+{"promptResult":{"stopReason":"end_turn"}}
