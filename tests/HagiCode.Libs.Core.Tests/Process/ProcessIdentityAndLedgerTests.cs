@@ -64,6 +64,80 @@ public sealed class ProcessIdentityAndLedgerTests
         ledger.Remove(new ProcessIdentity(30, Start)).ShouldBeFalse();
     }
 
+    [Test]
+    public void An_exited_root_with_processes_left_in_its_scope_stays_residual_but_never_alive()
+    {
+        var (ledger, liveness, platform) = CreateWithScope();
+        Add(ledger, liveness, 40, "claude-code", "session-1");
+        platform.Remove(40);
+        liveness.Live.Remove(40);
+
+        ledger.GetAlive(startTimeTolerance: Tolerance).ShouldBeEmpty();
+
+        var residual = ledger.GetResidual(new CliManagedProcessQuery { SessionId = "session-1" });
+        residual.Select(info => info.Pid).ShouldBe(new[] { 40 });
+        ledger.GetResidualMembers(new ProcessIdentity(40, Start)).ShouldBe(new[] { 41, 42 });
+        ledger.GetResidual(new CliManagedProcessQuery { SessionId = "other" }).ShouldBeEmpty();
+    }
+
+    [Test]
+    public void A_residual_entry_disappears_once_its_scope_is_empty()
+    {
+        var (ledger, liveness, platform) = CreateWithScope();
+        Add(ledger, liveness, 40, "claude-code", "session-1");
+        platform.Remove(40);
+        liveness.Live.Remove(40);
+        ledger.GetResidual().Count.ShouldBe(1);
+
+        platform.Remove(41).Remove(42);
+
+        ledger.GetResidual().ShouldBeEmpty();
+        ledger.GetResidualMembers(new ProcessIdentity(40, Start)).ShouldBeEmpty();
+    }
+
+    [Test]
+    public void A_removed_entry_without_a_scope_leaves_no_residual_record()
+    {
+        var liveness = new FakeLiveness();
+        var platform = new FakeProcessPlatform().Add(50, 1, "agent", Start);
+        var ledger = new CliManagedProcessLedger(liveness, platform, Timeout.InfiniteTimeSpan);
+        Add(ledger, liveness, 50, "claude-code", "session-1");
+
+        ledger.Remove(new ProcessIdentity(50, Start)).ShouldBeTrue();
+
+        ledger.GetResidual().ShouldBeEmpty();
+    }
+
+    [Test]
+    public void The_scope_key_is_picked_up_by_a_later_query_when_the_first_read_found_none()
+    {
+        var liveness = new FakeLiveness();
+        var platform = new FakeProcessPlatform().Add(60, 1, "agent", Start).Add(61, 1, "worker", Start);
+        platform.ContainmentMembersByKey["scope-60"] = [60, 61];
+        var ledger = new CliManagedProcessLedger(liveness, platform, Timeout.InfiniteTimeSpan);
+        Add(ledger, liveness, 60, "claude-code", "session-1");
+
+        platform.ContainmentKeys[60] = "scope-60";
+        ledger.GetAlive(startTimeTolerance: Tolerance).Count.ShouldBe(1);
+        platform.Remove(60);
+        liveness.Live.Remove(60);
+
+        ledger.GetAlive(startTimeTolerance: Tolerance).ShouldBeEmpty();
+        ledger.GetResidual().Select(info => info.Pid).ShouldBe(new[] { 60 });
+    }
+
+    private static (CliManagedProcessLedger Ledger, FakeLiveness Liveness, FakeProcessPlatform Platform) CreateWithScope()
+    {
+        var liveness = new FakeLiveness();
+        var platform = new FakeProcessPlatform()
+            .Add(40, 1, "agent", Start)
+            .Add(41, 1, "worker-a", Start.AddSeconds(1))
+            .Add(42, 1, "worker-b", Start.AddSeconds(2));
+        platform.ContainmentKeys[40] = "/user.slice/run-u40.scope";
+        platform.ContainmentMembersByKey["/user.slice/run-u40.scope"] = [40, 41, 42];
+        return (new CliManagedProcessLedger(liveness, platform, Timeout.InfiniteTimeSpan), liveness, platform);
+    }
+
     private static void Add(CliManagedProcessLedger ledger, FakeLiveness liveness, int pid, string provider, string? sessionId)
     {
         var identity = new ProcessIdentity(pid, Start);

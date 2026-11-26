@@ -259,6 +259,24 @@ public class CliProcessManager
     }
 
     /// <summary>
+    /// Gets the snapshotter that knows this manager's containment: Windows Job members and the processes an exited root left in its Linux scope.
+    /// A snapshotter built on its own cannot list those, so hosts that show process trees should use this one.
+    /// </summary>
+    public IProcessTreeSnapshotter ProcessTreeSnapshotter => _snapshotter;
+
+    /// <summary>
+    /// Returns the managed processes that have exited but left other processes in their containment, such as a Linux scope that still holds
+    /// background workers. They are never part of <see cref="GetAliveManagedProcesses" />. Pass each one as a root of a snapshot to list the
+    /// processes it left behind: the snapshot reports it with <see cref="ProcessTreeRootStatus.Exited" />.
+    /// </summary>
+    /// <param name="query">The provider and session filter. <see langword="null" /> returns every residual process.</param>
+    /// <returns>The recorded information of each exited root, ordered by process id.</returns>
+    public virtual IReadOnlyList<CliManagedProcessInfo> GetResidualManagedProcesses(CliManagedProcessQuery? query = null)
+    {
+        return _ledger.GetResidual(query);
+    }
+
+    /// <summary>
     /// Captures the process trees under the alive managed processes that match the query, in one process-table read.
     /// </summary>
     /// <param name="query">The provider and session filter. <see langword="null" /> captures every alive managed process.</param>
@@ -637,7 +655,13 @@ public class CliProcessManager
 
     private IReadOnlyList<int> ContainmentMembersOf(ProcessIdentity identity)
     {
-        if (!_ledger.TryGet(identity, out var entry) || entry.Containment is not { } job)
+        if (!_ledger.TryGet(identity, out var entry))
+        {
+            // The root has left the ledger; processes it left behind in its containment can remain.
+            return _ledger.GetResidualMembers(identity);
+        }
+
+        if (entry.Containment is not { } job)
         {
             return [];
         }

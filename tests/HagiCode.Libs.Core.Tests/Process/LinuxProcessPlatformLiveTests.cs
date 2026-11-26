@@ -76,6 +76,76 @@ public sealed class LinuxProcessPlatformLiveTests
         }
     }
 
+    [Test]
+    public async Task A_root_that_exits_leaves_its_scope_workers_listed_as_residual()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Ignore("Uses systemd-run and /proc.");
+        }
+
+        var capability = CgroupScopeCapabilityProbe.Default.GetCapability();
+        if (!capability.Supported)
+        {
+            Assert.Ignore($"systemd-run user scopes are not available on this host: {capability.Reason}.");
+        }
+
+        // The shell is the scope's root; the background sleep is a worker that outlives it, like an idle build node.
+        var startInfo = new System.Diagnostics.ProcessStartInfo("systemd-run") { UseShellExecute = false };
+        foreach (var argument in new[] { "--user", "--scope", "--quiet", "/bin/sh", "-c", "sleep 60 & wait" })
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        using var launched = System.Diagnostics.Process.Start(startInfo)!;
+        var platform = new LinuxProcessPlatform();
+        var rootIdentity = new ProcessIdentity(launched.Id, new DateTimeOffset(launched.StartTime.ToUniversalTime(), TimeSpan.Zero));
+        var ledger = new CliManagedProcessLedger(SystemProcessLivenessReader.Instance, platform, Timeout.InfiniteTimeSpan);
+        try
+        {
+            var deadline = DateTimeOffset.UtcNow.AddSeconds(10);
+            while ((!IsInTransientScope(launched.Id) || platform.ReadContainmentMembers(launched.Id).Count < 2) && DateTimeOffset.UtcNow < deadline)
+            {
+                await Task.Delay(50);
+            }
+
+            ledger.Add(
+                new CliManagedProcessInfo(rootIdentity, "test", "session-live", "/bin/sh", null, CliManagedProcessOrigin.Started, IsContained: false),
+                containment: null);
+            ledger.GetAlive().Select(info => info.Pid).ShouldContain(launched.Id);
+
+            launched.Kill();
+            await launched.WaitForExitAsync();
+
+            ledger.GetAlive().ShouldBeEmpty();
+            ledger.GetResidual().Select(info => info.Pid).ShouldBe(new[] { launched.Id });
+            var workers = ledger.GetResidualMembers(rootIdentity);
+            workers.ShouldNotBeEmpty();
+            workers.ShouldNotContain(launched.Id);
+
+            foreach (var worker in workers)
+            {
+                platform.Kill(worker);
+            }
+
+            var emptied = DateTimeOffset.UtcNow.AddSeconds(10);
+            while (ledger.GetResidual().Count > 0 && DateTimeOffset.UtcNow < emptied)
+            {
+                await Task.Delay(100);
+            }
+
+            ledger.GetResidual().ShouldBeEmpty();
+        }
+        finally
+        {
+            KillQuietly(launched);
+            foreach (var worker in ledger.GetResidualMembers(rootIdentity))
+            {
+                platform.Kill(worker);
+            }
+        }
+    }
+
     private static bool IsInTransientScope(int pid)
     {
         var cgroup = LinuxCgroupMembership.ParseUnifiedPath(File.ReadAllText(Path.Combine("/proc", pid.ToString(System.Globalization.CultureInfo.InvariantCulture), "cgroup")));

@@ -175,4 +175,64 @@ public sealed class ProcessTreeSnapshotterTests
         denied.Accessibility.ShouldBe(ProcessAccessibility.Denied);
         denied.StartedAtUtc.ShouldBeNull();
     }
+
+    [Test]
+    public async Task A_gone_root_whose_containment_still_has_processes_lists_only_those_as_exited()
+    {
+        // The root (100) is gone; 300 stays in its scope with a child 301. 200 is unrelated and never listed.
+        var platform = new FakeProcessPlatform()
+            .Add(300, 1, "worker", RootStart.AddSeconds(10))
+            .Add(301, 300, "worker-child", RootStart.AddSeconds(11))
+            .Add(200, 1, "unrelated", RootStart.AddSeconds(5));
+        var root = new ProcessIdentity(100, RootStart);
+        var snapshotter = new ProcessTreeSnapshotter(
+            platform,
+            TimeSpan.FromSeconds(1),
+            containmentLookup: identity => identity == root ? [300] : [],
+            logger: null);
+
+        var snapshot = await snapshotter.CaptureAsync(new ProcessTreeSnapshotRequest { Roots = [root] });
+
+        var result = snapshot.Roots.Single();
+        result.Status.ShouldBe(ProcessTreeRootStatus.Exited);
+        result.Processes
+            .Select(entry => (entry.Pid, entry.Membership))
+            .ToArray()
+            .ShouldBe(new[] { (300, ProcessMembership.Containment), (301, ProcessMembership.Descendant) });
+    }
+
+    [Test]
+    public async Task A_reused_root_id_with_remaining_containment_is_exited_and_the_new_process_is_not_listed()
+    {
+        var platform = new FakeProcessPlatform()
+            .Add(100, 1, "someone-else", RootStart.AddHours(1))
+            .Add(300, 1, "worker", RootStart.AddSeconds(10));
+        var root = new ProcessIdentity(100, RootStart);
+        var snapshotter = new ProcessTreeSnapshotter(
+            platform,
+            TimeSpan.FromSeconds(1),
+            containmentLookup: identity => identity == root ? [100, 300] : [],
+            logger: null);
+
+        var result = (await snapshotter.CaptureAsync(new ProcessTreeSnapshotRequest { Roots = [root] })).Roots.Single();
+
+        result.Status.ShouldBe(ProcessTreeRootStatus.Exited);
+        result.Processes.Select(entry => entry.Pid).ShouldBe(new[] { 300 });
+    }
+
+    [Test]
+    public async Task A_gone_root_with_an_empty_containment_keeps_its_plain_status()
+    {
+        var platform = new FakeProcessPlatform().Add(200, 1, "unrelated", RootStart);
+        var snapshotter = new ProcessTreeSnapshotter(
+            platform,
+            TimeSpan.FromSeconds(1),
+            containmentLookup: _ => [],
+            logger: null);
+
+        var result = (await snapshotter.CaptureAsync(new ProcessTreeSnapshotRequest { Roots = [new ProcessIdentity(100, RootStart)] })).Roots.Single();
+
+        result.Status.ShouldBe(ProcessTreeRootStatus.NotFound);
+        result.Processes.ShouldBeEmpty();
+    }
 }

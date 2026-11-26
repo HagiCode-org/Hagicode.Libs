@@ -75,7 +75,27 @@ internal sealed class FakeProcessPlatform : IProcessPlatform
             ProcessAccessibility.Accessible);
     }
 
+    /// <summary>Containment key by root pid; only alive processes report their key.</summary>
+    public Dictionary<int, string> ContainmentKeys { get; } = [];
+
+    /// <summary>Member pids by containment key; members that are not alive are not listed.</summary>
+    public Dictionary<string, List<int>> ContainmentMembersByKey { get; } = [];
+
     public IReadOnlyList<int> ReadContainmentMembers(int rootPid) => [];
+
+    public string? ReadContainmentKey(int rootPid) =>
+        _processes.ContainsKey(rootPid) && ContainmentKeys.TryGetValue(rootPid, out var key) ? key : null;
+
+    public IReadOnlyList<int> ReadContainmentMembersByKey(string containmentKey) =>
+        ContainmentMembersByKey.TryGetValue(containmentKey, out var members)
+            ? members.Where(_processes.ContainsKey).ToArray()
+            : [];
+
+    public FakeProcessPlatform Remove(int pid)
+    {
+        _processes.Remove(pid);
+        return this;
+    }
 
     public ProcessKillResult Kill(int pid)
     {

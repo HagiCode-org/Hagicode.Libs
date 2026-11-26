@@ -61,6 +61,11 @@ public enum ProcessTreeRootStatus
     /// The root's id is alive but its start time does not match, or its start time cannot be read so the identity cannot be confirmed. Nothing under it is listed.
     /// </summary>
     IdentityMismatch,
+
+    /// <summary>
+    /// The root has exited, but processes it left behind are still in its containment. Only those processes are listed, as <see cref="ProcessMembership.Containment" /> members and their descendants; the root itself is not.
+    /// </summary>
+    Exited,
 }
 
 /// <summary>
@@ -93,7 +98,7 @@ public sealed record ProcessSnapshotEntry(
 /// </summary>
 /// <param name="Root">The requested root identity.</param>
 /// <param name="Status">Whether the root was found, is gone, or has a different start time.</param>
-/// <param name="Processes">The root first, then members in parent-before-child order. Empty unless the status is <see cref="ProcessTreeRootStatus.Found" />.</param>
+/// <param name="Processes">The root first, then members in parent-before-child order. Empty unless the status is <see cref="ProcessTreeRootStatus.Found" /> or <see cref="ProcessTreeRootStatus.Exited" />.</param>
 /// <param name="Truncated">Whether <see cref="ProcessTreeSnapshotOptions.MaxProcessesPerRoot" /> stopped the walk before every member was listed.</param>
 public sealed record ProcessTreeRootSnapshot(
     ProcessIdentity Root,

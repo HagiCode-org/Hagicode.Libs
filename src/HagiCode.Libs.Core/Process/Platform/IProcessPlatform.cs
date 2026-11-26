@@ -31,6 +31,20 @@ internal interface IProcessPlatform
     IReadOnlyList<int> ReadContainmentMembers(int rootPid);
 
     /// <summary>
+    /// Reads a stable name for the containment object of <paramref name="rootPid" />, such as a Linux transient systemd scope path, that outlives the root process.
+    /// </summary>
+    /// <param name="rootPid">The root process id.</param>
+    /// <returns>The key, or <see langword="null" /> when the root has no containment that can be listed later. The default is <see langword="null" />.</returns>
+    string? ReadContainmentKey(int rootPid) => null;
+
+    /// <summary>
+    /// Lists the processes that are still in the containment object named by <paramref name="containmentKey" />, which may be after the root process has exited.
+    /// </summary>
+    /// <param name="containmentKey">A key from <see cref="ReadContainmentKey" />.</param>
+    /// <returns>Process ids, or an empty list when the containment is gone or empty. The default is an empty list.</returns>
+    IReadOnlyList<int> ReadContainmentMembersByKey(string containmentKey) => [];
+
+    /// <summary>
     /// Ends one process by id. The caller must have verified its identity first.
     /// </summary>
     /// <param name="pid">The process id.</param>

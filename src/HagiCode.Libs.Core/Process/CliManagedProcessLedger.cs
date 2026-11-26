@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using HagiCode.Libs.Core.Process.Platform;
 using HagiCode.Libs.Core.Process.Windows;
 
 namespace HagiCode.Libs.Core.Process;
@@ -10,13 +11,19 @@ namespace HagiCode.Libs.Core.Process;
 /// Entries are added when a managed process starts or is registered, and removed when it stops or its handle or registration is disposed.
 /// Queries also prune entries whose process has exited or whose process id now belongs to a different process, so a host that forgets to dispose a handle still gets correct results.
 /// Hosts that create several <see cref="CliProcessManager" /> instances share one ledger by registering it once and passing it to each.
+/// While a process is alive the ledger remembers the name of its containment (a Linux transient systemd scope). When the process is gone but other processes remain in that containment,
+/// the entry moves to a residual list instead of vanishing, so <see cref="GetResidual" /> can still report them. <see cref="GetAlive" /> never returns residual entries.
 /// </remarks>
 public sealed class CliManagedProcessLedger
 {
     private static readonly TimeSpan DefaultStartTimeTolerance = TimeSpan.FromSeconds(1);
 
     private readonly ConcurrentDictionary<ProcessIdentity, LedgerEntry> _entries = new();
+    private readonly ConcurrentDictionary<ProcessIdentity, string> _containmentKeys = new();
+    private readonly ConcurrentDictionary<ProcessIdentity, ResidualEntry> _residual = new();
     private readonly IProcessLivenessReader _liveness;
+    private readonly IProcessPlatform _platform;
+    private readonly TimeSpan _keyRetryDelay;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="CliManagedProcessLedger" /> class that reads liveness from the running operating system.
@@ -26,9 +33,11 @@ public sealed class CliManagedProcessLedger
     {
     }
 
-    internal CliManagedProcessLedger(IProcessLivenessReader liveness)
+    internal CliManagedProcessLedger(IProcessLivenessReader liveness, IProcessPlatform? platform = null, TimeSpan? keyRetryDelay = null)
     {
         _liveness = liveness ?? throw new ArgumentNullException(nameof(liveness));
+        _platform = platform ?? ProcessPlatformSelector.Default;
+        _keyRetryDelay = keyRetryDelay ?? TimeSpan.FromSeconds(1);
     }
 
     /// <summary>
@@ -51,6 +60,11 @@ public sealed class CliManagedProcessLedger
     {
         ArgumentNullException.ThrowIfNull(info);
         _entries[info.Identity] = new LedgerEntry(info, containment);
+        if (!RefreshContainmentKey(info.Identity) && _keyRetryDelay != Timeout.InfiniteTimeSpan)
+        {
+            // A scope launcher moves the process into its scope just after it starts, so the first read can still show the launcher's cgroup.
+            _ = RetryContainmentKeyAsync(info.Identity);
+        }
     }
 
     /// <summary>
@@ -58,7 +72,121 @@ public sealed class CliManagedProcessLedger
     /// </summary>
     internal bool Remove(ProcessIdentity identity)
     {
-        return _entries.TryRemove(identity, out _);
+        if (!_entries.TryRemove(identity, out var entry))
+        {
+            return false;
+        }
+
+        Retire(entry);
+        return true;
+    }
+
+    /// <summary>
+    /// Returns the managed processes that have exited while other processes remain in their containment, optionally filtered by provider and session.
+    /// </summary>
+    /// <param name="query">The filter. <see langword="null" /> returns every residual entry.</param>
+    /// <returns>The recorded information of each exited root. Entries whose containment has emptied are dropped.</returns>
+    public IReadOnlyList<CliManagedProcessInfo> GetResidual(CliManagedProcessQuery? query = null)
+    {
+        // Pruning first turns an exited root that nobody has queried yet into a residual entry.
+        GetAliveEntries(query: null, DefaultStartTimeTolerance);
+
+        var residual = new List<CliManagedProcessInfo>();
+        foreach (var pair in _residual)
+        {
+            if (ListResidualMembers(pair.Key, pair.Value).Count == 0)
+            {
+                _residual.TryRemove(pair);
+                continue;
+            }
+
+            if (Matches(pair.Value.Info, query))
+            {
+                residual.Add(pair.Value.Info);
+            }
+        }
+
+        return residual.OrderBy(info => info.Pid).ToArray();
+    }
+
+    /// <summary>
+    /// Lists the processes that remain in the containment of an exited root, or an empty list when the identity is not residual.
+    /// </summary>
+    internal IReadOnlyList<int> GetResidualMembers(ProcessIdentity identity)
+    {
+        return _residual.TryGetValue(identity, out var entry) ? ListResidualMembers(identity, entry) : [];
+    }
+
+    private IReadOnlyList<int> ListResidualMembers(ProcessIdentity identity, ResidualEntry entry)
+    {
+        try
+        {
+            return _platform.ReadContainmentMembersByKey(entry.ContainmentKey).Where(pid => pid != identity.Pid).ToArray();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            return [];
+        }
+    }
+
+    /// <summary>
+    /// Reads and stores the containment key of an alive entry. Returns <see langword="true" /> when the entry has a key afterwards.
+    /// </summary>
+    internal bool RefreshContainmentKey(ProcessIdentity identity)
+    {
+        if (_containmentKeys.ContainsKey(identity))
+        {
+            return true;
+        }
+
+        try
+        {
+            if (_platform.ReadContainmentKey(identity.Pid) is { } key)
+            {
+                _containmentKeys[identity] = key;
+                return true;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            // No readable containment: the entry stays without a key and leaves no residual record.
+        }
+
+        return false;
+    }
+
+    private async Task RetryContainmentKeyAsync(ProcessIdentity identity)
+    {
+        try
+        {
+            await Task.Delay(_keyRetryDelay).ConfigureAwait(false);
+            if (_entries.ContainsKey(identity))
+            {
+                RefreshContainmentKey(identity);
+            }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // The retry is best effort; the next query tries again.
+        }
+    }
+
+    /// <summary>
+    /// Called when an entry leaves the ledger: keeps a residual record when its containment still holds other processes.
+    /// </summary>
+    private void Retire(LedgerEntry entry)
+    {
+        var identity = entry.Info.Identity;
+        if (!_containmentKeys.TryRemove(identity, out var key))
+        {
+            return;
+        }
+
+        var residual = new ResidualEntry(entry.Info, key);
+        if (ListResidualMembers(identity, residual).Count > 0)
+        {
+            _residual[identity] = residual;
+        }
     }
 
     /// <summary>
@@ -81,9 +209,15 @@ public sealed class CliManagedProcessLedger
         {
             if (!IsStillSameProcess(entry.Info.Identity, startTimeTolerance))
             {
-                _entries.TryRemove(new KeyValuePair<ProcessIdentity, LedgerEntry>(entry.Info.Identity, entry));
+                if (_entries.TryRemove(new KeyValuePair<ProcessIdentity, LedgerEntry>(entry.Info.Identity, entry)))
+                {
+                    Retire(entry);
+                }
+
                 continue;
             }
+
+            RefreshContainmentKey(entry.Info.Identity);
 
             if (Matches(entry.Info, query))
             {
@@ -121,6 +255,11 @@ public sealed class CliManagedProcessLedger
     /// One recorded managed process and the Windows Job that holds it, when contained.
     /// </summary>
     internal sealed record LedgerEntry(CliManagedProcessInfo Info, IWindowsProcessJob? Containment);
+
+    /// <summary>
+    /// An exited root and the name of the containment that still holds other processes.
+    /// </summary>
+    private sealed record ResidualEntry(CliManagedProcessInfo Info, string ContainmentKey);
 }
 
 /// <summary>

@@ -127,14 +127,22 @@ internal sealed class LinuxProcessPlatform : IProcessPlatform
     /// <inheritdoc />
     public IReadOnlyList<int> ReadContainmentMembers(int rootPid)
     {
+        var key = ReadContainmentKey(rootPid);
+        return key is null ? [] : ReadContainmentMembersByKey(key);
+    }
+
+    /// <inheritdoc />
+    public string? ReadContainmentKey(int rootPid)
+    {
         var rootCgroup = LinuxCgroupMembership.ParseUnifiedPath(ReadTextOrEmpty(Path.Combine(_procRoot, rootPid.ToString(), "cgroup")));
         var ownCgroup = LinuxCgroupMembership.ParseUnifiedPath(ReadTextOrEmpty(Path.Combine(_procRoot, "self", "cgroup")));
-        if (!LinuxCgroupMembership.MayExpand(rootCgroup, ownCgroup))
-        {
-            return [];
-        }
+        return LinuxCgroupMembership.MayExpand(rootCgroup, ownCgroup) ? rootCgroup : null;
+    }
 
-        var procsPath = Path.Combine(_cgroupRoot, rootCgroup!.TrimStart('/'), "cgroup.procs");
+    /// <inheritdoc />
+    public IReadOnlyList<int> ReadContainmentMembersByKey(string containmentKey)
+    {
+        var procsPath = Path.Combine(_cgroupRoot, containmentKey.TrimStart('/'), "cgroup.procs");
         var members = new List<int>();
         foreach (var line in ReadTextOrEmpty(procsPath).Split('\n', StringSplitOptions.RemoveEmptyEntries))
         {

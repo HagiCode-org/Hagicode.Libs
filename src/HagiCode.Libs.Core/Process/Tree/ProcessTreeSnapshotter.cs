@@ -116,20 +116,25 @@ public sealed class ProcessTreeSnapshotter : IProcessTreeSnapshotter
     {
         if (!table.Contains(root.Pid))
         {
-            return new ProcessTreeRootSnapshot(root, ProcessTreeRootStatus.NotFound, [], Truncated: false);
+            return CaptureGoneRoot(root, ProcessTreeRootStatus.NotFound, table, options, cancellationToken);
         }
 
         var rootDetails = _platform.ReadDetails(root.Pid, options.IncludeCommandLine);
         if (rootDetails is null)
         {
-            return new ProcessTreeRootSnapshot(root, ProcessTreeRootStatus.NotFound, [], Truncated: false);
+            return CaptureGoneRoot(root, ProcessTreeRootStatus.NotFound, table, options, cancellationToken);
         }
 
         // A root whose start time cannot be read is not confirmed, so nothing under it is listed.
-        if (rootDetails.StartedAtUtc is not { } rootStartedAtUtc
-            || !ProcessIdentity.StartTimesMatch(rootStartedAtUtc, root.StartedAtUtc, _startTimeTolerance))
+        if (rootDetails.StartedAtUtc is not { } rootStartedAtUtc)
         {
             return new ProcessTreeRootSnapshot(root, ProcessTreeRootStatus.IdentityMismatch, [], Truncated: false);
+        }
+
+        if (!ProcessIdentity.StartTimesMatch(rootStartedAtUtc, root.StartedAtUtc, _startTimeTolerance))
+        {
+            // The id now belongs to another process, so the requested root has exited.
+            return CaptureGoneRoot(root, ProcessTreeRootStatus.IdentityMismatch, table, options, cancellationToken);
         }
 
         var walk = new TreeWalk(this, table, options, cancellationToken);
@@ -151,6 +156,36 @@ public sealed class ProcessTreeSnapshotter : IProcessTreeSnapshotter
         }
 
         return new ProcessTreeRootSnapshot(root, ProcessTreeRootStatus.Found, walk.Entries, walk.Truncated);
+    }
+
+    /// <summary>
+    /// Handles a root that is no longer the requested process. When the containment lookup still knows processes the root left behind, they are listed
+    /// with the status <see cref="ProcessTreeRootStatus.Exited" />; otherwise the plain <paramref name="goneStatus" /> is returned with nothing listed.
+    /// </summary>
+    private ProcessTreeRootSnapshot CaptureGoneRoot(
+        ProcessIdentity root,
+        ProcessTreeRootStatus goneStatus,
+        ProcessTableIndex table,
+        ProcessTreeSnapshotOptions options,
+        CancellationToken cancellationToken)
+    {
+        // Only the lookup is asked here. Reading the platform by the root's id would name whatever process reuses that id.
+        var members = _containmentLookup?.Invoke(root) ?? [];
+        var walk = new TreeWalk(this, table, options, cancellationToken);
+        foreach (var containedPid in members.Where(pid => pid != root.Pid).Distinct().Order())
+        {
+            if (walk.Full)
+            {
+                break;
+            }
+
+            walk.AddContainmentMember(containedPid, table.ParentOf(containedPid));
+            walk.Drain();
+        }
+
+        return walk.Entries.Count == 0
+            ? new ProcessTreeRootSnapshot(root, goneStatus, [], Truncated: false)
+            : new ProcessTreeRootSnapshot(root, ProcessTreeRootStatus.Exited, walk.Entries, walk.Truncated);
     }
 
     private IEnumerable<int> ContainmentMembersOf(ProcessIdentity root)
