@@ -47,10 +47,9 @@ public sealed class AntigravityImageFeatureTests
     }
 
     [Test]
-    public async Task Provider_prompt_frame_carries_a_text_block_only_so_no_image_reaches_the_cli_through_libs()
+    public async Task Provider_prompt_frame_carries_a_text_block_only_when_no_image_is_attached()
     {
-        // Gap, recorded in the matrix: AntigravityProvider.ExecuteAsync accepts text only and calls SendPromptAsync(text).
-        // An image can therefore reach agy through HagiCode only if the provider gains an image input.
+        // With no attachment the frame is unchanged from before image support: one text block.
         var agent = new AntigravityScriptedAgent().Enqueue(AntigravityTurnScript.EndTurn());
         var provider = new ScriptedAntigravityProvider(agent);
 
@@ -59,6 +58,59 @@ public sealed class AntigravityImageFeatureTests
         var blocks = agent.RequestsFor("session/prompt").Single()["params"]!["prompt"]!.AsArray();
         blocks.Count.ShouldBe(1);
         blocks[0]!["type"]!.GetValue<string>().ShouldBe("text");
+    }
+
+    [Test]
+    public async Task Provider_sends_an_attached_image_as_an_inline_block_after_the_text()
+    {
+        var agent = new AntigravityScriptedAgent().Enqueue(AntigravityTurnScript.EndTurn());
+        var provider = new ScriptedAntigravityProvider(agent);
+        var options = new AntigravityOptions
+        {
+            ImageAttachments = [new AntigravityImageAttachment("img-1", "image/png", [0, 1, 2], "- a.png | image/png | path=/x/a.png")]
+        };
+
+        var messages = await AntigravityTestHelpers.CollectAsync(provider.ExecuteAsync(options, "describe"));
+
+        var blocks = agent.RequestsFor("session/prompt").Single()["params"]!["prompt"]!.AsArray();
+        blocks.Select(static block => block!["type"]!.GetValue<string>()).ShouldBe(["text", "image"]);
+        blocks[0]!["text"]!.GetValue<string>().ShouldBe("describe");
+        blocks[1]!["data"]!.GetValue<string>().ShouldBe("AAEC");
+        var delivery = messages.Single(static message => message.Type == "image.delivery").Content.GetProperty("images")[0];
+        delivery.GetProperty("delivery").GetString().ShouldBe("inline");
+        delivery.GetProperty("image_id").GetString().ShouldBe("img-1");
+        messages.Select(static message => message.Content.ToString()).ShouldAllBe(static text => !text.Contains("AAEC"));
+    }
+
+    [Test]
+    public void Planner_lists_images_in_the_prompt_when_the_connection_does_not_advertise_image_input()
+    {
+        var plan = AntigravityImagePromptPlanner.Plan(
+            "describe",
+            [new AntigravityImageAttachment("img-1", "image/png", [0, 1, 2], "- a.png | image/png | path=/x/a.png")],
+            acceptsInlineImages: false);
+
+        plan.InlineImages.ShouldBeEmpty();
+        plan.Text.ShouldContain(AntigravityImagePromptPlanner.ManifestHeader);
+        plan.Text.ShouldContain("path=/x/a.png");
+        plan.Deliveries.Single().Reason.ShouldBe(AntigravityImagePromptPlanner.ConnectionNotAdvertisedReason);
+    }
+
+    [Test]
+    public void Planner_lists_an_unsupported_media_type_and_keeps_the_valid_image_inline()
+    {
+        var plan = AntigravityImagePromptPlanner.Plan(
+            "describe",
+            [
+                new AntigravityImageAttachment("img-1", "image/avif", [1], "- a.avif | path=/x/a.avif"),
+                new AntigravityImageAttachment("img-2", "image/png", [1], "- b.png | path=/x/b.png")
+            ],
+            acceptsInlineImages: true);
+
+        plan.InlineImages.Count.ShouldBe(1);
+        plan.Deliveries.Select(static item => item.Inlined).ShouldBe([false, true]);
+        plan.Text.ShouldContain("a.avif");
+        plan.Text.ShouldNotContain("b.png");
     }
 
     [Test]

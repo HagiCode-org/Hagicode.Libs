@@ -87,7 +87,7 @@ internal sealed class AntigravityPromptRun
     }
 
     /// <summary>Starts a prompt on the session, as the first turn, an answer, or a steer.</summary>
-    public Task<JsonElement> Start(string text, string? steerId = null)
+    public Task<JsonElement> Start(string text, string? steerId = null, IReadOnlyList<AcpImageBlock>? images = null)
     {
         lock (_gate)
         {
@@ -96,7 +96,10 @@ internal sealed class AntigravityPromptRun
                 throw new InvalidOperationException("The Antigravity run has ended, so no prompt can be started on it.");
             }
 
-            var result = _sessionClient.SendPromptAsync(_sessionId, text, _cancellationToken);
+            // With no image the text-only overload sends the same frame as before image support existed.
+            var result = images is { Count: > 0 }
+                ? _sessionClient.SendPromptAsync(_sessionId, text, images, _cancellationToken)
+                : _sessionClient.SendPromptAsync(_sessionId, text, _cancellationToken);
             _attempts.Add(new PromptAttempt(result, ObserveAsync(result, steerId)));
             return result;
         }

@@ -240,6 +240,12 @@ public class AntigravityProvider : ICliProvider<AntigravityOptions>
         var initializeResult = await sessionClient.InitializeAsync(startupCts.Token).ConfigureAwait(false);
         await AuthenticateIfRequestedAsync(sessionClient, options, initializeResult, startupCts.Token).ConfigureAwait(false);
 
+        // The image capability belongs to this connection and this execution only; it is never stored on the provider.
+        var imagePlan = AntigravityImagePromptPlanner.Plan(
+            prompt,
+            options.ImageAttachments,
+            AntigravityImagePromptPlanner.ReadInlineImageCapability(initializeResult));
+
         var sessionHandle = await StartSessionOrExplainSignInAsync(
             sessionClient,
             workingDirectory,
@@ -248,6 +254,10 @@ public class AntigravityProvider : ICliProvider<AntigravityOptions>
             startupCts.Token).ConfigureAwait(false);
 
         yield return AntigravityAcpMessageMapper.CreateSessionLifecycleMessage(sessionHandle);
+        if (imagePlan.Deliveries.Count > 0)
+        {
+            yield return AntigravityAcpMessageMapper.CreateImageDeliveryMessage(sessionHandle.SessionId, imagePlan.Deliveries);
+        }
 
         var run = new AntigravityPromptRun(sessionClient, sessionHandle.SessionId, cancellationToken, options.Steering);
         try
@@ -257,8 +267,9 @@ public class AntigravityProvider : ICliProvider<AntigravityOptions>
                                sessionHandle.SessionId,
                                run,
                                sessionHandle.IsResumed,
-                               prompt,
+                               imagePlan.Text,
                                options,
+                               imagePlan.InlineImages,
                                cancellationToken).ConfigureAwait(false))
             {
                 yield return message;
@@ -717,9 +728,10 @@ public class AntigravityProvider : ICliProvider<AntigravityOptions>
         bool isResumedSession,
         string prompt,
         AntigravityOptions options,
+        IReadOnlyList<AcpImageBlock> inlineImages,
         CancellationToken cancellationToken)
     {
-        _ = run.Start(prompt);
+        _ = run.Start(prompt, images: inlineImages);
         return StreamPromptMessagesAsync(sessionClient, sessionId, isResumedSession, run, options, cancellationToken);
     }
 

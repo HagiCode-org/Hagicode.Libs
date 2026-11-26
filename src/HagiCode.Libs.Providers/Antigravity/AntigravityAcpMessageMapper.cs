@@ -47,6 +47,29 @@ internal static class AntigravityAcpMessageMapper
             }));
     }
 
+    /// <summary>
+    /// Builds the delivery result for one execution with image attachments. It names each image by id, media type, byte count
+    /// and outcome. It carries no image bytes and no base64 data.
+    /// </summary>
+    public static CliMessage CreateImageDeliveryMessage(string sessionId, IReadOnlyList<AntigravityImageDeliveryItem> images)
+    {
+        return new CliMessage(
+            "image.delivery",
+            JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+            {
+                ["type"] = "image.delivery",
+                ["session_id"] = sessionId,
+                ["images"] = images.Select(static image => new
+                {
+                    image_id = image.ImageId,
+                    media_type = image.MediaType,
+                    byte_count = image.ByteCount,
+                    delivery = image.Inlined ? "inline" : "manifest",
+                    reason = image.Reason
+                }).ToArray()
+            }));
+    }
+
     public static CliMessage CreateTerminalMessage(string sessionId, JsonElement promptResult)
     {
         var stopReason = TryGetPromptResultStopReason(promptResult);

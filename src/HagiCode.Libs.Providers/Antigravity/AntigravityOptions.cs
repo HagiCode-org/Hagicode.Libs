@@ -81,6 +81,13 @@ public sealed record AntigravityOptions
     public static readonly TimeSpan DefaultQuestionTimeout = TimeSpan.FromMinutes(30);
 
     /// <summary>
+    /// Gets or sets the chat images for this execution. Each image is sent as an inline image block on the first prompt when the
+    /// connection advertises image input and the image passes validation; otherwise its manifest line is appended to the prompt text.
+    /// The bytes stay in memory and are never persisted or logged.
+    /// </summary>
+    public IReadOnlyList<AntigravityImageAttachment> ImageAttachments { get; init; } = [];
+
+    /// <summary>
     /// Gets or sets the channel for follow-up text sent into the run while it executes. Create a new channel for each execution.
     /// </summary>
     public AntigravityRunSteering? Steering { get; init; }
